@@ -1587,8 +1587,11 @@ static struct net_buf *l2cap_chan_create_seg(struct bt_l2cap_le_chan *ch,
 	uint16_t headroom;
 	uint16_t len;
 
+	BT_WARN("Create segment:");
+
 	/* Segment if data (+ data headroom) is bigger than MPS */
 	if (buf->len + sdu_hdr_len > ch->tx.mps) {
+		BT_WARN("Exceeding MPS");
 		goto segment;
 	}
 
@@ -1602,10 +1605,13 @@ static struct net_buf *l2cap_chan_create_seg(struct bt_l2cap_le_chan *ch,
 			/* Push SDU length if set */
 			net_buf_push_le16(buf, net_buf_frags_len(buf));
 		}
+		BT_WARN("Enough headroom available");
 		return net_buf_ref(buf);
 	}
 
 segment:
+
+	BT_WARN("Segmenting");
 	seg = l2cap_alloc_seg(buf);
 	if (!seg) {
 		return NULL;
@@ -2168,7 +2174,7 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 
 	sdu_len = net_buf_pull_le16(buf);
 
-	BT_DBG("chan %p len %u sdu_len %u", chan, buf->len, sdu_len);
+	BT_WARN("chan %p len %u sdu_len %u", chan, buf->len, sdu_len);
 
 	if (sdu_len > chan->rx.mtu) {
 		BT_ERR("Invalid SDU length");
