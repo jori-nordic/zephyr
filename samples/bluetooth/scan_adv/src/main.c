@@ -14,27 +14,60 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 
-static uint8_t mfg_data[] = { 0xff, 0xff, 0x00 };
+#define DEVICE_NAME "beacon"
+#define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
+
+void scan_rsp_cb(struct bt_le_ext_adv *adv,
+		 struct bt_le_ext_adv_scanned_info *info)
+{
+	printk("Scanned by: ");
+	for(int i=0; i<6; i++)
+		printk("%u", info->addr->a.val[i]);
+	printk("\n");
+	/* printk("%s\n", __func__); */
+}
+
+void connected_cb(struct bt_le_ext_adv *adv,
+		  struct bt_le_ext_adv_connected_info *info)
+{
+	printk("%s\n", __func__);
+}
+
+void sent_cb(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_sent_info *info)
+{
+	printk("%s: num_sent = %u\n", __func__, info->num_sent);
+}
 
 static const struct bt_data ad[] = {
-	BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, 3),
+	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_NO_BREDR),
+	BT_DATA_BYTES(BT_DATA_UUID16_ALL, 0xaa, 0xfe),
+	BT_DATA_BYTES(BT_DATA_SVC_DATA16,
+		      0xaa, 0xfe, /* Eddystone UUID */
+		      0x10, /* Eddystone-URL frame type */
+		      0x00, /* Calibrated Tx power at 0m */
+		      0x00, /* URL Scheme Prefix http://www. */
+		      'z', 'e', 'p', 'h', 'y', 'r',
+		      'p', 'r', 'o', 'j', 'e', 'c', 't',
+		      0x08) /* .org */
 };
 
-static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
-		    struct net_buf_simple *buf)
-{
-	mfg_data[2]++;
-}
+/* Set Scan Response data */
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+};
+
+struct bt_le_ext_adv_start_param adv_start_param = {0,255};
+struct bt_le_ext_adv* p_ext_adv;
+
+struct bt_le_ext_adv_cb adv_cb = {
+	.sent = sent_cb,
+	.connected = connected_cb,
+	.scanned = scan_rsp_cb,
+};
 
 void main(void)
 {
-	struct bt_le_scan_param scan_param = {
-		.type       = BT_HCI_LE_SCAN_PASSIVE,
-		.options    = BT_LE_SCAN_OPT_NONE,
-		.interval   = 0x0010,
-		.window     = 0x0010,
-	};
-	int err;
+	int err = 0;
 
 	printk("Starting Scanner/Advertiser Demo\n");
 
@@ -47,29 +80,33 @@ void main(void)
 
 	printk("Bluetooth initialized\n");
 
-	err = bt_le_scan_start(&scan_param, scan_cb);
+	k_msleep(100);
+	bt_le_ext_adv_create(BT_LE_ADV_NCONN,
+	/* bt_le_ext_adv_create(BT_LE_ADV_NCONN_NAME, */
+			     &adv_cb,
+			     &p_ext_adv);
+
+	k_msleep(100);
+	bt_le_ext_adv_set_data(p_ext_adv,
+			       ad, ARRAY_SIZE(ad),
+			       sd, ARRAY_SIZE(sd));
+
+	/* Start advertising */
+	k_msleep(100);
+	bt_le_ext_adv_start(p_ext_adv,
+			    &adv_start_param);
+
+	bt_le_ext_adv_set_data(p_ext_adv,
+			       ad, ARRAY_SIZE(ad),
+			       sd, ARRAY_SIZE(sd));
+
 	if (err) {
-		printk("Starting scanning failed (err %d)\n", err);
+		printk("Advertising failed to start (err %d)\n", err);
 		return;
 	}
 
-	do {
-		k_sleep(K_MSEC(400));
-
-		/* Start advertising */
-		err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad),
-				      NULL, 0);
-		if (err) {
-			printk("Advertising failed to start (err %d)\n", err);
-			return;
-		}
-
-		k_sleep(K_MSEC(400));
-
-		err = bt_le_adv_stop();
-		if (err) {
-			printk("Advertising failed to stop (err %d)\n", err);
-			return;
-		}
-	} while (1);
+	for(;;)
+	{
+		k_msleep(1000);
+	}
 }
