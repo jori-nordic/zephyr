@@ -32,7 +32,8 @@ static K_FIFO_DEFINE(tx_queue);
 #define BT_H4_OUT_EP_IDX                0
 #define BT_H4_IN_EP_IDX                 1
 
-#define BT_H4_BULK_EP_MPS               MIN(BT_BUF_TX_SIZE, USB_MAX_FS_BULK_MPS)
+#define BT_H4_BULK_EP_MPS               ROUND_UP(MIN(BT_BUF_TX_SIZE,	\
+						     USB_MAX_FS_BULK_MPS), 2)
 
 /* HCI RX/TX threads */
 static K_KERNEL_STACK_DEFINE(rx_thread_stack, 512);

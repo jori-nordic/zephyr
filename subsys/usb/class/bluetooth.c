@@ -33,9 +33,11 @@ static K_FIFO_DEFINE(tx_queue);
 #define BLUETOOTH_IN_EP_ADDR		0x82
 
 /* TODO: Replace use of USB_MAX_FS_INT_MPS if higher speeds are supported */
-#define BLUETOOTH_BULK_EP_MPS           MIN(BT_BUF_ACL_SIZE, \
-					    USB_MAX_FS_BULK_MPS)
-#define BLUETOOTH_INT_EP_MPS            MIN(BT_BUF_RX_SIZE, USB_MAX_FS_INT_MPS)
+/* Some usb drivers only accept EP sizes that are a power of 2 */
+#define BLUETOOTH_BULK_EP_MPS           ROUND_UP(MIN(BT_BUF_ACL_SIZE, \
+						     USB_MAX_FS_BULK_MPS), 2)
+#define BLUETOOTH_INT_EP_MPS            ROUND_UP(MIN(BT_BUF_RX_SIZE,	\
+						     USB_MAX_FS_INT_MPS), 2)
 
 /* HCI RX/TX threads */
 static K_KERNEL_STACK_DEFINE(rx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
