@@ -68,6 +68,14 @@
 			};
 		};
 
+		temp: temp@41010000 {
+			compatible = "nordic,nrf-temp";
+			reg = <0x41010000 0x1000>;
+			interrupts = <16 1>;
+			status = "okay";
+			label = "TEMP_0";
+		};
+
 		gpiote: gpiote@5000d000 {
 			compatible = "nordic,nrf-gpiote";
 			reg = <0x5000d000 0x1000>;
