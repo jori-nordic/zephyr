@@ -12,10 +12,6 @@
 #include <sys/util.h>
 #include <drivers/sensor.h>
 #include <device.h>
-/* #define NRF_NETWORK */
-/* #define NRFX_TEMP_ENABLED */
-/* #include <nrfx/mdk/nrf.h> */
-/* #include <hal/nrf_temp.h> */
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
@@ -27,81 +23,24 @@ struct rssi_wq_info {
 
 static const struct device *temp_dev;
 
-#define TEMP_IRQn 16
-typedef struct {                                /*!< (@ 0x41010000) TEMP_NS Structure                                          */
-  __OM  uint32_t  TASKS_START;                  /*!< (@ 0x00000000) Start temperature measurement                              */
-  __OM  uint32_t  TASKS_STOP;                   /*!< (@ 0x00000004) Stop temperature measurement                               */
-  __IM  uint32_t  RESERVED[30];
-  __IOM uint32_t  SUBSCRIBE_START;              /*!< (@ 0x00000080) Subscribe configuration for task START                     */
-  __IOM uint32_t  SUBSCRIBE_STOP;               /*!< (@ 0x00000084) Subscribe configuration for task STOP                      */
-  __IM  uint32_t  RESERVED1[30];
-  __IOM uint32_t  EVENTS_DATARDY;               /*!< (@ 0x00000100) Temperature measurement complete, data ready               */
-  __IM  uint32_t  RESERVED2[31];
-  __IOM uint32_t  PUBLISH_DATARDY;              /*!< (@ 0x00000180) Publish configuration for event DATARDY                    */
-  __IM  uint32_t  RESERVED3[96];
-  __IOM uint32_t  INTENSET;                     /*!< (@ 0x00000304) Enable interrupt                                           */
-  __IOM uint32_t  INTENCLR;                     /*!< (@ 0x00000308) Disable interrupt                                          */
-  __IM  uint32_t  RESERVED4[127];
-  __IM  int32_t   TEMP;                         /*!< (@ 0x00000508) Temperature in degC (0.25deg steps)                        */
-  __IM  uint32_t  RESERVED5[5];
-  __IOM uint32_t  A0;                           /*!< (@ 0x00000520) Slope of 1st piece wise linear function                    */
-  __IOM uint32_t  A1;                           /*!< (@ 0x00000524) Slope of 2nd piece wise linear function                    */
-  __IOM uint32_t  A2;                           /*!< (@ 0x00000528) Slope of 3rd piece wise linear function                    */
-  __IOM uint32_t  A3;                           /*!< (@ 0x0000052C) Slope of 4th piece wise linear function                    */
-  __IOM uint32_t  A4;                           /*!< (@ 0x00000530) Slope of 5th piece wise linear function                    */
-  __IOM uint32_t  A5;                           /*!< (@ 0x00000534) Slope of 6th piece wise linear function                    */
-  __IM  uint32_t  RESERVED6[2];
-  __IOM uint32_t  B0;                           /*!< (@ 0x00000540) y-intercept of 1st piece wise linear function              */
-  __IOM uint32_t  B1;                           /*!< (@ 0x00000544) y-intercept of 2nd piece wise linear function              */
-  __IOM uint32_t  B2;                           /*!< (@ 0x00000548) y-intercept of 3rd piece wise linear function              */
-  __IOM uint32_t  B3;                           /*!< (@ 0x0000054C) y-intercept of 4th piece wise linear function              */
-  __IOM uint32_t  B4;                           /*!< (@ 0x00000550) y-intercept of 5th piece wise linear function              */
-  __IOM uint32_t  B5;                           /*!< (@ 0x00000554) y-intercept of 6th piece wise linear function              */
-  __IM  uint32_t  RESERVED7[2];
-  __IOM uint32_t  T0;                           /*!< (@ 0x00000560) End point of 1st piece wise linear function                */
-  __IOM uint32_t  T1;                           /*!< (@ 0x00000564) End point of 2nd piece wise linear function                */
-  __IOM uint32_t  T2;                           /*!< (@ 0x00000568) End point of 3rd piece wise linear function                */
-  __IOM uint32_t  T3;                           /*!< (@ 0x0000056C) End point of 4th piece wise linear function                */
-  __IOM uint32_t  T4;                           /*!< (@ 0x00000570) End point of 5th piece wise linear function                */
-} NRF_TEMP_Type;                                /*!< Size = 1396 (0x574)                                                       */
-
-#define NRF_TEMP_NS_BASE            0x41010000UL
-#define NRF_TEMP                 ((NRF_TEMP_Type*)          NRF_TEMP_NS_BASE)
-
 /* Maybe get temp in its own thread */
 void hts_init(void)
 {
+	uint32_t temp = 0;
 	uint32_t ms = 0;
 	printk("Trying manual TEMP access\n");
 
-	/* NVIC_DisableIRQ(TEMP_IRQn); */
-	NRF_TEMP->EVENTS_DATARDY = 0;
-	/* NVIC_ClearPendingIRQ(TEMP_IRQn); */
-	NRF_TEMP->INTENSET = 1;
-	NRF_TEMP->TASKS_START = 1;
-	while(NRF_TEMP->EVENTS_DATARDY == 0)
-	{
-		ms++;
-		k_msleep(1);
-	}
-
-	uint32_t temp = NRF_TEMP->TEMP;
-	NRF_TEMP->TASKS_STOP = 1;
-	NRF_TEMP->INTENCLR = 1;
-	NRF_TEMP->EVENTS_DATARDY = 0;
-
-	/* NVIC_ClearPendingIRQ(TEMP_IRQn); */
 	printk("Temp: %d, ms: %d\n", temp, ms);
 
-	/* temp_dev = device_get_binding("TEMP_0"); */
+	temp_dev = device_get_binding("TEMP_0");
 
-	/* if (!temp_dev) { */
-	/* 	printk("error: no temp device\n"); */
-	/* 	return; */
-	/* } */
+	if (!temp_dev) {
+		printk("error: no temp device\n");
+		return;
+	}
 
-	/* printk("temp device is %p, name is %s\n", temp_dev, */
-	/*        temp_dev->name); */
+	printk("temp device is %p, name is %s\n", temp_dev,
+	       temp_dev->name);
 }
 
 float get_chip_temp(void)
@@ -111,7 +50,9 @@ float get_chip_temp(void)
 	float temperature;
 
 	if(!temp_dev)
+	{
 		return 0;
+	}
 
 	r = sensor_sample_fetch(temp_dev);
 	if (r) {
@@ -146,7 +87,7 @@ void correct_rssi(struct k_work *item)
 
     if(wq_info->rssi > -60)
     {
-	/* printk("RSSI: before: %d, after: %d, temp: %d\n", wq_info->rssi, comp_rssi, (int)get_chip_temp()); */
+	printk("RSSI: before: %d, after: %d, temp: %d\n", wq_info->rssi, comp_rssi, (int)get_chip_temp());
 	return;
     }
 }
