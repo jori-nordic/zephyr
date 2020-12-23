@@ -282,6 +282,14 @@ config BT_CTLR_TX_PWR_DYNAMIC_CONTROL
 	  Provides HCI VS commands to set and get the current Tx
 	  power on an individual role/connection basis.
 
+config BT_CTLR_READ_CHIP_TEMP
+	bool "Read chip temperature command"
+	depends on BT_HCI_VS
+	help
+	  Enable support for HCI command to read the controller chip's
+	  die temperature. Can be useful for compensation/calibration
+	  purposes.
+
 comment "BLE Controller features"
 
 if BT_CONN
