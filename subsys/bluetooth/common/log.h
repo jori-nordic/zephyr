@@ -33,6 +33,7 @@ extern "C" {
 #define LOG_LEVEL LOG_LEVEL_DBG
 #else
 #define LOG_LEVEL CONFIG_BT_LOG_LEVEL
+/* #define LOG_LEVEL 2 */
 #endif
 
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL);

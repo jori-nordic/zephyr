@@ -275,29 +275,21 @@ struct net_buf *net_buf_alloc_len(struct net_buf_pool *pool, size_t size,
 	irq_unlock(key);
 
 #if defined(CONFIG_NET_BUF_LOG) && (CONFIG_NET_BUF_LOG_LEVEL >= LOG_LEVEL_WRN)
-	if (K_TIMEOUT_EQ(timeout, K_FOREVER)) {
+	/* if (K_TIMEOUT_EQ(timeout, K_FOREVER)) { */
+	if (1) {
 		uint32_t ref = k_uptime_get_32();
 		buf = k_lifo_get(&pool->free, K_NO_WAIT);
 		while (!buf) {
-#if defined(CONFIG_NET_BUF_POOL_USAGE)
-			NET_BUF_WARN("%s():%d: Pool %s low on buffers.",
-				     func, line, pool->name);
-#else
-			NET_BUF_WARN("%s():%d: Pool %p low on buffers.",
-				     func, line, pool);
-#endif
+			NET_BUF_WARN("[%s] %s():%d: Pool %p low on buffers.",
+				     k_thread_name_get(k_current_get()), func, line, pool);
 			buf = k_lifo_get(&pool->free, WARN_ALLOC_INTERVAL);
-#if defined(CONFIG_NET_BUF_POOL_USAGE)
-			NET_BUF_WARN("%s():%d: Pool %s blocked for %u secs",
-				     func, line, pool->name,
-				     (k_uptime_get_32() - ref) / MSEC_PER_SEC);
-#else
 			NET_BUF_WARN("%s():%d: Pool %p blocked for %u secs",
 				     func, line, pool,
 				     (k_uptime_get_32() - ref) / MSEC_PER_SEC);
-#endif
 		}
 	} else {
+		NET_BUF_WARN("%s():%d: allocating from %p, timeout: %llu",
+			     func, line, pool, timeout.ticks);
 		buf = k_lifo_get(&pool->free, timeout);
 	}
 #else
@@ -347,6 +339,7 @@ success:
 
 #if defined(CONFIG_NET_BUF_POOL_USAGE)
 	atomic_dec(&pool->avail_count);
+	NET_BUF_WARN("[%s] %s(): Rem in pool %p: %d", k_thread_name_get(k_current_get()), func, pool, atomic_get(&pool->avail_count));
 	__ASSERT_NO_MSG(atomic_get(&pool->avail_count) >= 0);
 #endif
 	return buf;

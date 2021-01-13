@@ -457,6 +457,7 @@ static int bt_att_chan_send(struct bt_att_chan *chan, struct net_buf *buf,
 
 	/* Don't use tx_sem if caller has set it own callback */
 	if (!cb) {
+		BT_ERR("%s: Try to take TX sem", __func__);
 		if (k_sem_take(&chan->tx_sem, K_NO_WAIT) < 0) {
 			return -EAGAIN;
 		}
@@ -565,6 +566,7 @@ static int bt_att_chan_req_send(struct bt_att_chan *chan,
 
 	BT_DBG("req %p", req);
 
+	BT_ERR("%s: Try to take TX sem", __func__);
 	if (k_sem_take(&chan->tx_sem, K_NO_WAIT) < 0) {
 		return -EAGAIN;
 	}

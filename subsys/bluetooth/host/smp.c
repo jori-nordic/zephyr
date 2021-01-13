@@ -478,11 +478,16 @@ static struct net_buf *smp_create_pdu(struct bt_smp *smp, uint8_t op, size_t len
 		timeout = SMP_TIMEOUT;
 	}
 
+	BT_DBG("");
+
 	/* Use smaller timeout if returning an error since that could be
 	 * caused by lack of buffers.
 	 */
-	buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);
+	/* buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout); */
+	buf = bt_conn_create_pdu_timeout_debug(
+		NULL, sizeof(struct bt_l2cap_hdr), timeout, __func__, 0);
 	if (!buf) {
+		BT_DBG("Unable to allocate buffer");
 		/* If it was not possible to allocate a buffer within the
 		 * timeout marked it as timed out.
 		 */
@@ -1879,6 +1884,7 @@ static void smp_timeout(struct k_work *work)
 static void smp_send(struct bt_smp *smp, struct net_buf *buf,
 		     bt_conn_tx_cb_t cb, void *user_data)
 {
+	BT_DBG("");
 	bt_l2cap_send_cb(smp->chan.chan.conn, BT_L2CAP_CID_SMP, buf, cb, NULL);
 	k_delayed_work_submit(&smp->work, SMP_TIMEOUT);
 }
@@ -3004,10 +3010,13 @@ static uint8_t sc_send_public_key(struct bt_smp *smp)
 	struct bt_smp_public_key *req;
 	struct net_buf *req_buf;
 
+	BT_DBG("");
+
 	req_buf = smp_create_pdu(smp, BT_SMP_CMD_PUBLIC_KEY, sizeof(*req));
 	if (!req_buf) {
 		return BT_SMP_ERR_UNSPECIFIED;
 	}
+	BT_DBG("PDU successfully allocated");
 
 	req = net_buf_add(req_buf, sizeof(*req));
 
@@ -3064,15 +3073,18 @@ static int smp_send_pairing_req(struct bt_conn *conn)
 		}
 	}
 
+	BT_DBG("Init SMP");
 	if (smp_init(smp)) {
 		return -ENOBUFS;
 	}
 
+	BT_DBG("Create REQ PDU");
 	req_buf = smp_create_pdu(smp, BT_SMP_CMD_PAIRING_REQ, sizeof(*req));
 	if (!req_buf) {
 		return -ENOBUFS;
 	}
 
+	BT_DBG("REQ buf add");
 	req = net_buf_add(req_buf, sizeof(*req));
 
 	req->auth_req = get_auth(conn, BT_SMP_AUTH_DEFAULT);
@@ -3090,6 +3102,7 @@ static int smp_send_pairing_req(struct bt_conn *conn)
 	smp->preq[0] = BT_SMP_CMD_PAIRING_REQ;
 	memcpy(smp->preq + 1, req, sizeof(*req));
 
+	BT_DBG("REQ PDU send");
 	smp_send(smp, req_buf, NULL, NULL);
 
 	atomic_set_bit(&smp->allowed_cmds, BT_SMP_CMD_PAIRING_RSP);
@@ -5389,6 +5402,7 @@ int bt_smp_start_security(struct bt_conn *conn)
 		}
 
 		if (!smp_keys_check(conn)) {
+			BT_DBG("Send pairing req");
 			return smp_send_pairing_req(conn);
 		}
 
@@ -5398,11 +5412,13 @@ int bt_smp_start_security(struct bt_conn *conn)
 		}
 
 		/* Encryption is in progress */
+		BT_DBG("Wait for encryption");
 		if (atomic_test_bit(smp->flags, SMP_FLAG_ENC_PENDING)) {
 			return -EBUSY;
 		}
 
 		/* LE SC LTK and legacy master LTK are stored in same place */
+		BT_DBG("Start encryption");
 		err = bt_conn_le_start_encryption(conn,
 						  conn->le.keys->ltk.rand,
 						  conn->le.keys->ltk.ediv,

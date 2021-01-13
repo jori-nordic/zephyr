@@ -2431,6 +2431,7 @@ struct net_buf *bt_conn_create_pdu_timeout(struct net_buf_pool *pool,
 	__ASSERT_NO_MSG(!k_is_in_isr());
 
 	if (!pool) {
+		BT_WARN("Alloc PDU from pool (%p), reserve = %d", &acl_tx_pool, reserve);
 		pool = &acl_tx_pool;
 	}
 
