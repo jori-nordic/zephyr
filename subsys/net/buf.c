@@ -9,6 +9,10 @@
 #define LOG_MODULE_NAME net_buf
 #define LOG_LEVEL CONFIG_NET_BUF_LOG_LEVEL
 
+#if defined(CONFIG_SOC_NRF5340_CPUNET_QKAA)
+/* #undef __ASSERT_ON */
+#define __ASSERT_ON 0
+#endif
 #include <logging/log.h>
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
