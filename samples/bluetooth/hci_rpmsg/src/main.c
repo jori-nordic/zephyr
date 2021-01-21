@@ -27,6 +27,9 @@
 #include <bluetooth/hci.h>
 #include <bluetooth/buf.h>
 #include <bluetooth/hci_raw.h>
+#include <nrf.h>
+#include <nrfx.h>
+#include <tracing/tracing.h>
 
 #define LOG_LEVEL LOG_LEVEL_INFO
 #define LOG_MODULE_NAME hci_rpmsg
@@ -246,6 +249,7 @@ static void tx_thread(void *p1, void *p2, void *p3)
 
 		/* Wait until a buffer is available */
 		buf = net_buf_get(&tx_queue, K_FOREVER);
+		NRF_P1_NS->OUTSET = 1<<9;
 		/* Pass buffer to the stack */
 		err = bt_send(buf);
 		if (err) {
@@ -256,6 +260,7 @@ static void tx_thread(void *p1, void *p2, void *p3)
 		/* Give other threads a chance to run if tx_queue keeps getting
 		 * new data all the time.
 		 */
+		NRF_P1_NS->OUTCLR = 1<<9;
 		k_yield();
 	}
 }
@@ -284,6 +289,8 @@ static int hci_rpmsg_send(struct net_buf *buf)
 	net_buf_push_u8(buf, pkt_indicator);
 
 	LOG_HEXDUMP_DBG(buf->data, buf->len, "Final HCI buffer:");
+
+	/* Blocks here for ~1ms when asserts enabled */
 	rpmsg_send(&ep, buf->data, buf->len);
 
 	net_buf_unref(buf);
@@ -411,6 +418,7 @@ static int hci_rpmsg_init(void)
 	return err;
 }
 
+k_tid_t main_tid = 0;
 void main(void)
 {
 	int err;
@@ -437,13 +445,147 @@ void main(void)
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 	k_thread_name_set(&tx_thread_data, "HCI rpmsg TX");
 
+#if defined(CONFIG_SOC_NRF5340_CPUNET_QKAA)
+	printk("######## Hello from RPMSG\n");
+	NRF_P1_NS->DIRSET = (1<<16) - 1;
+	NRF_P1_NS->OUTSET = (1<<16) - 1;
+	k_msleep(1);
+	NRF_P1_NS->OUTCLR = (1<<16) - 1;
+#endif
+
+	main_tid = k_current_get();
+
 	while (1) {
 		struct net_buf *buf;
 
 		buf = net_buf_get(&rx_queue, K_FOREVER);
+		/* NRF_P1_NS->OUTSET = 1<<4; */
 		err = hci_rpmsg_send(buf);
+		/* NRF_P1_NS->OUTCLR = 1<<4; */
+
 		if (err) {
 			LOG_ERR("Failed to send (err %d)", err);
 		}
 	}
 }
+
+void sys_trace_thread_switched_out()
+{
+	if (k_current_get() == main_tid) {
+		NRF_P1_NS->OUTCLR = 1 << 7;
+	} else {
+		NRF_P1_NS->OUTCLR = 1 << 5;
+	}
+}
+
+void sys_trace_thread_switched_in()
+{
+	if (k_current_get() == main_tid) {
+		NRF_P1_NS->OUTSET = 1 << 7;
+	} else {
+		NRF_P1_NS->OUTSET = 1 << 5;
+	}
+}
+
+void sys_trace_thread_priority_set(struct k_thread *thread)
+{
+}
+
+void sys_trace_thread_create(struct k_thread *thread) {}
+
+void sys_trace_thread_abort(struct k_thread *thread) {}
+
+void sys_trace_thread_suspend(struct k_thread *thread)
+{
+	if (k_current_get() == main_tid) {
+		NRF_P1_NS->OUTCLR = 1 << 7;
+	};
+}
+
+void sys_trace_thread_resume(struct k_thread *thread)
+{
+	if (k_current_get() == main_tid) {
+		NRF_P1_NS->OUTSET = 1 << 7;
+	};
+}
+
+void sys_trace_thread_ready(struct k_thread *thread) {	\
+	if(1) {	\
+		/* NRF_P1_NS->OUTSET = 1<<5;				\ */
+	};								\
+	}
+
+void sys_trace_thread_pend(struct k_thread *thread) {	\
+	if(1) {	\
+		/* NRF_P1_NS->OUTCLR = 1<<5;				\ */
+	};								\
+	}
+
+void sys_trace_thread_info(struct k_thread *thread) {}
+
+void sys_trace_thread_name_set(struct k_thread *thread) {}
+
+void sys_trace_isr_enter()
+{
+	if (1) {
+		NRF_P1_NS->OUTSET = 1 << 1;
+	};
+
+	/* int8_t active = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >> */
+	/* 		  SCB_ICSR_VECTACTIVE_Pos) - */
+	/* 		 16); */
+
+	/* if(active <0) active = 0; */
+	/* for(; active > 0; active--) */
+	/* { */
+	/* 	NRF_P1_NS->OUTSET = 1 << 0; */
+	/* 	__NOP(); */
+	/* 	__NOP(); */
+	/* 	__NOP(); */
+	/* 	__NOP(); */
+	/* 	NRF_P1_NS->OUTCLR = 1 << 0; */
+	/* 	__NOP(); */
+	/* 	__NOP(); */
+	/* 	__NOP(); */
+	/* 	__NOP(); */
+	/* } */
+}
+
+void sys_trace_isr_exit() {	\
+	if (1) {
+		NRF_P1_NS->OUTCLR = 1<<1;				\
+	};								\
+	}
+
+
+void sys_trace_isr_exit_to_scheduler() {	\
+	if (1) {
+		NRF_P1_NS->OUTCLR = 1<<1;				\
+	};								\
+	}
+
+void sys_trace_void(int id) {}
+
+void sys_trace_end_call(int id) {}
+
+void sys_trace_idle() {}
+
+void sys_trace_semaphore_init(struct k_sem *sem) {}
+
+void sys_trace_semaphore_take(struct k_sem *sem) {	\
+	if(1) {	\
+		NRF_P1_NS->OUTSET = 1<<8;				\
+	};								\
+	}
+
+void sys_trace_semaphore_give(struct k_sem *sem) {	\
+	if(1) {	\
+		NRF_P1_NS->OUTCLR = 1<<8;				\
+	};								\
+	}
+
+void sys_trace_mutex_init(struct k_mutex *mutex) {}
+
+void sys_trace_mutex_lock(struct k_mutex *mutex) {}
+
+void sys_trace_mutex_unlock(struct k_mutex *mutex) {}
