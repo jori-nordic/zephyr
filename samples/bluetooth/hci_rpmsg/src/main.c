@@ -30,7 +30,9 @@
 #include <nrf.h>
 #include <nrfx.h>
 #include <tracing/tracing.h>
+#include <ksched.h>
 
+/* #define LOG_LEVEL LOG_LEVEL_DBG */
 #define LOG_LEVEL LOG_LEVEL_INFO
 #define LOG_MODULE_NAME hci_rpmsg
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -129,8 +131,10 @@ static void ipm_callback_process(struct k_work *work)
 static void ipm_callback(const struct device *dev, void *context,
 			 uint32_t id, volatile void *data)
 {
-	LOG_INF("Got callback of id %u", id);
+	/* LOG_INF("Got callback of id %u", id); */
+NRF_P1_NS->OUTSET = 1<<8;
 	k_work_submit(&ipm_work);
+NRF_P1_NS->OUTCLR = 1<<8;
 }
 
 static void rpmsg_service_unbind(struct rpmsg_endpoint *ep)
@@ -308,7 +312,7 @@ void bt_ctlr_assert_handle(char *file, uint32_t line)
 int endpoint_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32_t src,
 		void *priv)
 {
-	LOG_INF("Received message of %u bytes.", len);
+	/* LOG_INF("Received message of %u bytes.", len); */
 	hci_rpmsg_rx((uint8_t *) data, len);
 
 	return RPMSG_SUCCESS;
@@ -459,9 +463,10 @@ void main(void)
 		struct net_buf *buf;
 
 		buf = net_buf_get(&rx_queue, K_FOREVER);
-		/* NRF_P1_NS->OUTSET = 1<<4; */
+/* NRF_P1_NS->OUTSET = 1<<8; */
 		err = hci_rpmsg_send(buf);
-		/* NRF_P1_NS->OUTCLR = 1<<4; */
+		/* k_busy_wait(50); */
+/* NRF_P1_NS->OUTCLR = 1<<8; */
 
 		if (err) {
 			LOG_ERR("Failed to send (err %d)", err);
@@ -473,7 +478,8 @@ void sys_trace_thread_switched_out()
 {
 	if (k_current_get() == main_tid) {
 		NRF_P1_NS->OUTCLR = 1 << 7;
-	} else {
+	}
+	if (!z_is_idle_thread_object(k_current_get())) {
 		NRF_P1_NS->OUTCLR = 1 << 5;
 	}
 }
@@ -482,7 +488,8 @@ void sys_trace_thread_switched_in()
 {
 	if (k_current_get() == main_tid) {
 		NRF_P1_NS->OUTSET = 1 << 7;
-	} else {
+	}
+	if (!z_is_idle_thread_object(k_current_get())) {
 		NRF_P1_NS->OUTSET = 1 << 5;
 	}
 }
@@ -572,17 +579,19 @@ void sys_trace_idle() {}
 
 void sys_trace_semaphore_init(struct k_sem *sem) {}
 
-void sys_trace_semaphore_take(struct k_sem *sem) {	\
-	if(1) {	\
-		NRF_P1_NS->OUTSET = 1<<8;				\
-	};								\
-	}
+void sys_trace_semaphore_take(struct k_sem *sem)
+{
+	/* if (1) { */
+	/* 	NRF_P1_NS->OUTSET = 1 << 8; */
+	/* }; */
+}
 
-void sys_trace_semaphore_give(struct k_sem *sem) {	\
-	if(1) {	\
-		NRF_P1_NS->OUTCLR = 1<<8;				\
-	};								\
-	}
+void sys_trace_semaphore_give(struct k_sem *sem)
+{
+	/* if (1) { */
+	/* 	NRF_P1_NS->OUTCLR = 1 << 8; */
+	/* }; */
+}
 
 void sys_trace_mutex_init(struct k_mutex *mutex) {}
 

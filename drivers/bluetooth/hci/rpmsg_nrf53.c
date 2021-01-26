@@ -178,6 +178,8 @@ int bt_rpmsg_platform_init(void)
 	static struct metal_io_region       *io;
 	static struct metal_device          *device;
 
+	printk("##### hello from RPMSG driver\n");
+
 	/* Setup thread for RX data processing. */
 	k_thread_create(&bt_rpmsg_rx_thread_data, bt_rpmsg_rx_thread_stack,
 			K_KERNEL_STACK_SIZEOF(bt_rpmsg_rx_thread_stack),
