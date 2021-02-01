@@ -7,6 +7,8 @@
 #include <drivers/ipm.h>
 
 #include <ipc/rpmsg_service.h>
+#include <nrf.h>
+#include <nrfx.h>
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
 #define LOG_MODULE_NAME bt_hci_driver_nrf53
@@ -28,7 +30,9 @@ static int endpoint_cb(struct rpmsg_endpoint *ept, void *data, size_t len,
 	BT_DBG("Received message of %u bytes.", len);
 	BT_HEXDUMP_DBG((uint8_t *)data, len, "Data:");
 
+NRF_P1_S->OUTSET = 1<<4;
 	bt_rpmsg_rx(data, len);
+NRF_P1_S->OUTCLR = 1<<4;
 
 	return RPMSG_SUCCESS;
 }
@@ -37,6 +41,7 @@ int bt_rpmsg_platform_init(void)
 {
 	int err;
 
+	printk("##### hello from RPMSG driver\n");
 	err = rpmsg_service_register_endpoint("nrf_bt_hci", endpoint_cb);
 
 	if (err < 0) {
@@ -51,7 +56,10 @@ int bt_rpmsg_platform_init(void)
 
 int bt_rpmsg_platform_send(struct net_buf *buf)
 {
-	return rpmsg_service_send(endpoint_id, buf->data, buf->len);
+NRF_P1_S->OUTSET = 1<<8;
+	int err = rpmsg_service_send(endpoint_id, buf->data, buf->len);
+NRF_P1_S->OUTCLR = 1<<8;
+	return err;
 }
 
 int bt_rpmsg_platform_endpoint_is_bound(void)

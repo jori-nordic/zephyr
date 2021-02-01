@@ -90,8 +90,8 @@
 &uart0 {
 	status = "okay";
 	current-speed = <115200>;
-	tx-pin = <33>;
-	rx-pin = <32>;
+	tx-pin = <46>;
+	rx-pin = <47>;
 	rts-pin = <11>;
 	cts-pin = <10>;
 };
