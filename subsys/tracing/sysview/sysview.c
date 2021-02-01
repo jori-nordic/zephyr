@@ -71,38 +71,38 @@ void sys_trace_idle(void)
 
 void sys_trace_semaphore_init(struct k_sem *sem)
 {
-	SEGGER_SYSVIEW_RecordU32(
-		SYS_TRACE_ID_SEMA_INIT, (uint32_t)(uintptr_t)sem);
+	/* SEGGER_SYSVIEW_RecordU32( */
+	/* 	SYS_TRACE_ID_SEMA_INIT, (uint32_t)(uintptr_t)sem); */
 }
 
 void sys_trace_semaphore_take(struct k_sem *sem)
 {
-	SEGGER_SYSVIEW_RecordU32(
-		SYS_TRACE_ID_SEMA_TAKE, (uint32_t)(uintptr_t)sem);
+	/* SEGGER_SYSVIEW_RecordU32( */
+	/* 	SYS_TRACE_ID_SEMA_TAKE, (uint32_t)(uintptr_t)sem); */
 }
 
 void sys_trace_semaphore_give(struct k_sem *sem)
 {
-	SEGGER_SYSVIEW_RecordU32(
-		SYS_TRACE_ID_SEMA_GIVE, (uint32_t)(uintptr_t)sem);
+	/* SEGGER_SYSVIEW_RecordU32( */
+	/* 	SYS_TRACE_ID_SEMA_GIVE, (uint32_t)(uintptr_t)sem); */
 }
 
 void sys_trace_mutex_init(struct k_mutex *mutex)
 {
-	SEGGER_SYSVIEW_RecordU32(
-		SYS_TRACE_ID_MUTEX_INIT, (uint32_t)(uintptr_t)mutex);
+	/* SEGGER_SYSVIEW_RecordU32( */
+	/* 	SYS_TRACE_ID_MUTEX_INIT, (uint32_t)(uintptr_t)mutex); */
 }
 
 void sys_trace_mutex_lock(struct k_mutex *mutex)
 {
-	SEGGER_SYSVIEW_RecordU32(
-		SYS_TRACE_ID_MUTEX_LOCK, (uint32_t)(uintptr_t)mutex);
-}
+	/* SEGGER_SYSVIEW_RecordU32( */
+	/* 	SYS_TRACE_ID_MUTEX_LOCK, (uint32_t)(uintptr_t)mutex); */
+}	/*  */
 
 void sys_trace_mutex_unlock(struct k_mutex *mutex)
 {
-	SEGGER_SYSVIEW_RecordU32(
-		SYS_TRACE_ID_MUTEX_UNLOCK, (uint32_t)(uintptr_t)mutex);
+	/* SEGGER_SYSVIEW_RecordU32( */
+	/* 	SYS_TRACE_ID_MUTEX_UNLOCK, (uint32_t)(uintptr_t)mutex); */
 }
 
 static void set_thread_name(char *name, struct k_thread *thread)
