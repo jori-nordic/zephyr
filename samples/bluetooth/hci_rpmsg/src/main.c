@@ -295,7 +295,7 @@ void main(void)
 
 		buf = net_buf_get(&rx_queue, K_FOREVER);
 		err = hci_rpmsg_send(buf);
-		/* LOG_ERR("aha"); */
+		LOG_ERR("aha");
 		if (err) {
 			LOG_ERR("Failed to send (err %d)", err);
 		}
@@ -450,3 +450,22 @@ void sys_trace_mutex_lock(struct k_mutex *mutex) {}
 
 void sys_trace_mutex_unlock(struct k_mutex *mutex) {}
 
+#if 0
+/* Try creating a thread to keep CPU from entering idle */
+#define MY_STACK_SIZE 500
+#define MY_PRIORITY 8		/* Logging is 10 */
+
+static void my_entry_point(void *p1, void *p2, void *p3) {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	while(1)
+		k_busy_wait(1000);
+};
+
+K_THREAD_DEFINE(my_tid, MY_STACK_SIZE,
+                my_entry_point, NULL, NULL, NULL,
+                MY_PRIORITY, 0, 0);
+
+#endif
