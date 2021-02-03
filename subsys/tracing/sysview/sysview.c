@@ -18,7 +18,6 @@
 #define THREAD_NAME_LEN 20
 #endif
 
-static uint32_t interrupt;
 
 uint32_t sysview_get_timestamp(void)
 {
@@ -27,6 +26,10 @@ uint32_t sysview_get_timestamp(void)
 
 uint32_t sysview_get_interrupt(void)
 {
+	uint32_t interrupt = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >>
+			       SCB_ICSR_VECTACTIVE_Pos) -
+			      16);
+
 	return interrupt;
 }
 
