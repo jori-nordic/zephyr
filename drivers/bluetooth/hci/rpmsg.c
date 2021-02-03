@@ -78,7 +78,7 @@ static struct net_buf *bt_rpmsg_evt_recv(uint8_t *data, size_t remaining)
 	buf = bt_buf_get_evt(hdr.evt, discardable, K_NO_WAIT);
 	if (!buf) {
 		if (discardable) {
-			BT_DBG("Discardable buffer pool full, ignoring event");
+			BT_ERR("Discardable buffer pool full, ignoring event");
 		} else {
 			BT_ERR("No available event buffers!");
 		}

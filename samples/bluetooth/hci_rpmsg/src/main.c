@@ -282,11 +282,17 @@ void main(void)
 
 #if defined(CONFIG_SOC_NRF5340_CPUNET_QKAA)
 	printk("######## Hello from RPMSG\n");
+	printk("Reset reason: 0x%x\n", NRF_RESET_NS->RESETREAS);
+	/* NRF_RESET_NS->RESETREAS = 0; */
 	NRF_P1_NS->DIRSET = (1<<16) - 1;
 	NRF_P1_NS->OUTSET = (1<<16) - 1;
 	k_msleep(1);
 	NRF_P1_NS->OUTCLR = (1<<16) - 1;
 #endif
+
+	/* Use constant-latency mode */
+	/* does not fix */
+	NRF_POWER_NS->TASKS_CONSTLAT = 1;
 
 	main_tid = k_current_get();
 
@@ -295,7 +301,7 @@ void main(void)
 
 		buf = net_buf_get(&rx_queue, K_FOREVER);
 		err = hci_rpmsg_send(buf);
-		LOG_ERR("aha");
+		/* LOG_ERR("aha"); */
 		if (err) {
 			LOG_ERR("Failed to send (err %d)", err);
 		}
@@ -453,7 +459,7 @@ void sys_trace_mutex_unlock(struct k_mutex *mutex) {}
 #if 0
 /* Try creating a thread to keep CPU from entering idle */
 #define MY_STACK_SIZE 500
-#define MY_PRIORITY 8		/* Logging is 10 */
+#define MY_PRIORITY K_LOWEST_APPLICATION_THREAD_PRIO
 
 static void my_entry_point(void *p1, void *p2, void *p3) {
 	ARG_UNUSED(p1);
