@@ -386,44 +386,53 @@ void sys_trace_thread_info(struct k_thread *thread) {}
 
 void sys_trace_thread_name_set(struct k_thread *thread) {}
 
-void sys_trace_isr_enter()
-{
-	/* if (1) { */
-	/* 	NRF_P1_NS->OUTSET = 1 << 1; */
-	/* }; */
-
-	/* int8_t active = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >> */
-	/* 		  SCB_ICSR_VECTACTIVE_Pos) - */
-	/* 		 16); */
-
-	/* if(active <0) active = 0; */
-	/* for(; active > 0; active--) */
+__STATIC_FORCEINLINE void delay_unit(void) {
+	/* for(int i=0; i<20; i++) */
 	/* { */
-	/* 	NRF_P1_NS->OUTSET = 1 << 0; */
-	/* 	__NOP(); */
-	/* 	__NOP(); */
-	/* 	__NOP(); */
-	/* 	__NOP(); */
-	/* 	NRF_P1_NS->OUTCLR = 1 << 0; */
-	/* 	__NOP(); */
-	/* 	__NOP(); */
-	/* 	__NOP(); */
 	/* 	__NOP(); */
 	/* } */
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	/* k_busy_wait fails llpm */
+	/* k_busy_wait(1); */
+};
+
+
+/* #pragma GCC optimize ("O0") */
+void sys_trace_isr_enter()
+{
+	int8_t active = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >>
+			  SCB_ICSR_VECTACTIVE_Pos) -
+			 16);
+
+	if(active <0) active = 0;
+	for(; active > 0; active--)
+	{
+		NRF_P1_NS->OUTCLR = 1 << 9;
+		delay_unit();
+		NRF_P1_NS->OUTSET = 1 << 9;
+		delay_unit();
+	}
 }
 
 void sys_trace_isr_exit()
 {
-	/* if (1) { */
-	/* 	NRF_P1_NS->OUTCLR = 1 << 1; */
-	/* }; */
+	if (1) {
+		NRF_P1_NS->OUTCLR = 1 << 9;
+	};
 }
 
 void sys_trace_isr_exit_to_scheduler()
 {
-	/* if (1) { */
-	/* 	NRF_P1_NS->OUTCLR = 1 << 1; */
-	/* }; */
+	if (1) {
+		NRF_P1_NS->OUTCLR = 1 << 9;
+		delay_unit();
+		NRF_P1_NS->OUTSET = 1 << 9;
+		delay_unit();
+		NRF_P1_NS->OUTCLR = 1 << 9;
+	};
 }
 
 void sys_trace_void(int id)
