@@ -198,8 +198,7 @@ void idle(void *p1, void *unused2, void *unused3)
 			k_cpu_idle();
 		}
 #else /* CONFIG_PM */
-		/* k_cpu_idle(); */
-		arch_irq_unlock(key);
+		k_cpu_idle();
 #endif /* CONFIG_PM */
 #else /* CONFIG_SYS_CLOCK_EXISTS */
 		k_cpu_idle();
