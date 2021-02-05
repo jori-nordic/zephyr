@@ -35,6 +35,9 @@
 #include <nrfx.h>
 #include <tracing/tracing.h>
 #include <ksched.h>
+#include <debug/ppi_trace.h>
+#include <hal/nrf_gpiote.h>
+#include <nrfx_dppi.h>
 
 /* #define LOG_LEVEL LOG_LEVEL_DBG */
 #define LOG_LEVEL LOG_LEVEL_WRN
@@ -232,9 +235,7 @@ static int hci_rpmsg_send(struct net_buf *buf)
 
 	LOG_HEXDUMP_DBG(buf->data, buf->len, "Final HCI buffer:");
 
-NRF_P1_NS->OUTSET = 1<<1;
 	rpmsg_service_send(endpoint_id, buf->data, buf->len);
-NRF_P1_NS->OUTCLR = 1<<1;
 
 	net_buf_unref(buf);
 
@@ -244,19 +245,126 @@ NRF_P1_NS->OUTCLR = 1<<1;
 #if defined(CONFIG_BT_CTLR_ASSERT_HANDLER)
 void bt_ctlr_assert_handle(char *file, uint32_t line)
 {
-	LOG_ERR("Controller assert in: %s at %d", file, line);
+	/* printk("Controller assert in: %s at %d", file, line); */
+	printk("assert\n");
+	ARG_UNUSED(file);
+	ARG_UNUSED(line);
+	while(1);
 }
 #endif /* CONFIG_BT_CTLR_ASSERT_HANDLER */
 
 int endpoint_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32_t src,
 		void *priv)
 {
-NRF_P1_NS->OUTSET = 1<<0;
 	LOG_INF("Received message of %u bytes.", len);
 	hci_rpmsg_rx((uint8_t *) data, len);
-NRF_P1_NS->OUTCLR = 1<<0;
 
 	return RPMSG_SUCCESS;
+}
+
+/** @brief Allocate GPIOTE channel.
+ *
+ * @param pin Pin.
+ *
+ * @return Allocated channel or -1 if failed to allocate.
+ */
+static int gpiote_channel_alloc(uint32_t pin)
+{
+	for (uint8_t channel = 0; channel < GPIOTE_CH_NUM; ++channel) {
+		if (!nrf_gpiote_te_is_enabled(NRF_GPIOTE, channel)) {
+			nrf_gpiote_task_configure(NRF_GPIOTE, channel, pin,
+						  NRF_GPIOTE_POLARITY_TOGGLE,
+						  NRF_GPIOTE_INITIAL_VALUE_LOW);
+			nrf_gpiote_task_enable(NRF_GPIOTE, channel);
+			return channel;
+		}
+	}
+
+	return -1;
+}
+
+/* Convert task address to associated subscribe register */
+#define SUBSCRIBE_ADDR(task) (volatile uint32_t *)(task + 0x80)
+
+/* Convert event address to associated publish register */
+#define PUBLISH_ADDR(evt) (volatile uint32_t *)(evt + 0x80)
+
+void ppi_trace_config_custom(uint32_t pin, uint32_t ppi_ch)
+{
+	uint32_t task;
+	int gpiote_ch;
+	nrf_gpiote_task_t task_id;
+
+	/* Alloc gpiote channel */
+	gpiote_ch = gpiote_channel_alloc(pin);
+
+	/* Get gpiote task address */
+	task_id = offsetof(NRF_GPIOTE_Type, TASKS_OUT[gpiote_ch]);
+	task = nrf_gpiote_task_address_get(NRF_GPIOTE, task_id);
+
+	/* Hook to already assigned DPPI channel */
+	*SUBSCRIBE_ADDR(task) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch;
+}
+
+void ppi_trace_config_cpu(uint32_t pin, uint32_t ppi_ch)
+{
+	uint32_t task;
+	uint32_t evt;
+	int gpiote_ch;
+	nrf_gpiote_task_t task_id;
+
+	/* Alloc gpiote channel */
+	gpiote_ch = gpiote_channel_alloc(pin);
+
+	/* Get gpiote SET address */
+	task_id = offsetof(NRF_GPIOTE_Type, TASKS_SET[gpiote_ch]);
+	task = nrf_gpiote_task_address_get(NRF_GPIOTE, task_id);
+
+	/* Publish CPU wakeup */
+	evt = (uint32_t)&(NRF_POWER_NS->EVENTS_SLEEPEXIT);
+	*PUBLISH_ADDR(evt) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch;
+
+	/* Hook GPIOTE to configured DPPI channel */
+	*SUBSCRIBE_ADDR(task) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch;
+
+	/* Enable said channel */
+	NRF_DPPIC_NS->CHENSET = 1<<ppi_ch;
+
+	/* Get gpiote CLEAR address */
+	task_id = offsetof(NRF_GPIOTE_Type, TASKS_CLR[gpiote_ch]);
+	task = nrf_gpiote_task_address_get(NRF_GPIOTE, task_id);
+
+	/* Publish CPU sleep */
+	ppi_ch++;
+	evt = (uint32_t)&(NRF_POWER_NS->EVENTS_SLEEPENTER);
+	*PUBLISH_ADDR(evt) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch;
+
+	/* Hook GPIOTE to configured DPPI channel */
+	*SUBSCRIBE_ADDR(task) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch;
+
+	/* Enable said channel */
+	NRF_DPPIC_NS->CHENSET = 1<<ppi_ch;
+}
+
+static void setup_pin_toggling(void)
+{
+/* #define HAL_DPPI_REM_EVENTS_START_CHANNEL_IDX     3U */
+#define HAL_DPPI_RADIO_EVENTS_READY_CHANNEL_IDX   4U
+#define HAL_DPPI_RADIO_EVENTS_ADDRESS_CHANNEL_IDX 5U
+#define HAL_DPPI_RADIO_EVENTS_END_CHANNEL_IDX     6U
+#define HAL_DPPI_RADIO_EVENTS_DISABLED_CH_IDX     7U
+
+#define GPIO7 32+9
+#define GPIO3 32+5
+#define GPIO4 32+6
+#define GPIO5 32+7
+#define GPIO6 32+8
+
+	/* ppi_trace_config_custom(GPIO7, HAL_DPPI_RADIO_EVENTS_READY_CHANNEL_IDX); */
+	ppi_trace_config_custom(GPIO3, HAL_DPPI_RADIO_EVENTS_ADDRESS_CHANNEL_IDX);
+	ppi_trace_config_custom(GPIO4, HAL_DPPI_RADIO_EVENTS_END_CHANNEL_IDX);
+	ppi_trace_config_custom(GPIO5, HAL_DPPI_RADIO_EVENTS_DISABLED_CH_IDX);
+	ppi_trace_config_cpu(GPIO6, 16U);
 }
 
 k_tid_t main_tid = 0;
@@ -285,14 +393,10 @@ void main(void)
 	printk("Reset reason: 0x%x\n", NRF_RESET_NS->RESETREAS);
 	/* NRF_RESET_NS->RESETREAS = 0; */
 	NRF_P1_NS->DIRSET = (1<<16) - 1;
-	NRF_P1_NS->OUTSET = (1<<16) - 1;
 	k_msleep(1);
-	NRF_P1_NS->OUTCLR = (1<<16) - 1;
 #endif
 
-	/* Use constant-latency mode */
-	/* does not fix */
-	NRF_POWER_NS->TASKS_CONSTLAT = 1;
+	setup_pin_toggling();
 
 	main_tid = k_current_get();
 
@@ -327,143 +431,6 @@ int register_endpoint(const struct device *arg)
 
 SYS_INIT(register_endpoint, POST_KERNEL, CONFIG_RPMSG_SERVICE_EP_REG_PRIORITY);
 
-
-void sys_trace_thread_switched_out()
-{
-	if (k_current_get() == main_tid) {
-		NRF_P1_NS->OUTCLR = 1 << 7;
-	}
-	if (!z_is_idle_thread_object(k_current_get())) {
-		NRF_P1_NS->OUTCLR = 1 << 5;
-	}
-}
-
-void sys_trace_thread_switched_in()
-{
-	if (k_current_get() == main_tid) {
-		NRF_P1_NS->OUTSET = 1 << 7;
-	}
-	if (!z_is_idle_thread_object(k_current_get())) {
-		NRF_P1_NS->OUTSET = 1 << 5;
-	}
-}
-
-void sys_trace_thread_priority_set(struct k_thread *thread)
-{
-}
-
-void sys_trace_thread_create(struct k_thread *thread) {}
-
-void sys_trace_thread_abort(struct k_thread *thread) {}
-
-void sys_trace_thread_suspend(struct k_thread *thread)
-{
-	if (k_current_get() == main_tid) {
-		NRF_P1_NS->OUTCLR = 1 << 7;
-	};
-}
-
-void sys_trace_thread_resume(struct k_thread *thread)
-{
-	if (k_current_get() == main_tid) {
-		NRF_P1_NS->OUTSET = 1 << 7;
-	};
-}
-
-void sys_trace_thread_ready(struct k_thread *thread) {	\
-	if(1) {	\
-		/* NRF_P1_NS->OUTSET = 1<<5;				\ */
-	};								\
-	}
-
-void sys_trace_thread_pend(struct k_thread *thread) {	\
-	if(1) {	\
-		/* NRF_P1_NS->OUTCLR = 1<<5;				\ */
-	};								\
-	}
-
-void sys_trace_thread_info(struct k_thread *thread) {}
-
-void sys_trace_thread_name_set(struct k_thread *thread) {}
-
-__STATIC_FORCEINLINE void delay_unit(void) {
-	/* for(int i=0; i<20; i++) */
-	/* { */
-	/* 	__NOP(); */
-	/* } */
-	__NOP();
-	__NOP();
-	__NOP();
-	__NOP();
-	/* k_busy_wait fails llpm */
-	/* k_busy_wait(1); */
-};
-
-
-/* #pragma GCC optimize ("O0") */
-void sys_trace_isr_enter()
-{
-	int8_t active = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >>
-			  SCB_ICSR_VECTACTIVE_Pos) -
-			 16);
-
-	if(active <0) active = 0;
-	for(; active > 0; active--)
-	{
-		NRF_P1_NS->OUTCLR = 1 << 9;
-		delay_unit();
-		NRF_P1_NS->OUTSET = 1 << 9;
-		delay_unit();
-	}
-}
-
-void sys_trace_isr_exit()
-{
-	if (1) {
-		NRF_P1_NS->OUTCLR = 1 << 9;
-	};
-}
-
-void sys_trace_isr_exit_to_scheduler()
-{
-	if (1) {
-		NRF_P1_NS->OUTCLR = 1 << 9;
-		delay_unit();
-		NRF_P1_NS->OUTSET = 1 << 9;
-		delay_unit();
-		NRF_P1_NS->OUTCLR = 1 << 9;
-	};
-}
-
-void sys_trace_void(int id)
-{
-}
-
-void sys_trace_end_call(int id) {}
-
-void sys_trace_idle() {}
-
-void sys_trace_semaphore_init(struct k_sem *sem) {}
-
-void sys_trace_semaphore_take(struct k_sem *sem)
-{
-	/* if (1) { */
-	/* 	NRF_P1_NS->OUTSET = 1 << 8; */
-	/* }; */
-}
-
-void sys_trace_semaphore_give(struct k_sem *sem)
-{
-	/* if (1) { */
-	/* 	NRF_P1_NS->OUTCLR = 1 << 8; */
-	/* }; */
-}
-
-void sys_trace_mutex_init(struct k_mutex *mutex) {}
-
-void sys_trace_mutex_lock(struct k_mutex *mutex) {}
-
-void sys_trace_mutex_unlock(struct k_mutex *mutex) {}
 
 #if 0
 /* Try creating a thread to keep CPU from entering idle */

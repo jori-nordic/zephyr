@@ -56,9 +56,9 @@ int bt_rpmsg_platform_init(void)
 
 int bt_rpmsg_platform_send(struct net_buf *buf)
 {
-NRF_P1_S->OUTSET = 1<<8;
+/* NRF_P1_S->OUTSET = 1<<8; */
 	int err = rpmsg_service_send(endpoint_id, buf->data, buf->len);
-NRF_P1_S->OUTCLR = 1<<8;
+/* NRF_P1_S->OUTCLR = 1<<8; */
 	return err;
 }
 
