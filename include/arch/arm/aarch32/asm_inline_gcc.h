@@ -26,6 +26,9 @@
 #include <arch/arm/aarch32/cortex_a_r/cpu.h>
 #endif
 
+#include <nrf.h>
+#include <nrfx.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -43,6 +46,14 @@ extern "C" {
 static ALWAYS_INLINE unsigned int arch_irq_lock(void)
 {
 	unsigned int key;
+
+#if defined(CONFIG_SOC_NRF5340_CPUNET_QKAA)
+NRF_P1_NS->OUTSET = 1 << 6;
+#endif
+
+	NRF_TIMER2_NS->EVENTS_COMPARE[0] = 0;
+	NRF_TIMER2_NS->TASKS_CAPTURE[0] = 1;
+	while(!NRF_TIMER2_NS->EVENTS_COMPARE[0]);
 
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
 	__asm__ volatile("mrs %0, PRIMASK;"
@@ -83,6 +94,18 @@ static ALWAYS_INLINE unsigned int arch_irq_lock(void)
 
 static ALWAYS_INLINE void arch_irq_unlock(unsigned int key)
 {
+#if defined(CONFIG_SOC_NRF5340_CPUNET_QKAA)
+NRF_P1_NS->OUTCLR = 1 << 6;
+#endif
+
+	NRF_TIMER2_NS->EVENTS_COMPARE[1] = 0;
+	NRF_TIMER2_NS->TASKS_CAPTURE[1] = 1;
+	while(!NRF_TIMER2_NS->EVENTS_COMPARE[1]);
+	if(NRF_TIMER2_NS->CC[1] > (NRF_TIMER2_NS->CC[0] + 70))
+	{
+		__BKPT();
+	}
+
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
 	if (key) {
 		return;
@@ -106,6 +129,7 @@ static ALWAYS_INLINE void arch_irq_unlock(unsigned int key)
 #else
 #error Unknown ARM architecture
 #endif /* CONFIG_ARMV6_M_ARMV8_M_BASELINE */
+
 }
 
 static ALWAYS_INLINE bool arch_irq_unlocked(unsigned int key)
