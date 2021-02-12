@@ -354,11 +354,13 @@ static void setup_pin_toggling(void)
 #define HAL_DPPI_RADIO_EVENTS_END_CHANNEL_IDX     6U
 #define HAL_DPPI_RADIO_EVENTS_DISABLED_CH_IDX     7U
 
-#define GPIO7 32+9
+/* Logic analyzer hookup */
+#define GPIO2 32+4
 #define GPIO3 32+5
 #define GPIO4 32+6
 #define GPIO5 32+7
 #define GPIO6 32+8
+#define GPIO7 32+9
 
 	/* ppi_trace_config_custom(GPIO7, HAL_DPPI_RADIO_EVENTS_READY_CHANNEL_IDX); */
 	/* ppi_trace_config_custom(GPIO3, HAL_DPPI_RADIO_EVENTS_ADDRESS_CHANNEL_IDX); */
