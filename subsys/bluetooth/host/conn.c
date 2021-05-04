@@ -132,6 +132,8 @@ static void notify_connected(struct bt_conn *conn)
 {
 	struct bt_conn_cb *cb;
 
+	BT_ERR("Connected");
+
 	for (cb = callback_list; cb; cb = cb->_next) {
 		if (cb->connected) {
 			cb->connected(conn, conn->err);
@@ -146,6 +148,8 @@ static void notify_connected(struct bt_conn *conn)
 static void notify_disconnected(struct bt_conn *conn)
 {
 	struct bt_conn_cb *cb;
+
+	BT_ERR("Disconnected");
 
 	for (cb = callback_list; cb; cb = cb->_next) {
 		if (cb->disconnected) {
@@ -2681,6 +2685,8 @@ uint8_t bt_conn_index(struct bt_conn *conn)
 {
 	ptrdiff_t index;
 
+	__ASSERT(conn, "Null conn pointer");
+
 	switch (conn->type) {
 #if defined(CONFIG_BT_ISO)
 	case BT_CONN_TYPE_ISO:
@@ -2698,6 +2704,11 @@ uint8_t bt_conn_index(struct bt_conn *conn)
 #endif
 	default:
 		index = conn - acl_conns;
+		if(!(0 <= index && index < ARRAY_SIZE(acl_conns)))
+		{
+			BT_ERR("Invalid conn pointer: 0x%X acl conns: %d", index, (uint8_t)ARRAY_SIZE(acl_conns));
+			BT_ERR("ptrs: conn: %p, acl_conns: %p", conn, acl_conns);
+		}
 		__ASSERT(0 <= index && index < ARRAY_SIZE(acl_conns),
 			 "Invalid bt_conn pointer");
 		break;
