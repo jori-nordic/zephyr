@@ -230,10 +230,11 @@ static inline void ctf_top_thread_name_set(
 		);
 }
 
-static inline void ctf_top_isr_enter(void)
+static inline void ctf_top_isr_enter(int8_t number)
 {
 	CTF_EVENT(
-		CTF_LITERAL(uint8_t, CTF_EVENT_ISR_ENTER)
+		CTF_LITERAL(uint8_t, CTF_EVENT_ISR_ENTER),
+		number
 		);
 }
 

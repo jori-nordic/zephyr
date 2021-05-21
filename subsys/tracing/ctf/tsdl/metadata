@@ -135,6 +135,9 @@ event {
 event {
 	name = isr_enter;
 	id = 0x20;
+	fields := struct {
+		int8_t number;
+	};
 };
 
 event {

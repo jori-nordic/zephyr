@@ -115,6 +115,10 @@ def main():
 
                     timeline.append(th)
 
+        elif event.name in ['isr_enter']:
+            c = Fore.RED
+            number = event.payload_field['number']
+            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} {number}" + Fore.RESET)
         elif event.name in ['thread_info']:
             stack_size = event.payload_field['stack_size']
             print(f"{dt} (+{diff_s:.6f} s): {event.name} (Stack size: {stack_size})")
