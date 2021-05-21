@@ -18,6 +18,7 @@ Generate trace using samples/subsys/tracing for example:
     ./scripts/tracing/parse_ctf.py -t ctf
 """
 
+import re
 import sys
 import datetime
 from colorama import Fore
@@ -34,8 +35,31 @@ def parse_args():
     parser.add_argument("-t", "--trace",
             required=True,
             help="tracing data (directory with metadata and trace file)")
+    parser.add_argument("-m", "--header",
+            required=False,
+            help="Filepath to the CPU header to read IRQ names")
     args = parser.parse_args()
     return args
+
+def get_irqs(fp):
+    # Get IRQ number and name associations from nRF53 CMSIS header
+    p = re.compile(r'^  (?P<name>[A-Za-z0-9_]+)_IRQn\s*=\s*(?P<num>-?[0-9]+),')
+    lines = []
+    irqs = {'': ''}
+
+    with open(fp, 'r') as reader:
+        for line, i in zip(reader.readlines(), range(100)):
+            # Skip the lines we don't care about
+            if i < 50:
+                continue
+            lines.append(line)
+
+        for l in lines:
+            if p.search(l):
+                irqs[p.search(l).group('num')] = p.search(l).group('name')
+
+    return irqs
+
 
 def main():
     args = parse_args()
@@ -43,6 +67,11 @@ def main():
     msg_it = bt2.TraceCollectionMessageIterator(args.trace)
     last_event_ns_from_origin = None
     timeline = []
+
+    if args.header:
+        irqs = get_irqs(args.header)
+    else:
+        irqs = None
 
     def get_thread(name):
         for t in timeline:
@@ -118,7 +147,11 @@ def main():
         elif event.name in ['isr_enter']:
             c = Fore.RED
             number = event.payload_field['number']
-            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} {number}" + Fore.RESET)
+            name = ''
+            if irqs:
+                if str(number) in irqs:
+                    name = irqs[str(number)]
+            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} {number} - {name}" + Fore.RESET)
         elif event.name in ['thread_info']:
             stack_size = event.payload_field['stack_size']
             print(f"{dt} (+{diff_s:.6f} s): {event.name} (Stack size: {stack_size})")
