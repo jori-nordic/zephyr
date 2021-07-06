@@ -212,7 +212,8 @@ struct bt_dev_le {
 	uint16_t		mtu;
 	struct k_sem		pkts;
 	uint16_t		acl_mtu;
-	struct k_sem		acl_pkts;
+	/* TODO: add feature guard */
+	struct k_sem		acl_pkts[CONFIG_BT_MAX_CONN];
 #if defined(CONFIG_BT_ISO)
 	uint16_t		iso_mtu;
 	struct k_sem		iso_pkts;

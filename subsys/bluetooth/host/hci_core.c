@@ -2465,7 +2465,9 @@ static void read_buffer_size_complete(struct net_buf *buf)
 
 	BT_DBG("ACL BR/EDR buffers: pkts %u mtu %u", pkts, bt_dev.le.acl_mtu);
 
-	k_sem_init(&bt_dev.le.acl_pkts, pkts, pkts);
+	/* This should be per-connection */
+	for(int i=0; i<CONFIG_BT_MAX_CONN; i++)
+		k_sem_init(&bt_dev.le.acl_pkts[i], pkts, pkts);
 }
 #endif /* !defined(CONFIG_BT_BREDR) */
 
@@ -2483,7 +2485,8 @@ static void le_read_buffer_size_complete(struct net_buf *buf)
 	BT_DBG("ACL LE buffers: pkts %u mtu %u", rp->le_max_num,
 	       bt_dev.le.acl_mtu);
 
-	k_sem_init(&bt_dev.le.acl_pkts, rp->le_max_num, rp->le_max_num);
+	for(int i=0; i<CONFIG_BT_MAX_CONN; i++)
+	k_sem_init(&bt_dev.le.acl_pkts[i], rp->le_max_num, rp->le_max_num);
 }
 
 static void read_buffer_size_v2_complete(struct net_buf *buf)
@@ -2503,7 +2506,8 @@ static void read_buffer_size_v2_complete(struct net_buf *buf)
 		bt_dev.le.acl_mtu);
 
 	max_num = MIN(rp->acl_max_num, CONFIG_BT_CONN_TX_MAX);
-	k_sem_init(&bt_dev.le.acl_pkts, max_num, max_num);
+	for(int i=0; i<CONFIG_BT_MAX_CONN; i++)
+	k_sem_init(&bt_dev.le.acl_pkts[i], max_num, max_num);
 
 	bt_dev.le.iso_mtu = sys_le16_to_cpu(rp->iso_max_len);
 	if (!bt_dev.le.iso_mtu) {

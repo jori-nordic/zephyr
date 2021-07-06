@@ -92,7 +92,7 @@ struct k_sem *bt_conn_get_pkts(struct bt_conn *conn)
 		}
 	}
 #endif /* CONFIG_BT_ISO */
-	return &bt_dev.le.acl_pkts;
+	return &bt_dev.le.acl_pkts[bt_conn_index(conn)];
 }
 
 static inline const char *state2str(bt_conn_state_t state)
