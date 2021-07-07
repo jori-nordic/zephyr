@@ -39,6 +39,15 @@
 #include "gatt_internal.h"
 #include "iso_internal.h"
 
+#include <drivers/gpio.h>
+#include <nrf.h>
+
+#define GP0 (1 << 3)
+#define GP1 (1 << 4)
+#define GP2 (1 << 28)
+#define GP3 (1 << 29)
+#define GPX (GP0 | GP1 | GP2 | GP3)
+
 /* Peripheral timeout to initialize Connection Parameter Update procedure */
 #define CONN_UPDATE_TIMEOUT  K_MSEC(CONFIG_BT_CONN_PARAM_UPDATE_TIMEOUT)
 
@@ -1109,6 +1118,20 @@ static int send_iso(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 	return bt_send(buf);
 }
 
+static inline void setup_timer(void)
+{
+	NRF_TIMER2->TASKS_CLEAR = 1; /* Clear Timer */
+	NRF_TIMER2->MODE = 0; /* Timer Mode */
+	NRF_TIMER2->BITMODE = 3; /* 32 - bit */
+	NRF_TIMER2->TASKS_START = 1;
+}
+
+static inline uint32_t get_us(void)
+{
+	NRF_TIMER2->TASKS_CAPTURE[0] = 1;
+	return NRF_TIMER2->CC[0];
+}
+
 static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 		      bool always_consume)
 {
@@ -1121,7 +1144,9 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	       flags);
 
 	/* Wait until the controller can accept ACL packets */
+	NRF_P0->OUTSET = GP0;
 	k_sem_take(bt_conn_get_pkts(conn), K_FOREVER);
+	NRF_P0->OUTCLR = GP0;
 
 	/* Check for disconnection while waiting for pkts_sem */
 	if (conn->state != BT_CONN_CONNECTED) {
@@ -2710,9 +2735,52 @@ struct bt_conn *bt_conn_lookup_index(uint8_t index)
 	return bt_conn_ref(&acl_conns[index]);
 }
 
+#define GPIO_PIN_CNF_DEFAULT  (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos) | \
+                              (GPIO_PIN_CNF_DRIVE_S0S1 << GPIO_PIN_CNF_DRIVE_Pos) | \
+                              (GPIO_PIN_CNF_PULL_Pulldown << GPIO_PIN_CNF_PULL_Pos) | \
+                              (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos)
+
+#define DBP_CNF_OUT(_pin)                                                      \
+	{                                                                      \
+		(NRF_P0->PIN_CNF[_pin] =                                       \
+			 GPIO_PIN_CNF_DEFAULT |                                \
+			 (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos));   \
+	}
+
+static inline void debug_pin_outcnf(uint32_t bitf)
+{
+  for (uint8_t _i = 0; _i <= 31; _i++)
+  {
+    if (bitf & ((uint64_t)1<<_i))
+    {
+      if (_i <32)
+      {
+        DBP_CNF_OUT(_i);
+      }
+    }
+  }
+}
+
+static void m_setup_gpio(uint32_t bitf)
+{
+	debug_pin_outcnf(bitf);
+
+	uint32_t p0 = bitf;
+	NRF_P0->DIRSET = p0;
+	NRF_P0->OUTCLR = p0;
+}
+
 int bt_conn_init(void)
 {
 	int err, i;
+
+	m_setup_gpio(GPX);
+
+	NRF_P0->OUTSET = GPX;
+	__NOP();
+	__NOP();
+	__NOP();
+	NRF_P0->OUTCLR = GPX;
 
 	for (i = 0; i < ARRAY_SIZE(conn_tx); i++) {
 		k_fifo_put(&free_tx, &conn_tx[i]);
