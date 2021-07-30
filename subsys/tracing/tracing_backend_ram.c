@@ -11,15 +11,17 @@
 #include <tracing_buffer.h>
 #include <tracing_backend.h>
 
-uint8_t ram_tracing[CONFIG_RAM_TRACING_BUFFER_SIZE];
+extern uint8_t ram_tracing[CONFIG_RAM_TRACING_BUFFER_SIZE];
 static uint32_t pos;
 static bool buffer_full;
+
+extern bool enable_trace;
 
 static void tracing_backend_ram_output(
 		const struct tracing_backend *backend,
 		uint8_t *data, uint32_t length)
 {
-	if (buffer_full) {
+	if (buffer_full || !enable_trace) {
 		return;
 	}
 
