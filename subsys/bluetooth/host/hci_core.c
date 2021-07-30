@@ -50,6 +50,10 @@
 #include "crypto.h"
 #include "settings.h"
 
+#ifdef CONFIG_TRACING
+#include "ctf_top.h"
+#endif
+
 #if defined(CONFIG_BT_BREDR)
 #include "br.h"
 #endif
@@ -468,6 +472,10 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 		bt_conn_unref(conn);
 	}
+
+	#ifdef CONFIG_TRACING
+	ctf_custom((ctf_bounded_string_t){"num_cmp_pkt end"});
+	#endif
 }
 
 #if defined(CONFIG_BT_CENTRAL)
@@ -3329,6 +3337,9 @@ void hci_event_prio(struct net_buf *buf)
 	struct bt_hci_evt_hdr *hdr;
 	uint8_t evt_flags;
 
+	#ifdef CONFIG_TRACING
+	ctf_custom((ctf_bounded_string_t){"hci_event_prio"});
+	#endif
 	net_buf_simple_save(&buf->b, &state);
 
 	BT_ASSERT(buf->len >= sizeof(*hdr));
@@ -3364,6 +3375,10 @@ int bt_recv(struct net_buf *buf)
 #endif /* BT_CONN */
 	case BT_BUF_EVT:
 	{
+		#ifdef CONFIG_TRACING
+		ctf_custom((ctf_bounded_string_t){"EVT BUF RX"});
+		#endif
+
 #if defined(CONFIG_BT_RECV_IS_RX_THREAD)
 		hci_event(buf);
 #else
@@ -3376,6 +3391,10 @@ int bt_recv(struct net_buf *buf)
 
 		if (evt_flags & BT_HCI_EVT_FLAG_RECV) {
 			net_buf_put(&bt_dev.rx_queue, buf);
+			#ifdef CONFIG_TRACING
+			ctf_bounded_string_t string = {"put to queue"};
+			ctf_custom(string);
+			#endif
 		}
 #endif
 		return 0;

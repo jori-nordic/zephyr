@@ -39,6 +39,10 @@
 #include "gatt_internal.h"
 #include "iso_internal.h"
 
+#ifdef CONFIG_TRACING
+#include "ctf_top.h"
+#endif
+
 struct tx_meta {
 	struct bt_conn_tx *tx;
 };
@@ -169,6 +173,10 @@ static void tx_notify(struct bt_conn *conn)
 
 		/* Free up TX notify since there may be user waiting */
 		tx_free(tx);
+
+		#ifdef CONFIG_TRACING
+		ctf_custom((ctf_bounded_string_t){"tx_notify"});
+		#endif
 
 		/* Run the callback, at this point it should be safe to
 		 * allocate new buffers since the TX should have been

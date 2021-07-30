@@ -45,6 +45,10 @@
 #include "settings.h"
 #include "gatt_internal.h"
 
+#ifdef CONFIG_TRACING
+#include "ctf_top.h"
+#endif
+
 #define SC_TIMEOUT	K_MSEC(10)
 #define CCC_STORE_DELAY	K_SECONDS(1)
 
@@ -4112,6 +4116,10 @@ int bt_gatt_write_without_response_cb(struct bt_conn *conn, uint16_t handle,
 	struct bt_att_write_cmd *cmd;
 	size_t write;
 
+	#ifdef CONFIG_TRACING
+	ctf_custom((ctf_bounded_string_t){"gatt_write"});
+	#endif
+
 	__ASSERT(conn, "invalid parameters\n");
 	__ASSERT(handle, "invalid parameters\n");
 
@@ -4313,6 +4321,10 @@ static int gatt_write_encode(struct net_buf *buf, size_t len, void *user_data)
 int bt_gatt_write(struct bt_conn *conn, struct bt_gatt_write_params *params)
 {
 	size_t len;
+
+	#ifdef CONFIG_TRACING
+	ctf_custom((ctf_bounded_string_t){"gatt_write"});
+	#endif
 
 	__ASSERT(conn, "invalid parameters\n");
 	__ASSERT(params && params->func, "invalid parameters\n");
