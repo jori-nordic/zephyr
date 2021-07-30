@@ -162,6 +162,7 @@ static void tx_notify(struct bt_conn *conn)
 			break;
 		}
 
+		NRF_P0->OUTSET = GP5;
 		tx = (void *)sys_slist_get_not_empty(&conn->tx_complete);
 		irq_unlock(key);
 
@@ -177,6 +178,8 @@ static void tx_notify(struct bt_conn *conn)
 		#ifdef CONFIG_TRACING
 		ctf_custom((ctf_bounded_string_t){"tx_notify"});
 		#endif
+
+		NRF_P0->OUTCLR = GP5;
 
 		/* Run the callback, at this point it should be safe to
 		 * allocate new buffers since the TX should have been
@@ -362,7 +365,9 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 	}
 
 	if (cb) {
+		NRF_P0->OUTSET = GP6;
 		tx = conn_tx_alloc();
+		NRF_P0->OUTCLR = GP6;
 		if (!tx) {
 			BT_ERR("Unable to allocate TX context");
 			return -ENOBUFS;

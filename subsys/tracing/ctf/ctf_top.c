@@ -150,6 +150,7 @@ void sys_trace_k_thread_name_set(struct k_thread *thread, int ret)
 
 void sys_trace_isr_enter(void)
 {
+	NRF_P0->OUTSET = GP2;
 	int8_t active = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >>
 			  SCB_ICSR_VECTACTIVE_Pos) -
 			 16);
@@ -159,11 +160,13 @@ void sys_trace_isr_enter(void)
 
 void sys_trace_isr_exit(void)
 {
+	NRF_P0->OUTCLR = GP2;
 	ctf_top_isr_exit();
 }
 
 void sys_trace_isr_exit_to_scheduler(void)
 {
+	NRF_P0->OUTCLR = GP2;
 	ctf_top_isr_exit_to_scheduler();
 }
 

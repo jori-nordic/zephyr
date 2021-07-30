@@ -4120,6 +4120,8 @@ int bt_gatt_write_without_response_cb(struct bt_conn *conn, uint16_t handle,
 	ctf_custom((ctf_bounded_string_t){"gatt_write"});
 	#endif
 
+	NRF_P0->OUTSET = GP7;
+
 	__ASSERT(conn, "invalid parameters\n");
 	__ASSERT(handle, "invalid parameters\n");
 
@@ -4158,7 +4160,11 @@ int bt_gatt_write_without_response_cb(struct bt_conn *conn, uint16_t handle,
 
 	BT_DBG("handle 0x%04x length %u", handle, length);
 
-	return bt_att_send(conn, buf, func, user_data);
+	int err = bt_att_send(conn, buf, func, user_data);
+
+	NRF_P0->OUTCLR = GP7;
+
+	return err;
 }
 
 static int gatt_exec_encode(struct net_buf *buf, size_t len, void *user_data)
@@ -4320,7 +4326,9 @@ static int gatt_write_encode(struct net_buf *buf, size_t len, void *user_data)
 
 int bt_gatt_write(struct bt_conn *conn, struct bt_gatt_write_params *params)
 {
+	NRF_P0->OUTSET = GP7;
 	size_t len;
+	int err;
 
 	#ifdef CONFIG_TRACING
 	ctf_custom((ctf_bounded_string_t){"gatt_write"});
@@ -4331,6 +4339,7 @@ int bt_gatt_write(struct bt_conn *conn, struct bt_gatt_write_params *params)
 	__ASSERT(params->handle, "invalid parameters\n");
 
 	if (conn->state != BT_CONN_CONNECTED) {
+		NRF_P0->OUTCLR = GP7;
 		return -ENOTCONN;
 	}
 
@@ -4338,13 +4347,18 @@ int bt_gatt_write(struct bt_conn *conn, struct bt_gatt_write_params *params)
 
 	/* Use Prepare Write if offset is set or Long Write is required */
 	if (params->offset || len > (bt_att_get_mtu(conn) - 1)) {
-		return gatt_prepare_write(conn, params);
+		err = gatt_prepare_write(conn, params);
+		NRF_P0->OUTCLR = GP7;
+		return err;
 	}
 
 	BT_DBG("handle 0x%04x length %u", params->handle, params->length);
 
-	return gatt_req_send(conn, gatt_write_rsp, params, gatt_write_encode,
+	err = gatt_req_send(conn, gatt_write_rsp, params, gatt_write_encode,
 			     BT_ATT_OP_WRITE_REQ, len);
+
+	NRF_P0->OUTCLR = GP7;
+	return err;
 }
 
 static void gatt_write_ccc_rsp(struct bt_conn *conn, uint8_t err,
