@@ -97,6 +97,7 @@ typedef enum {
 	CTF_EVENT_MUTEX_LOCK_EXIT = 0x2B,
 	CTF_EVENT_MUTEX_UNLOCK_ENTER = 0x2C,
 	CTF_EVENT_MUTEX_UNLOCK_EXIT = 0x2D,
+	CTF_EVENT_CUSTOM = 0x2E,
 } ctf_event_t;
 
 typedef struct {
@@ -181,9 +182,12 @@ static inline void ctf_top_thread_name_set(uint32_t thread_id,
 		  name);
 }
 
-static inline void ctf_top_isr_enter(void)
+static inline void ctf_top_isr_enter(int8_t number)
 {
-	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_ISR_ENTER));
+	CTF_EVENT(
+		CTF_LITERAL(uint8_t, CTF_EVENT_ISR_ENTER),
+		number
+		);
 }
 
 static inline void ctf_top_isr_exit(void)
@@ -288,6 +292,11 @@ static inline void ctf_top_mutex_unlock_enter(uint32_t mutex_id)
 static inline void ctf_top_mutex_unlock_exit(uint32_t mutex_id, int32_t ret)
 {
 	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_MUTEX_UNLOCK_EXIT), mutex_id);
+}
+
+static inline void ctf_custom(ctf_bounded_string_t data)
+{
+	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_CUSTOM), data);
 }
 
 #endif /* SUBSYS_DEBUG_TRACING_CTF_TOP_H */

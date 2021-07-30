@@ -136,6 +136,9 @@ event {
 event {
 	name = isr_enter;
 	id = 0x1B;
+	fields := struct {
+		int8_t number;
+	};
 };
 
 event {
@@ -285,3 +288,10 @@ event {
 	};
 };
 
+event {
+	name = custom;
+	id = 0x2E;
+	fields := struct {
+		ctf_bounded_string_t data[20];
+	};
+};

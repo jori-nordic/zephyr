@@ -150,7 +150,11 @@ void sys_trace_k_thread_name_set(struct k_thread *thread, int ret)
 
 void sys_trace_isr_enter(void)
 {
-	ctf_top_isr_enter();
+	int8_t active = (((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) >>
+			  SCB_ICSR_VECTACTIVE_Pos) -
+			 16);
+
+	ctf_top_isr_enter(active);
 }
 
 void sys_trace_isr_exit(void)
