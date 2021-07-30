@@ -2785,9 +2785,52 @@ struct bt_conn *bt_conn_lookup_index(uint8_t index)
 	return bt_conn_ref(&acl_conns[index]);
 }
 
+#define GPIO_PIN_CNF_DEFAULT  (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos) | \
+                              (GPIO_PIN_CNF_DRIVE_S0S1 << GPIO_PIN_CNF_DRIVE_Pos) | \
+                              (GPIO_PIN_CNF_PULL_Pulldown << GPIO_PIN_CNF_PULL_Pos) | \
+                              (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos)
+
+#define DBP_CNF_OUT(_pin)                                                      \
+	{                                                                      \
+		(NRF_P0->PIN_CNF[_pin] =                                       \
+			 GPIO_PIN_CNF_DEFAULT |                                \
+			 (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos));   \
+	}
+
+static inline void debug_pin_outcnf(uint32_t bitf)
+{
+  for (uint8_t _i = 0; _i <= 31; _i++)
+  {
+    if (bitf & ((uint64_t)1<<_i))
+    {
+      if (_i <32)
+      {
+        DBP_CNF_OUT(_i);
+      }
+    }
+  }
+}
+
+static void m_setup_gpio(uint32_t bitf)
+{
+	debug_pin_outcnf(bitf);
+
+	uint32_t p0 = bitf;
+	NRF_P0->DIRSET = p0;
+	NRF_P0->OUTCLR = p0;
+}
+
 int bt_conn_init(void)
 {
 	int err, i;
+
+	m_setup_gpio(GPX);
+
+	NRF_P0->OUTSET = GPX;
+	__NOP();
+	__NOP();
+	__NOP();
+	NRF_P0->OUTCLR = GPX;
 
 	for (i = 0; i < ARRAY_SIZE(conn_tx); i++) {
 		k_fifo_put(&free_tx, &conn_tx[i]);

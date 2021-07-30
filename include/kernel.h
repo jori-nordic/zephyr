@@ -13,6 +13,17 @@
 #ifndef ZEPHYR_INCLUDE_KERNEL_H_
 #define ZEPHYR_INCLUDE_KERNEL_H_
 
+/* So I don't have to include it /everywhere/ */
+#define GP0 (1 << 3)
+#define GP1 (1 << 4)
+#define GP2 (1 << 28)
+#define GP3 (1 << 29)
+#define GP4 (1 << 30)
+#define GP5 (1 << 31)
+#define GP6 (1 << 26)
+#define GP7 (1 << 27)
+#define GPX (GP0 | GP1 | GP2 | GP3 | GP4 | GP5 | GP6 | GP7)
+
 #if !defined(_ASMLANGUAGE)
 #include <kernel_includes.h>
 #include <errno.h>
