@@ -365,9 +365,9 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 	}
 
 	if (cb) {
-		NRF_P0->OUTSET = GP6;
+		/* NRF_P0->OUTSET = GP6; */
 		tx = conn_tx_alloc();
-		NRF_P0->OUTCLR = GP6;
+		/* NRF_P0->OUTCLR = GP6; */
 		if (!tx) {
 			BT_ERR("Unable to allocate TX context");
 			return -ENOBUFS;
