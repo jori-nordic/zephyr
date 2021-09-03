@@ -232,10 +232,13 @@ static void gen_data(uint8_t* buf, uint16_t len)
 	}
 }
 
+static bool big_mtu = false;
+
 void gatt_mtu_cb(struct bt_conn *conn, uint8_t err,
 		 struct bt_gatt_exchange_params *params)
 {
 	LOG_INF("MTU exchange callback");
+	big_mtu = true;
 }
 
 void main(void)
@@ -265,7 +268,7 @@ void main(void)
 		/* Prepare gatt write */
 		gatt_params.data = gatt_data;
 		gatt_params.handle = char_handle;
-		gatt_params.length = 16;
+		gatt_params.length = 190;
 		gatt_params.offset = 0;
 		gatt_params.func = gatt_cb;
 
@@ -278,6 +281,8 @@ void main(void)
 		/* Increase MTU */
 		gatt_mtu_params.func = gatt_mtu_cb;
 		bt_gatt_exchange_mtu(default_conn, &gatt_mtu_params);
+
+		while(!big_mtu) {k_msleep(2000);}
 
 		LOG_INF("Entering main loop");
 		LOG_INF("Char handle: 0x%x", char_handle);
