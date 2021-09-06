@@ -291,16 +291,16 @@ void main(void)
 			gen_data(gatt_data, sizeof(gatt_data));
 			LOG_INF("Write");
 			bt_gatt_write(default_conn, &gatt_params);
-			LOG_INF("Read");
-			bt_gatt_read(default_conn, &gatt_read_params);
+			/* LOG_INF("Read"); */
+			/* bt_gatt_read(default_conn, &gatt_read_params); */
 
 			LOG_INF("Clear");
 			memset(gatt_data, 0x00, sizeof(gatt_data));
 			LOG_INF("Write");
 			bt_gatt_write(default_conn, &gatt_params);
-			LOG_INF("Read");
-			bt_gatt_read(default_conn, &gatt_read_params);
-			k_msleep(10000);
+			/* LOG_INF("Read"); */
+			/* bt_gatt_read(default_conn, &gatt_read_params); */
+			/* k_msleep(100); */
 		}
 	}
 }
