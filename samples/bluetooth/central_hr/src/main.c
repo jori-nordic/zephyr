@@ -290,7 +290,12 @@ void main(void)
 			LOG_INF("Generate");
 			gen_data(gatt_data, sizeof(gatt_data));
 			LOG_INF("Write");
-			bt_gatt_write(default_conn, &gatt_params);
+			/* bt_gatt_write(default_conn, &gatt_params); */
+			bt_gatt_write_without_response(default_conn,
+						       gatt_params.handle,
+						       gatt_params.data,
+						       gatt_params.length,
+						       false);
 			/* LOG_INF("Read"); */
 			/* bt_gatt_read(default_conn, &gatt_read_params); */
 
