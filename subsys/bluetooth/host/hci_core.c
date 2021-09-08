@@ -421,7 +421,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 	BT_DBG("num_handles %u", evt->num_handles);
 
-	NRF_P0->OUTSET = GP3;
+	/* NRF_P0->OUTSET = GP3; */
 
 	for (i = 0; i < evt->num_handles; i++) {
 		uint16_t handle, count;
@@ -479,7 +479,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 	ctf_custom((ctf_bounded_string_t){"num_cmp_pkt end"});
 	#endif
 
-	NRF_P0->OUTCLR = GP3;
+	/* NRF_P0->OUTCLR = GP3; */
 }
 
 #if defined(CONFIG_BT_CENTRAL)

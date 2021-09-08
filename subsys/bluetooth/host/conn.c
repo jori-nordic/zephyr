@@ -468,6 +468,8 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	BT_DBG("conn %p buf %p len %u flags 0x%02x", conn, buf, buf->len,
 	       flags);
 
+	NRF_P0->OUTSET = GP3;
+
 	/* Wait until the controller can accept ACL packets */
 	k_sem_take(bt_conn_get_pkts(conn), K_FOREVER);
 
@@ -515,6 +517,8 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 		irq_unlock(key);
 		goto fail;
 	}
+
+	NRF_P0->OUTCLR = GP3;
 
 	return true;
 
@@ -2608,6 +2612,8 @@ struct net_buf *bt_conn_create_frag_timeout(size_t reserve, k_timeout_t timeout)
 	struct net_buf_pool *pool = NULL;
 
 #if CONFIG_BT_L2CAP_TX_FRAG_COUNT > 0
+	NRF_P0->OUTSET = GP2;
+
 	pool = &frag_pool;
 #endif
 
@@ -2615,7 +2621,10 @@ struct net_buf *bt_conn_create_frag_timeout(size_t reserve, k_timeout_t timeout)
 	return bt_conn_create_pdu_timeout_debug(pool, reserve, timeout,
 						func, line);
 #else
-	return bt_conn_create_pdu_timeout(pool, reserve, timeout);
+	struct net_buf* buf = bt_conn_create_pdu_timeout(pool, reserve, timeout);
+
+	NRF_P0->OUTCLR = GP2;
+	return buf;
 #endif /* CONFIG_NET_BUF_LOG */
 }
 
