@@ -24,15 +24,20 @@ LOG_MODULE_REGISTER(main);
 
 #define TEST_SERVICE_UUID BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0)
 #define TEST_CHARACTERISTIC_UUID BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef2)
+#define NUM_ML 3		/* Number of peripherals to connect to */
 
 static void start_scan(void);
 
-static struct bt_conn *default_conn;
+static struct bt_conn *connections[NUM_ML];
+static uint8_t conns = 0;
+static uint8_t big_mtu = 0;
 
 static struct bt_uuid_128 uuid = BT_UUID_INIT_128(0);
 static struct bt_gatt_discover_params discover_params;
-
-uint32_t char_handle = 0;
+static struct bt_gatt_write_params gatt_params;
+#define DAT_LEN 512
+static uint8_t gatt_data[DAT_LEN] = {0};
+uint32_t char_handle = 0;	/* Assuming it's the same on all devices */
 
 static uint8_t discover_func(struct bt_conn *conn,
 			     const struct bt_gatt_attr *attr,
@@ -71,6 +76,7 @@ static uint8_t discover_func(struct bt_conn *conn,
 static bool eir_found(struct bt_data *data, void *user_data)
 {
 	bt_addr_le_t *addr = user_data;
+	static int id = 0;
 
 	switch (data->type) {
 	case BT_DATA_UUID128_ALL:
@@ -97,11 +103,16 @@ static bool eir_found(struct bt_data *data, void *user_data)
 
 		param = BT_LE_CONN_PARAM_DEFAULT;
 		err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN,
-					param, &default_conn);
+					param, &connections[id]);
 		if (err) {
 			LOG_INF("Create conn failed (err %d)", err);
-			start_scan();
+		} else {
+			id++;
 		}
+
+		/* Restart scanning to connect to the rest of peripherals */
+		if(id < NUM_ML)
+			start_scan();
 
 		return false;
 	}
@@ -153,29 +164,43 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (conn_err) {
-		LOG_INF("Failed to connect to %s (%u)", addr, conn_err);
-
-		bt_conn_unref(default_conn);
-		default_conn = NULL;
-
 		start_scan();
 		return;
 	}
 
 	LOG_INF("Connected: %s", log_strdup(addr));
 
-	if (conn == default_conn) {
-		memcpy(&uuid, BT_UUID_DECLARE_128(TEST_SERVICE_UUID), sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
-		discover_params.func = discover_func;
-		discover_params.start_handle = BT_ATT_FIRST_ATTTRIBUTE_HANDLE;
-		discover_params.end_handle = BT_ATT_LAST_ATTTRIBUTE_HANDLE;
-		discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+	/* Get connection index */
+	int conn_idx = 0;
+	for(; conn_idx < NUM_ML; conn_idx++) {
+		if(connections[conn_idx] == conn) {
+			break;
+		}
+	}
+	if(connections[conn_idx] != conn) {
+		LOG_INF("Conn not in index, disconnecting..");
+		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		start_scan();
+	} else {
+		/* Start GATT discovery process for only the first device */
+		if(conn_idx == 0) {
+			memcpy(&uuid, BT_UUID_DECLARE_128(TEST_SERVICE_UUID), sizeof(uuid));
+			discover_params.uuid = &uuid.uuid;
+			discover_params.func = discover_func;
+			discover_params.start_handle = BT_ATT_FIRST_ATTTRIBUTE_HANDLE;
+			discover_params.end_handle = BT_ATT_LAST_ATTTRIBUTE_HANDLE;
+			discover_params.type = BT_GATT_DISCOVER_PRIMARY;
 
-		err = bt_gatt_discover(default_conn, &discover_params);
-		if (err) {
-			LOG_INF("Discover failed(err %d)", err);
-			return;
+			err = bt_gatt_discover(connections[conn_idx], &discover_params);
+			if (err) {
+				LOG_INF("Discover failed(err %d), disconnecting", err);
+				bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+			}
+		}
+
+		if(conns < NUM_ML-1) {
+			conns++;
+			start_scan();
 		}
 	}
 }
@@ -188,24 +213,31 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	LOG_INF("Disconnected: %s (reason 0x%02x)", log_strdup(addr), reason);
 
-	if (default_conn != conn) {
-		return;
+	/* Get connection index */
+	int conn_idx = 0;
+	for(; conn_idx < NUM_ML; conn_idx++) {
+		if(connections[conn_idx] == conn) {
+			break;
+		}
 	}
 
-	bt_conn_unref(default_conn);
-	default_conn = NULL;
-	char_handle = 0;
-
-	start_scan();
+	if(connections[conn_idx] != conn) {
+		start_scan();
+		return;
+	} else {
+		bt_conn_unref(connections[conn_idx]);
+		connections[conn_idx] = NULL;
+		char_handle = 0;
+		start_scan();
+		if(big_mtu) big_mtu--;
+		if(conns) conns--;
+	}
 }
 
 static struct bt_conn_cb conn_callbacks = {
 	.connected = connected,
 	.disconnected = disconnected,
 };
-
-#define DAT_LEN 512
-static uint8_t gatt_data[DAT_LEN] = {0};
 
 void gatt_cb(struct bt_conn *conn, uint8_t err,
 	     struct bt_gatt_write_params *params)
@@ -232,20 +264,31 @@ static void gen_data(uint8_t* buf, uint16_t len)
 	}
 }
 
-static bool big_mtu = false;
-
 void gatt_mtu_cb(struct bt_conn *conn, uint8_t err,
 		 struct bt_gatt_exchange_params *params)
 {
 	LOG_INF("MTU exchange callback");
-	big_mtu = true;
+	big_mtu++;
+}
+
+void send_gatt_write_wo_rsp(struct bt_conn *conn, void *data)
+{
+	LOG_INF("Gatt write conn 0x%x", (uint32_t)conn);
+	gen_data(gatt_data, sizeof(gatt_data));
+	int err = bt_gatt_write_without_response(conn,
+						 gatt_params.handle,
+						 gatt_params.data,
+						 gatt_params.length,
+						 false);
+	if(err) {
+		LOG_ERR("Write failed (err %d)", err);
+	}
 }
 
 void main(void)
 {
 	int err;
 	err = bt_enable(NULL);
-	struct bt_gatt_write_params gatt_params;
 	struct bt_gatt_read_params gatt_read_params;
 	struct bt_gatt_exchange_params gatt_mtu_params;
 
@@ -262,7 +305,9 @@ void main(void)
 
 	while(1)
 	{
-		/* Wait for discovery to complete */
+		/* Wait for discovery to complete
+		 * -> for all connections */
+		LOG_INF("Waiting for discovery..");
 		while(!char_handle) {k_msleep(2000);};
 
 		/* Prepare gatt write */
@@ -280,32 +325,17 @@ void main(void)
 
 		/* Increase MTU */
 		gatt_mtu_params.func = gatt_mtu_cb;
-		bt_gatt_exchange_mtu(default_conn, &gatt_mtu_params);
+		for(int idx = 0; idx < NUM_ML; idx++) {
+			bt_gatt_exchange_mtu(connections[idx], &gatt_mtu_params);
+		}
 
-		while(!big_mtu) {k_msleep(2000);}
+		LOG_INF("Waiting for MTU update..");
+		while(big_mtu < NUM_ML) {k_msleep(2000);}
 
 		LOG_INF("Entering main loop");
 		LOG_INF("Char handle: 0x%x", char_handle);
 		while(char_handle) { /* Stops when disconnected */
-			LOG_INF("Generate");
-			gen_data(gatt_data, sizeof(gatt_data));
-			LOG_INF("Write");
-			/* bt_gatt_write(default_conn, &gatt_params); */
-			bt_gatt_write_without_response(default_conn,
-						       gatt_params.handle,
-						       gatt_params.data,
-						       gatt_params.length,
-						       false);
-			/* LOG_INF("Read"); */
-			/* bt_gatt_read(default_conn, &gatt_read_params); */
-
-			LOG_INF("Clear");
-			memset(gatt_data, 0x00, sizeof(gatt_data));
-			LOG_INF("Write");
-			bt_gatt_write(default_conn, &gatt_params);
-			/* LOG_INF("Read"); */
-			/* bt_gatt_read(default_conn, &gatt_read_params); */
-			/* k_msleep(100); */
+			bt_conn_foreach(BT_CONN_TYPE_LE, send_gatt_write_wo_rsp, NULL);
 		}
 	}
 }
