@@ -245,18 +245,6 @@ void gatt_cb(struct bt_conn *conn, uint8_t err,
 	LOG_INF("Gatt write callback: err %d", err);
 }
 
-uint8_t gatt_read_cb(struct bt_conn *conn, uint8_t err,
-		     struct bt_gatt_read_params *params,
-		     const void *data, uint16_t length)
-{
-	LOG_INF("Gatt read callback: err %d len %d", err, length);
-
-	memcpy(gatt_data, data, length);
-	LOG_HEXDUMP_INF(gatt_data, length, "Read data: ");
-
-	return BT_GATT_ITER_STOP;
-}
-
 static void gen_data(uint8_t* buf, uint16_t len)
 {
 	for(int i=0; i<len; i++) {
@@ -289,7 +277,6 @@ void main(void)
 {
 	int err;
 	err = bt_enable(NULL);
-	struct bt_gatt_read_params gatt_read_params;
 	struct bt_gatt_exchange_params gatt_mtu_params;
 
 	if (err) {
@@ -316,12 +303,6 @@ void main(void)
 		gatt_params.length = 190;
 		gatt_params.offset = 0;
 		gatt_params.func = gatt_cb;
-
-		/* Prepare gatt read */
-		gatt_read_params.func = gatt_read_cb;
-		gatt_read_params.handle_count = 1;
-		gatt_read_params.single.handle = char_handle;
-		gatt_read_params.single.offset = 0;
 
 		/* Increase MTU */
 		gatt_mtu_params.func = gatt_mtu_cb;
