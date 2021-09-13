@@ -47,19 +47,18 @@ static uint8_t discover_func(struct bt_conn *conn,
 	int err;
 
 	if (!attr) {
-		LOG_INF("No more attributes, discovery complete");
+		/* LOG_INF("No more attributes, discovery complete"); */
 		(void)memset(params, 0, sizeof(*params));
 		return BT_GATT_ITER_STOP;
 	}
 
-	LOG_INF("[ATTRIBUTE] handle %u", attr->handle);
+	/* LOG_INF("[ATTRIBUTE] handle %u", attr->handle); */
 
 	if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_DECLARE_128(TEST_SERVICE_UUID))) {
 		memcpy(&uuid, BT_UUID_DECLARE_128(TEST_CHARACTERISTIC_UUID), sizeof(uuid));
 		discover_params.uuid = &uuid.uuid;
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
-		LOG_INF("Discovered service");
 
 		err = bt_gatt_discover(conn, &discover_params);
 		if (err) {
@@ -82,14 +81,14 @@ static bool eir_found(struct bt_data *data, void *user_data)
 	switch (data->type) {
 	case BT_DATA_UUID128_ALL:
 		if(data->data_len < 16) return false;
-		LOG_INF("UUID128, len %d", data->data_len);
+		/* LOG_INF("UUID128, len %d", data->data_len); */
 
 		struct bt_le_conn_param *param;
 		struct bt_uuid_128 uuid;
 		int err;
 
 		bt_uuid_create(&uuid.uuid, data->data, 16);
-		LOG_HEXDUMP_INF(&uuid.val[0], data->data_len, "Adv data: ");
+		/* LOG_HEXDUMP_INF(&uuid.val[0], data->data_len, "Adv data: "); */
 
 		if (bt_uuid_cmp(&uuid.uuid, BT_UUID_DECLARE_128(TEST_SERVICE_UUID)))
 			return false;
