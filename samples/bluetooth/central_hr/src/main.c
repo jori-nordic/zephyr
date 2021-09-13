@@ -110,10 +110,6 @@ static bool eir_found(struct bt_data *data, void *user_data)
 			id++;
 		}
 
-		/* Restart scanning to connect to the rest of peripherals */
-		if(id < NUM_ML)
-			start_scan();
-
 		return false;
 	}
 
