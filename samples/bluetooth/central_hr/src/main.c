@@ -31,6 +31,7 @@ static void start_scan(void);
 static struct bt_conn *connections[NUM_ML];
 static uint8_t conns = 0;
 static uint8_t big_mtu = 0;
+static uint8_t param_updated = 0;
 
 static struct bt_uuid_128 uuid = BT_UUID_INIT_128(0);
 static struct bt_gatt_discover_params discover_params;
@@ -199,9 +200,9 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		}
 
 		if(conns < NUM_ML-1) {
-			conns++;
 			start_scan();
 		}
+		conns++;
 	}
 }
 
@@ -231,13 +232,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		start_scan();
 		if(big_mtu) big_mtu--;
 		if(conns) conns--;
+		if(param_updated) param_updated--;
 	}
 }
-
-static struct bt_conn_cb conn_callbacks = {
-	.connected = connected,
-	.disconnected = disconnected,
-};
 
 void gatt_cb(struct bt_conn *conn, uint8_t err,
 	     struct bt_gatt_write_params *params)
@@ -273,6 +270,32 @@ void send_gatt_write_wo_rsp(struct bt_conn *conn, void *data)
 	}
 }
 
+void update_conn_params(struct bt_conn *conn, void *data)
+{
+	const struct bt_le_conn_param param =
+		BT_LE_CONN_PARAM_INIT(6, 6, 0, 100);
+
+	int err = bt_conn_le_param_update(conn, &param);
+
+	if(err) {
+		LOG_ERR("Conn Param Update failed (err %d)", err);
+	}
+}
+
+void conn_param_cb(struct bt_conn *conn,
+		   uint16_t interval, uint16_t latency, uint16_t timeout)
+{
+	LOG_INF("Conn param update (%u): %d, %d, %d",
+		(uint32_t)conn, interval, latency, timeout);
+	param_updated++;
+}
+
+static struct bt_conn_cb conn_callbacks = {
+	.connected = connected,
+	.disconnected = disconnected,
+	.le_param_updated = conn_param_cb,
+};
+
 void main(void)
 {
 	int err;
@@ -292,17 +315,21 @@ void main(void)
 
 	while(1)
 	{
-		/* Wait for discovery to complete
-		 * -> for all connections */
+		/* Wait for discovery to complete on one device */
 		LOG_INF("Waiting for discovery..");
 		while(!char_handle) {k_msleep(2000);};
 
-		/* Prepare gatt write */
-		gatt_params.data = gatt_data;
-		gatt_params.handle = char_handle;
-		gatt_params.length = 190;
-		gatt_params.offset = 0;
-		gatt_params.func = gatt_cb;
+		/* Wait for all devices to connect */
+		LOG_INF("Waiting for all conns");
+		while(conns < NUM_ML) {k_msleep(2000);}
+
+		/* Update conn params */
+		LOG_INF("Waiting for conn param update..");
+		bt_conn_foreach(BT_CONN_TYPE_LE, update_conn_params, NULL);
+		while(param_updated < NUM_ML) {
+			k_msleep(2000);
+			LOG_INF("Waiting for conn param update..");
+		}
 
 		/* Increase MTU */
 		gatt_mtu_params.func = gatt_mtu_cb;
@@ -313,8 +340,16 @@ void main(void)
 		LOG_INF("Waiting for MTU update..");
 		while(big_mtu < NUM_ML) {k_msleep(2000);}
 
+		/* Prepare gatt write */
+		gatt_params.data = gatt_data;
+		gatt_params.handle = char_handle;
+		gatt_params.length = 20;
+		gatt_params.offset = 0;
+		gatt_params.func = gatt_cb;
+
 		LOG_INF("Entering main loop");
 		LOG_INF("Char handle: 0x%x", char_handle);
+
 		while(char_handle) { /* Stops when disconnected */
 			bt_conn_foreach(BT_CONN_TYPE_LE, send_gatt_write_wo_rsp, NULL);
 		}
