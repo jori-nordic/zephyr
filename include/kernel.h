@@ -22,7 +22,11 @@
 #define GP5 (1 << 31)
 #define GP6 (1 << 26)
 #define GP7 (1 << 27)
-#define GPX (GP0 | GP1 | GP2 | GP3 | GP4 | GP5 | GP6 | GP7)
+#define GP8 (1 << 20)
+#define GP9 (1 << 21)
+#define GP10 (1 << 22)
+#define GP11 (1 << 23)
+#define GPX (GP0 | GP1 | GP2 | GP3 | GP4 | GP5 | GP6 | GP7 | GP8 | GP9 | GP10 | GP11)
 
 #if !defined(_ASMLANGUAGE)
 #include <kernel_includes.h>
