@@ -260,6 +260,14 @@ void send_gatt_write_wo_rsp(struct bt_conn *conn, void *data)
 						 gatt_params.data,
 						 gatt_params.length,
 						 false);
+
+	/* Uncomment this to see buffer refill working */
+	/* err |= bt_gatt_write_without_response(conn, */
+	/* 				     gatt_params.handle, */
+	/* 				     gatt_params.data, */
+	/* 				     gatt_params.length, */
+	/* 				     false); */
+
 	if(err) {
 		LOG_ERR("Write failed (err %d)", err);
 	}
