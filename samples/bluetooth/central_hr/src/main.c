@@ -328,13 +328,13 @@ void main(void)
 		}
 
 		/* Increase MTU */
-		gatt_mtu_params.func = gatt_mtu_cb;
-		for(int idx = 0; idx < NUM_ML; idx++) {
-			bt_gatt_exchange_mtu(connections[idx], &gatt_mtu_params);
-		}
+		/* gatt_mtu_params.func = gatt_mtu_cb; */
+		/* for(int idx = 0; idx < NUM_ML; idx++) { */
+		/* 	bt_gatt_exchange_mtu(connections[idx], &gatt_mtu_params); */
+		/* } */
 
-		LOG_INF("Waiting for MTU update..");
-		while(big_mtu < NUM_ML) {k_msleep(2000);}
+		/* LOG_INF("Waiting for MTU update.."); */
+		/* while(big_mtu < NUM_ML) {k_msleep(2000);} */
 
 		/* Prepare gatt write */
 		gatt_params.data = gatt_data;
