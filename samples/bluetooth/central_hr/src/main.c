@@ -179,7 +179,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		start_scan();
 	} else {
 		/* Start GATT discovery process for only the first device */
-		if(conn_idx == 0) {
+		if(0) {
 			memcpy(&uuid, BT_UUID_DECLARE_128(TEST_SERVICE_UUID), sizeof(uuid));
 			discover_params.uuid = &uuid.uuid;
 			discover_params.func = discover_func;
@@ -312,7 +312,8 @@ void main(void)
 	{
 		/* Wait for discovery to complete on one device */
 		LOG_INF("Waiting for discovery..");
-		while(!char_handle) {k_msleep(2000);};
+		/* while(!char_handle) {k_msleep(2000);}; */
+		char_handle = 0x12;
 
 		/* Wait for all devices to connect */
 		LOG_INF("Waiting for all conns");
