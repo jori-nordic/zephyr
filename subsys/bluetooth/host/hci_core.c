@@ -414,6 +414,8 @@ static void hci_data_buf_overflow(struct net_buf *buf)
 	BT_WARN("Data buffer overflow (link type 0x%02x)", evt->link_type);
 }
 
+extern struct k_sem   log_process_thread_sem;
+
 static void hci_num_completed_packets(struct net_buf *buf)
 {
 	struct bt_hci_evt_num_completed_packets *evt = (void *)buf->data;
@@ -430,7 +432,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 		handle = sys_le16_to_cpu(evt->h[i].handle);
 		count = sys_le16_to_cpu(evt->h[i].count);
 
-		BT_DBG("handle %u count %u", handle, count);
+		BT_ERR("NCP h %u c %u", handle, count);
 
 		conn = bt_conn_lookup_handle(handle);
 		if (!conn) {
@@ -457,6 +459,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 			if (!node) {
 				BT_ERR("packets count mismatch");
+				k_sem_give(&log_process_thread_sem);
 				break;
 			}
 
