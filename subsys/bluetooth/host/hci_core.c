@@ -424,6 +424,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 	BT_DBG("num_handles %u", evt->num_handles);
 
 	/* NRF_P0->OUTSET = GP3; */
+	NRF_P0->OUTSET = GP4;
 
 	for (i = 0; i < evt->num_handles; i++) {
 		uint16_t handle, count;
@@ -456,10 +457,18 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 			node = sys_slist_get(&conn->tx_pending);
 			irq_unlock(key);
+	NRF_P0->OUTCLR = GP4;
 
 			if (!node) {
+				/* We get here after a while, usually 1-5seconds */
+				/* Then we are not able to refill the buffers anymore, or seldomly */
+				NRF_P0->OUTSET = GP2;
+				__NOP();
+				__NOP();
+				__NOP();
 				BT_ERR("packets count mismatch");
 				k_sem_give(&log_process_thread_sem);
+				NRF_P0->OUTCLR = GP2;
 				break;
 			}
 
@@ -470,6 +479,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 			tx->pending_no_cb = 0U;
 			sys_slist_append(&conn->tx_complete, &tx->node);
 			irq_unlock(key);
+	NRF_P0->OUTSET = GP4;
 
 			k_work_submit(&conn->tx_complete_work);
 			k_sem_give(bt_conn_get_pkts(conn));
@@ -477,6 +487,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 		bt_conn_unref(conn);
 	}
+	NRF_P0->OUTCLR = GP4;
 
 	#ifdef CONFIG_TRACING
 	ctf_custom((ctf_bounded_string_t){"num_cmp_pkt end"});
