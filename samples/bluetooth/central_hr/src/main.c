@@ -253,8 +253,7 @@ void gatt_mtu_cb(struct bt_conn *conn, uint8_t err,
 
 void send_gatt_write_wo_rsp(struct bt_conn *conn, void *data)
 {
-	LOG_INF("Gatt write conn 0x%x", (uint32_t)conn);
-	gen_data(gatt_data, sizeof(gatt_data));
+	/* LOG_INF("Gatt write conn 0x%x", (uint32_t)conn); */
 	int err = bt_gatt_write_without_response(conn,
 						 gatt_params.handle,
 						 gatt_params.data,
@@ -354,6 +353,7 @@ void main(void)
 		LOG_INF("Entering main loop");
 		LOG_INF("Char handle: 0x%x", char_handle);
 
+		gen_data(gatt_data, 20);
 		while(char_handle) { /* Stops when disconnected */
 			bt_conn_foreach(BT_CONN_TYPE_LE, send_gatt_write_wo_rsp, NULL);
 		}
