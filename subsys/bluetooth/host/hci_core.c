@@ -433,7 +433,7 @@ static void hci_num_completed_packets(struct net_buf *buf)
 		handle = sys_le16_to_cpu(evt->h[i].handle);
 		count = sys_le16_to_cpu(evt->h[i].count);
 
-		BT_ERR("NCP h %u c %u", handle, count);
+		BT_ERR("\t\t\tNCP h %u c %u", handle, count);
 
 		conn = bt_conn_lookup_handle(handle);
 		if (!conn) {

@@ -747,6 +747,7 @@ static void process_unack_tx(struct bt_conn *conn)
 			continue;
 		}
 
+		BT_ERR("Unack TX");
 		node = sys_slist_get(&conn->tx_pending);
 		irq_unlock(key);
 
