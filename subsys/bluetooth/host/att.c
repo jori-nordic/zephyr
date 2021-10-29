@@ -412,9 +412,9 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		buf = bt_l2cap_create_pdu_timeout(NULL, 0, BT_ATT_TIMEOUT);
 		break;
 	default:
-		NRF_P0->OUTSET = GP0;
+		/* NRF_P0->OUTSET = GP0; */
 		buf = bt_l2cap_create_pdu(NULL, 0);
-		NRF_P0->OUTCLR = GP0;
+		/* NRF_P0->OUTCLR = GP0; */
 	}
 
 	if (!buf) {
