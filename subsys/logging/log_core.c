@@ -230,8 +230,8 @@ static void z_log_msg_post_finalize(void)
 	} else if (CONFIG_LOG_PROCESS_TRIGGER_THRESHOLD) {
 		if ((buffered_cnt == CONFIG_LOG_PROCESS_TRIGGER_THRESHOLD) &&
 		    (proc_tid != NULL)) {
-			/* k_timer_stop(&log_process_thread_timer); */
-			/* k_sem_give(&log_process_thread_sem); */
+			k_timer_stop(&log_process_thread_timer);
+			k_sem_give(&log_process_thread_sem);
 		}
 	} else {
 		/* No action needed. Message processing will be triggered by the
@@ -1388,7 +1388,7 @@ bool z_log_msg2_pending(void)
 
 static void log_process_thread_timer_expiry_fn(struct k_timer *timer)
 {
-	/* k_sem_give(&log_process_thread_sem); */
+	k_sem_give(&log_process_thread_sem);
 }
 
 static void log_process_thread_func(void *dummy1, void *dummy2, void *dummy3)
