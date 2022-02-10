@@ -243,7 +243,7 @@ struct net_buf *net_buf_alloc_len(struct net_buf_pool *pool, size_t size,
 
 	__ASSERT_NO_MSG(pool);
 
-	NET_BUF_DBG("%s():%d: pool %p size %zu", func, line, pool, size);
+	NET_BUF_DBG("%s():%d: pool %p (%s) size %zu", func, line, pool, pool->name, size);
 
 	/* We need to prevent race conditions
 	 * when accessing pool->uninit_count.
@@ -414,7 +414,7 @@ struct net_buf *net_buf_get(struct k_fifo *fifo, k_timeout_t timeout)
 {
 	struct net_buf *buf, *frag;
 
-	NET_BUF_DBG("%s():%d: fifo %p", func, line, fifo);
+	/* NET_BUF_DBG("%s():%d: fifo %p", func, line, fifo); */
 
 	buf = k_fifo_get(fifo, timeout);
 	if (!buf) {

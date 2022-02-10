@@ -175,9 +175,34 @@ struct net_buf *bt_buf_get_evt(uint8_t evt, bool discardable, k_timeout_t timeou
 	return bt_buf_get_rx(BT_BUF_EVT, timeout);
 }
 
+volatile void* watch_addr = 0;
+void config_watch(void* addr)
+{
+	return;
+	watch_addr = addr;
+	if(addr) {
+		DWT->COMP1 = (uint32_t)addr;
+		DWT->MASK1 = 0;               /* match all comparator bits, don't ignore any */
+		DWT->FUNCTION1 = (1 << 11)    /* DATAVSIZE 1 - match whole word */
+			| (1 << 1) | (1 << 2);/* generate a watchpoint event on write */
+	} else {
+		DWT->COMP1 = 0;
+		DWT->MASK1 = 0;
+		DWT->FUNCTION1 = 0;
+	}
+}
+
 int bt_recv(struct net_buf *buf)
 {
 	BT_DBG("buf %p len %u", buf, buf->len);
+
+	/* LOG_ERR("%x %x", (uint8_t)(*buf->user_data), bt_buf_get_type(buf)); */
+	if(buf->data[0] == 0x02 && buf->data[1] == 0x13) {
+		BT_ASSERT(false);
+		LOG_HEXDUMP_ERR(buf->data, buf->len, "Raw packet");
+		/* LOG_PANIC(); */
+		k_panic();
+	}
 
 	bt_monitor_send(bt_monitor_opcode(buf), buf->data, buf->len);
 
@@ -185,9 +210,11 @@ int bt_recv(struct net_buf *buf)
 	    raw_mode == BT_HCI_RAW_MODE_H4) {
 		switch (bt_buf_get_type(buf)) {
 		case BT_BUF_EVT:
+			LOG_WRN("e");
 			net_buf_push_u8(buf, H4_EVT);
 			break;
 		case BT_BUF_ACL_IN:
+			LOG_WRN("d");
 			net_buf_push_u8(buf, H4_ACL);
 			break;
 		case BT_BUF_ISO_IN:
@@ -202,8 +229,19 @@ int bt_recv(struct net_buf *buf)
 		}
 	}
 
+	LOG_HEXDUMP_WRN(buf->data, buf->len, "BT RECV");
+
+	/* arm_core_mpu_configure_dynamic_mpu_regions(regions, 1); */
+
+/* void arm_core_mpu_configure_dynamic_mpu_regions( */
+/* 	const struct z_arm_mpu_partition dynamic_regions[], */
+/* 	uint8_t regions_num); */
+
 	/* Queue to RAW rx queue */
 	net_buf_put(raw_rx, buf);
+
+	/* Setup watchpoint on data start */
+	config_watch((void*)(buf->data));
 
 	return 0;
 }
