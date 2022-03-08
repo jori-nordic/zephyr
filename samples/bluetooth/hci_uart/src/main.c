@@ -36,9 +36,6 @@ static K_THREAD_STACK_DEFINE(tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
 static struct k_thread tx_thread_data;
 static K_FIFO_DEFINE(tx_queue);
 
-/* RX in terms of bluetooth communication */
-static K_FIFO_DEFINE(uart_tx_queue);
-
 #define H4_CMD 0x01
 #define H4_ACL 0x02
 #define H4_SCO 0x03
@@ -204,39 +201,15 @@ static void rx_isr(void)
 	} while (read);
 }
 
-static void tx_isr(void)
-{
-	static struct net_buf *buf;
-	int len;
-
-	if (!buf) {
-		buf = net_buf_get(&uart_tx_queue, K_NO_WAIT);
-		if (!buf) {
-			uart_irq_tx_disable(hci_uart_dev);
-			return;
-		}
-	}
-
-	len = uart_fifo_fill(hci_uart_dev, buf->data, buf->len);
-	net_buf_pull(buf, len);
-	if (!buf->len) {
-		net_buf_unref(buf);
-		buf = NULL;
-	}
-}
-
 static void bt_uart_isr(const struct device *unused, void *user_data)
 {
 	ARG_UNUSED(unused);
 	ARG_UNUSED(user_data);
+	LOG_DBG("UART ISR");
 
 	if (!(uart_irq_rx_ready(hci_uart_dev) ||
 	      uart_irq_tx_ready(hci_uart_dev))) {
 		LOG_DBG("spurious interrupt");
-	}
-
-	if (uart_irq_tx_ready(hci_uart_dev)) {
-		tx_isr();
 	}
 
 	if (uart_irq_rx_ready(hci_uart_dev)) {
@@ -271,8 +244,9 @@ static int h4_send(struct net_buf *buf)
 	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf),
 		    buf->len);
 
-	net_buf_put(&uart_tx_queue, buf);
-	uart_irq_tx_enable(hci_uart_dev);
+	while (buf->len) {
+		uart_poll_out(hci_uart_dev, net_buf_pull_u8(buf));
+	}
 
 	return 0;
 }
@@ -394,7 +368,10 @@ void main(void)
 	while (1) {
 		struct net_buf *buf;
 
-		buf = net_buf_get(&rx_queue, K_FOREVER);
+		LOG_DBG("Wait for rx_queue");
+		buf = net_buf_get(&rx_queue, K_SECONDS(1));
+		if(!buf) continue;
+		LOG_DBG("Send");
 		err = h4_send(buf);
 		if (err) {
 			LOG_ERR("Failed to send");
