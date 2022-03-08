@@ -63,7 +63,7 @@
  * to be the same length. Size also needs to be compatible with the
  * slave device used (e.g. nRF5X max buffer length for SPIS is 255).
  */
-#define SPI_MAX_MSG_LEN		255 /* As defined by X-NUCLEO-IDB04A1 BSP */
+#define SPI_MAX_MSG_LEN		300 /* As defined by X-NUCLEO-IDB04A1 BSP */
 
 static uint8_t rxmsg[SPI_MAX_MSG_LEN];
 static uint8_t txmsg[SPI_MAX_MSG_LEN];

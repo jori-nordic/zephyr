@@ -49,7 +49,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #define EVT_BLUE_INITIALIZED   0x01
 
 /* Needs to be aligned with the SPI master buffer size */
-#define SPI_MAX_MSG_LEN        255
+#define SPI_MAX_MSG_LEN        300
 
 static uint8_t rxmsg[SPI_MAX_MSG_LEN];
 static struct spi_buf rx;
