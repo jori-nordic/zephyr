@@ -275,6 +275,8 @@ static void uarte_nrfx_isr_int(void *arg)
 	}
 
 	if (config->flags & UARTE_CFG_FLAG_LOW_POWER) {
+		/* Shouldn't get here */
+		k_panic();
 		int key = irq_lock();
 
 		if (nrf_uarte_event_check(uarte, NRF_UARTE_EVENT_TXSTOPPED)) {

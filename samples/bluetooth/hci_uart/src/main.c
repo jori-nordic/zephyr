@@ -28,7 +28,7 @@
 #include <bluetooth/hci_raw.h>
 
 #define LOG_MODULE_NAME hci_uart
-LOG_MODULE_REGISTER(LOG_MODULE_NAME);
+LOG_MODULE_REGISTER(LOG_MODULE_NAME, 4);
 
 static const struct device *hci_uart_dev =
 	DEVICE_DT_GET(DT_CHOSEN(zephyr_bt_c2h_uart));
@@ -225,6 +225,25 @@ static void tx_isr(void)
 	}
 }
 
+#if defined(CONFIG_SOC_NRF5340_CPUAPP)
+#define UART_INST NRF_UARTE0_S
+static void print_events(void)
+{
+	LOG_DBG("CTS: %d", UART_INST->EVENTS_CTS);
+	LOG_DBG("NCTS: %d", UART_INST->EVENTS_NCTS);
+	LOG_DBG("RXDRDY: %d", UART_INST->EVENTS_RXDRDY);
+	LOG_DBG("ENDRX: %d", UART_INST->EVENTS_ENDRX);
+	LOG_DBG("TXDRDY: %d", UART_INST->EVENTS_TXDRDY);
+	LOG_DBG("ENDTX: %d", UART_INST->EVENTS_ENDTX);
+	LOG_DBG("ERROR: %d", UART_INST->EVENTS_ERROR);
+	LOG_DBG("RXTO: %d", UART_INST->EVENTS_RXTO);
+	LOG_DBG("RXSTARTED: %d", UART_INST->EVENTS_RXSTARTED);
+	LOG_DBG("TXSTARTED: %d", UART_INST->EVENTS_TXSTARTED);
+	LOG_DBG("TXSTOPPED: %d", UART_INST->EVENTS_TXSTOPPED);
+	LOG_DBG("INTEN: 0x%X", UART_INST->INTEN);
+}
+#endif
+
 static void bt_uart_isr(const struct device *unused, void *user_data)
 {
 	ARG_UNUSED(unused);
@@ -233,6 +252,10 @@ static void bt_uart_isr(const struct device *unused, void *user_data)
 	if (!(uart_irq_rx_ready(hci_uart_dev) ||
 	      uart_irq_tx_ready(hci_uart_dev))) {
 		LOG_DBG("spurious interrupt");
+#if defined(CONFIG_SOC_NRF5340_CPUAPP)
+		print_events();
+#endif
+		return;
 	}
 
 	if (uart_irq_tx_ready(hci_uart_dev)) {
@@ -394,6 +417,7 @@ void main(void)
 	while (1) {
 		struct net_buf *buf;
 
+		LOG_DBG("wait on rx_queue");
 		buf = net_buf_get(&rx_queue, K_FOREVER);
 		err = h4_send(buf);
 		if (err) {
