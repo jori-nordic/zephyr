@@ -117,6 +117,9 @@ static void rx_isr(void)
 			sizeof(struct bt_hci_acl_hdr))];
 	int read;
 
+	LOG_HEXDUMP_WRN(buf->data, buf->len,
+		"RX IRQ");
+
 	do {
 		switch (state) {
 		case ST_IDLE:
@@ -213,9 +216,14 @@ static void tx_isr(void)
 		buf = net_buf_get(&uart_tx_queue, K_NO_WAIT);
 		if (!buf) {
 			uart_irq_tx_disable(hci_uart_dev);
+			LOG_ERR("irq: no buf");
 			return;
 		}
 	}
+
+	LOG_ERR("irq: buf");
+	LOG_HEXDUMP_WRN(buf->data, buf->len,
+		"TX IRQ");
 
 	len = uart_fifo_fill(hci_uart_dev, buf->data, buf->len);
 	net_buf_pull(buf, len);
