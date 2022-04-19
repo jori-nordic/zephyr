@@ -1607,6 +1607,7 @@ static int uarte_nrfx_fifo_read(const struct device *dev,
 	int num_rx = 0;
 	NRF_UARTE_Type *uarte = get_uarte_instance(dev);
 	const struct uarte_nrfx_data *data = dev->data;
+	static uint32_t index = 0;
 
 	if (size > 0 && nrf_uarte_event_check(uarte, NRF_UARTE_EVENT_ENDRX)) {
 		/* Clear the interrupt */
@@ -1615,14 +1616,26 @@ static int uarte_nrfx_fifo_read(const struct device *dev,
 		uint32_t rx_amount = nrf_uarte_rx_amount_get(uarte);
 		num_rx = MIN(size, rx_amount);
 
-		memcpy(rx_data, data->int_driven->rx_buffer, num_rx);
+		memcpy(rx_data, data->int_driven->rx_buffer + index, num_rx);
+		index = 0;
 
 		/* Attempt reading the rest in a single transfer */
-		if(num_rx != size)
-			nrf_uarte_rx_buffer_set(uarte, data->int_driven->rx_buffer, size - num_rx);
-		else
+		if(size > num_rx) {
+			uint32_t newsize = size - num_rx;
+			if (newsize > data->int_driven->rx_buff_size)
+				newsize = data->int_driven->rx_buff_size;
+
+			nrf_uarte_rx_buffer_set(uarte, data->int_driven->rx_buffer, newsize);
+			nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+		} else if (size < num_rx) {
+			/* We have read less than what's in the buffer. */
+			/* Store an index to the rest of the data and do not
+			 * attempt to read more. */
+			index = num_rx - size;
+		} else {
 			nrf_uarte_rx_buffer_set(uarte, data->int_driven->rx_buffer, 1);
-		nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+			nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+		}
 	}
 
 	return num_rx;
