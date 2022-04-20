@@ -196,6 +196,7 @@ static void bt_rpmsg_rx(const uint8_t *data, size_t len)
 	struct net_buf *buf = NULL;
 	size_t remaining = len;
 
+	BT_ERR("bt_rpmsg_rx: len %d", len);
 	BT_HEXDUMP_DBG(data, len, "RPMsg data:");
 
 	pkt_indicator = *data++;
