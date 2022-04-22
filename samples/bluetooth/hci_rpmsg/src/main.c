@@ -23,6 +23,10 @@
 #include <bluetooth/buf.h>
 #include <bluetooth/hci_raw.h>
 
+#include <debug/ppi_trace.h>
+#include <hal/nrf_gpiote.h>
+#include <nrfx_dppi.h>
+
 #define BT_DBG_ENABLED 0
 #define LOG_MODULE_NAME hci_rpmsg
 #include "common/log.h"
@@ -221,6 +225,7 @@ static void hci_rpmsg_send(struct net_buf *buf)
 
 	LOG_HEXDUMP_DBG(buf->data, buf->len, "Final HCI buffer:");
 
+	NRF_P1->OUTSET = GP0;
 	do {
 		ret = ipc_service_send(&hci_ept, buf->data, buf->len);
 		if (ret < 0) {
@@ -235,6 +240,7 @@ static void hci_rpmsg_send(struct net_buf *buf)
 	} while (ret < 0);
 
 	LOG_INF("Sent message of %d bytes.", ret);
+	NRF_P1->OUTCLR = GP0;
 
 	net_buf_unref(buf);
 }
@@ -265,6 +271,87 @@ static struct ipc_ept_cfg hci_ept_cfg = {
 	},
 };
 
+/** @brief Allocate GPIOTE channel.
+ *
+ * @param pin Pin.
+ *
+ * @return Allocated channel or -1 if failed to allocate.
+ */
+static int gpiote_channel_alloc(uint32_t pin)
+{
+	for (uint8_t channel = 0; channel < GPIOTE_CH_NUM; ++channel) {
+		if (!nrf_gpiote_te_is_enabled(NRF_GPIOTE, channel)) {
+			nrf_gpiote_task_configure(NRF_GPIOTE, channel, pin,
+						  NRF_GPIOTE_POLARITY_TOGGLE,
+						  NRF_GPIOTE_INITIAL_VALUE_LOW);
+			nrf_gpiote_task_enable(NRF_GPIOTE, channel);
+			return channel;
+		}
+	}
+
+	return -1;
+}
+
+/* Convert task address to associated subscribe register */
+#define SUBSCRIBE_ADDR(task) (volatile uint32_t *)(task + 0x80)
+
+/* Convert event address to associated publish register */
+#define PUBLISH_ADDR(evt) (volatile uint32_t *)(evt + 0x80)
+
+void ppi_trace_config_toggle(uint32_t pin, uint32_t ppi_ch)
+{
+	uint32_t task;
+	int gpiote_ch;
+	nrf_gpiote_task_t task_id;
+
+	/* Alloc gpiote channel */
+	gpiote_ch = gpiote_channel_alloc(pin);
+
+	/* Get gpiote task address */
+	task_id = offsetof(NRF_GPIOTE_Type, TASKS_OUT[gpiote_ch]);
+	task = nrf_gpiote_task_address_get(NRF_GPIOTE, task_id);
+
+	/* Hook to already assigned DPPI channel */
+	*SUBSCRIBE_ADDR(task) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch;
+}
+
+void ppi_trace_config_updown(uint32_t pin, uint32_t ppi_ch_set, uint32_t ppi_ch_clr)
+{
+	uint32_t task;
+	int gpiote_ch;
+	nrf_gpiote_task_t task_id;
+
+	/* Alloc gpiote channel */
+	gpiote_ch = gpiote_channel_alloc(pin);
+
+	/* Get gpiote task address */
+	task_id = offsetof(NRF_GPIOTE_Type, TASKS_SET[gpiote_ch]);
+	task = nrf_gpiote_task_address_get(NRF_GPIOTE, task_id);
+
+	/* Hook to already assigned DPPI channel */
+	*SUBSCRIBE_ADDR(task) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch_set;
+
+	/* Get gpiote task address */
+	task_id = offsetof(NRF_GPIOTE_Type, TASKS_CLR[gpiote_ch]);
+	task = nrf_gpiote_task_address_get(NRF_GPIOTE, task_id);
+
+	/* Hook to already assigned DPPI channel */
+	*SUBSCRIBE_ADDR(task) = DPPIC_SUBSCRIBE_CHG_EN_EN_Msk | (uint32_t)ppi_ch_clr;
+}
+
+static void setup_pin_toggling(void)
+{
+/* #define HAL_DPPI_REM_EVENTS_START_CHANNEL_IDX     3U */
+#define HAL_DPPI_RADIO_EVENTS_READY_CHANNEL_IDX   4U
+#define HAL_DPPI_RADIO_EVENTS_ADDRESS_CHANNEL_IDX 5U
+#define HAL_DPPI_RADIO_EVENTS_END_CHANNEL_IDX     6U
+#define HAL_DPPI_RADIO_EVENTS_DISABLED_CH_IDX     7U
+
+	ppi_trace_config_updown(32 + 5,
+				HAL_DPPI_RADIO_EVENTS_ADDRESS_CHANNEL_IDX,
+				HAL_DPPI_RADIO_EVENTS_DISABLED_CH_IDX);
+}
+
 void main(void)
 {
 	int err;
@@ -275,8 +362,13 @@ void main(void)
 
 	LOG_DBG("Start");
 
+	NRF_P1->DIRSET = GPNET;
+	NRF_P1->OUTSET = GPNET;
 	/* Enable the raw interface, this will in turn open the HCI driver */
 	bt_enable_raw(&rx_queue);
+	NRF_P1->OUTCLR = GPNET;
+
+	setup_pin_toggling();
 
 	/* Spawn the TX thread and start feeding commands and data to the
 	 * controller

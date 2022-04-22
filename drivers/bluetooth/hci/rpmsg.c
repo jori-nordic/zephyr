@@ -270,7 +270,9 @@ static void hci_ept_bound(void *priv)
 
 static void hci_ept_recv(const void *data, size_t len, void *priv)
 {
+	NRF_P1->OUTSET = GP3;
 	bt_rpmsg_rx(data, len);
+	NRF_P1->OUTCLR = GP3;
 }
 
 static struct ipc_ept_cfg hci_ept_cfg = {

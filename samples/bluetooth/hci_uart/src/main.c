@@ -385,8 +385,11 @@ void main(void)
 	LOG_DBG("Start");
 	__ASSERT(hci_uart_dev, "UART device is NULL");
 
+	NRF_P1->DIRSET = GPAPP;
+	NRF_P1->OUTSET = GPAPP;
 	/* Enable the raw interface, this will in turn open the HCI driver */
 	bt_enable_raw(&rx_queue);
+	NRF_P1->OUTCLR = GPAPP;
 
 	if (IS_ENABLED(CONFIG_BT_WAIT_NOP)) {
 		/* Issue a Command Complete with NOP */
@@ -433,3 +436,32 @@ void main(void)
 		}
 	}
 }
+
+/** @brief Allow access to specific GPIOs for the network core.
+ *
+ * Function is executed very early during system initialization to make sure
+ * that the network core is not started yet. More pins can be added if the
+ * network core needs them.
+ */
+static void transfer_gpio(bool port, uint32_t num)
+{
+	if(port)
+		NRF_P1_S->PIN_CNF[num] = (GPIO_PIN_CNF_MCUSEL_NetworkMCU <<
+						GPIO_PIN_CNF_MCUSEL_Pos);
+	else
+		NRF_P0_S->PIN_CNF[num] = (GPIO_PIN_CNF_MCUSEL_NetworkMCU <<
+						GPIO_PIN_CNF_MCUSEL_Pos);
+}
+
+static int network_gpio_allow(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	transfer_gpio(1, 4);
+	transfer_gpio(1, 5);
+	transfer_gpio(1, 6);
+
+	return 0;
+}
+
+SYS_INIT(network_gpio_allow, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
