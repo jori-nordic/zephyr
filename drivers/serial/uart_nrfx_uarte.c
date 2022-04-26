@@ -114,9 +114,12 @@ struct uarte_async_cb {
 struct uarte_nrfx_int_driven {
 	uart_irq_callback_user_data_t cb; /**< Callback function pointer */
 	void *cb_data; /**< Callback function arg */
+	uint8_t *rx_buffer;
+	uint16_t rx_buff_size;
 	uint8_t *tx_buffer;
 	uint16_t tx_buff_size;
 	volatile bool disable_tx_irq;
+	volatile uint32_t rx_index;
 #ifdef CONFIG_PM_DEVICE
 	bool rx_irq_enabled;
 #endif
@@ -1510,7 +1513,11 @@ static int uarte_nrfx_poll_in(const struct device *dev, unsigned char *c)
 		return -1;
 	}
 
+#ifdef UARTE_INTERRUPT_DRIVEN
+	*c = *data->int_driven->rx_buffer;
+#else
 	*c = data->rx_data;
+#endif
 
 	/* clear the interrupt */
 	nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ENDRX);
@@ -1604,10 +1611,31 @@ static int uarte_nrfx_fifo_read(const struct device *dev,
 		/* Clear the interrupt */
 		nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ENDRX);
 
-		/* Receive a character */
-		rx_data[num_rx++] = (uint8_t)data->rx_data;
+		uint32_t rx_amount = nrf_uarte_rx_amount_get(uarte);
+		num_rx = MIN(size, rx_amount);
 
-		nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+		memcpy(rx_data,
+		       data->int_driven->rx_buffer + data->int_driven->rx_index,
+		       num_rx);
+		data->int_driven->rx_index = 0;
+
+		if(size > num_rx) {
+			/* Attempt reading the remaining bytes in a single transfer. */
+			nrf_uarte_rx_buffer_set(uarte,
+						data->int_driven->rx_buffer,
+						MIN(data->int_driven->rx_buff_size,
+						    size - num_rx));
+			nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+		} else if (size < num_rx) {
+			/* We have read less than what's in the buffer. */
+			/* Store an index to the rest of the data and do not
+			 * attempt to read more. */
+			data->int_driven->rx_index = num_rx - size;
+		} else {
+			/* If we have read the whole buffer, restart RX for only 1 byte. */
+			nrf_uarte_rx_buffer_set(uarte, data->int_driven->rx_buffer, 1);
+			nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+		}
 	}
 
 	return num_rx;
@@ -1831,7 +1859,11 @@ static int uarte_instance_init(const struct device *dev,
 		if (!cfg->disable_rx) {
 			nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ENDRX);
 
+#ifdef UARTE_INTERRUPT_DRIVEN
+			nrf_uarte_rx_buffer_set(uarte, data->int_driven->rx_buffer, 1);
+#else
 			nrf_uarte_rx_buffer_set(uarte, &data->rx_data, 1);
+#endif
 			nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
 		}
 	}
@@ -2124,8 +2156,13 @@ static int uarte_nrfx_pm_action(const struct device *dev,
 		(static uint8_t uarte##idx##_tx_buffer[\
 			MIN(CONFIG_UART_##idx##_NRF_TX_BUFFER_SIZE,	       \
 			    BIT_MASK(UARTE##idx##_EASYDMA_MAXCNT_SIZE))];      \
+		 static uint8_t uarte##idx##_rx_buffer[			\
+			MIN(CONFIG_UART_##idx##_NRF_TX_BUFFER_SIZE,	       \
+			    BIT_MASK(UARTE##idx##_EASYDMA_MAXCNT_SIZE))];      \
 		 static struct uarte_nrfx_int_driven			       \
 			uarte##idx##_int_driven = {			       \
+				.rx_buffer = uarte##idx##_rx_buffer,	       \
+				.rx_buff_size = sizeof(uarte##idx##_rx_buffer),\
 				.tx_buffer = uarte##idx##_tx_buffer,	       \
 				.tx_buff_size = sizeof(uarte##idx##_tx_buffer),\
 			};))
