@@ -571,7 +571,11 @@ static void att_send_process(struct bt_att *att)
 		}
 	}
 
-	if (err < 0) {
+	if (err == -ENOTCONN) {
+		/* If we are not connected anymore, free the buffer */
+		BT_ERR("Freeing buf %p id %d", buf, net_buf_id(buf));
+		net_buf_unref(buf);
+	} else if (err < 0) {
 		/* Push it back if it could not be send */
 		k_queue_prepend(&att->tx_queue._queue, buf);
 	}
