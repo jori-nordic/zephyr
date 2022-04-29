@@ -647,6 +647,7 @@ static void conn_cleanup(struct bt_conn *conn)
 {
 	struct net_buf *buf;
 
+	BT_ERR("Conn cleanup");
 	/* Give back any allocated buffers */
 	while ((buf = net_buf_get(&conn->tx_queue, K_NO_WAIT))) {
 		if (tx_data(buf)->tx) {

@@ -149,13 +149,16 @@ K_FIFO_DEFINE(free_att_tx_meta_data);
 
 static struct bt_att_tx_meta_data *tx_meta_data_alloc(void)
 {
-	return k_fifo_get(&free_att_tx_meta_data, K_NO_WAIT);
+	struct bt_att_tx_meta_data *data = k_fifo_get(&free_att_tx_meta_data, K_NO_WAIT);
+	BT_WARN("Alloc %p", data);
+	return data;
 }
 
 static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
 {
 	__ASSERT_NO_MSG(data);
 
+	BT_WARN("Free %p", data);
 	(void)memset(data, 0, sizeof(*data));
 	k_fifo_put(&free_att_tx_meta_data, data);
 }
@@ -2809,12 +2812,13 @@ static void att_chan_detach(struct bt_att_chan *chan)
 {
 	struct net_buf *buf;
 
-	BT_DBG("chan %p", chan);
+	BT_ERR("detach %p", chan);
 
 	sys_slist_find_and_remove(&chan->att->chans, &chan->node);
 
 	/* Release pending buffers */
 	while ((buf = net_buf_get(&chan->tx_queue, K_NO_WAIT))) {
+		BT_ERR("release %p", bt_att_tx_meta_data(buf));
 		tx_meta_data_free(bt_att_tx_meta_data(buf));
 		net_buf_unref(buf);
 	}
@@ -2898,10 +2902,10 @@ static void bt_att_disconnected(struct bt_l2cap_chan *chan)
 	struct bt_att *att = att_chan->att;
 	struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
 
-	BT_DBG("chan %p cid 0x%04x", le_chan, le_chan->tx.cid);
+	BT_ERR("chan %p cid 0x%04x", le_chan, le_chan->tx.cid);
 
 	if (!att_chan->att) {
-		BT_DBG("Ignore disconnect on detached ATT chan");
+		BT_ERR("Ignore disconnect on detached ATT chan");
 		return;
 	}
 
