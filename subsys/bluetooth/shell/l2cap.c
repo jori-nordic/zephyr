@@ -275,6 +275,71 @@ static int cmd_register(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static int cmd_ecred_reconfigure(const struct shell *sh, size_t argc, char *argv[])
+{
+	static struct bt_l2cap_chan * l2cap_ecred_chans[1] = {&l2ch_chan.ch.chan};
+	uint16_t mtu;
+	int err;
+
+	if (!default_conn) {
+		shell_error(sh, "Not connected");
+		return -ENOEXEC;
+	}
+
+	if (!l2ch_chan.ch.chan.conn) {
+		shell_error(sh, "Channel not connected");
+		return -ENOEXEC;
+	}
+
+	mtu = strtoul(argv[1], NULL, 10);
+
+	err = bt_l2cap_ecred_chan_reconfigure(l2cap_ecred_chans, mtu);
+	if (err < 0) {
+		shell_error(sh, "Unable to reconfigure channel (err %d)", err);
+	} else {
+		shell_print(sh, "L2CAP reconfiguration pending");
+	}
+
+	return err;
+}
+
+static int cmd_ecred_connect(const struct shell *sh, size_t argc, char *argv[])
+{
+	static struct bt_l2cap_chan * l2cap_ecred_chans[1] = {&l2ch_chan.ch.chan};
+	uint16_t psm;
+	int err;
+
+	if (!default_conn) {
+		shell_error(sh, "Not connected");
+		return -ENOEXEC;
+	}
+
+	if (l2ch_chan.ch.chan.conn) {
+		shell_error(sh, "Channel already in use");
+		return -ENOEXEC;
+	}
+
+	psm = strtoul(argv[1], NULL, 16);
+
+	if (argc > 2) {
+		int sec;
+
+		sec = *argv[2] - '0';
+
+		l2ch_chan.ch.required_sec_level = sec;
+	}
+
+	err = bt_l2cap_ecred_chan_connect(default_conn, l2cap_ecred_chans, psm);
+	if (err < 0) {
+		shell_error(sh, "Unable to connect to psm %u (err %d)", psm,
+			    err);
+	} else {
+		shell_print(sh, "L2CAP connection pending");
+	}
+
+	return err;
+}
+
 static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 {
 	uint16_t psm;
@@ -455,6 +520,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(l2cap_cmds,
 	SHELL_CMD_ARG(send, NULL, "[number of packets] [length of packet(s)]",
 		      cmd_send, 1, 2),
 	SHELL_CMD_ARG(allowlist, &allowlist_cmds, HELP_NONE, NULL, 1, 0),
+	SHELL_CMD_ARG(ecred-connect, NULL, "<psm> [sec_level]", cmd_ecred_connect, 2, 1),
+	SHELL_CMD_ARG(ecred-reconfigure, NULL, "<mtu>", cmd_ecred_reconfigure, 1, 1),
 	SHELL_SUBCMD_SET_END
 );
 
