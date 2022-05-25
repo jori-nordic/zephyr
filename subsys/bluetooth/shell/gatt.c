@@ -360,6 +360,8 @@ static int cmd_read_uuid(const struct shell *sh, size_t argc, char *argv[])
 {
 	int err;
 
+	sh_global = sh;
+
 	if (!default_conn) {
 		shell_error(sh, "Not connected");
 		return -ENOEXEC;

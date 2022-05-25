@@ -2818,6 +2818,7 @@ int bt_l2cap_ecred_chan_reconfigure(struct bt_l2cap_chan **chans, uint16_t mtu)
 
 		/* validate MTU is not decreased */
 		if (mtu < BT_L2CAP_LE_CHAN(chans[i])->rx.mtu) {
+	BT_DBG("dec mtu");
 			return -EINVAL;
 		}
 	}

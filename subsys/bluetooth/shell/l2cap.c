@@ -31,7 +31,7 @@
 
 #include "bt.h"
 
-#define CREDITS			10
+#define CREDITS			20
 #define DATA_MTU		(23 * CREDITS)
 
 #define L2CAP_POLICY_NONE		0x00
@@ -402,7 +402,7 @@ static int cmd_send(const struct shell *sh, size_t argc, char *argv[])
 		len = strtoul(argv[2], NULL, 10);
 		if (len > DATA_MTU) {
 			shell_print(sh,
-				    "Length exceeds TX MTU for the channel");
+				    "Length exceeds (fixed) TX MTU for the channel");
 			return -ENOEXEC;
 		}
 	}
