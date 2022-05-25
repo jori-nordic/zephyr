@@ -15,6 +15,7 @@
 #include <drivers/timer/system_timer.h>
 #include <kernel.h>
 #include <kernel_internal.h>
+#include <stdlib.h>
 
 static int cmd_kernel_version(const struct shell *shell,
 			      size_t argc, char **argv)
@@ -216,6 +217,17 @@ static int cmd_kernel_stacks(const struct shell *shell,
 }
 #endif
 
+static int cmd_kernel_sleep(const struct shell *shell,
+			    size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	k_msleep(strtoul(argv[1], NULL, 10));
+
+	return 0;
+}
+
 #if defined(CONFIG_REBOOT)
 static int cmd_kernel_reboot_warm(const struct shell *shell,
 				  size_t argc, char **argv)
@@ -260,6 +272,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_kernel,
 #endif
 	SHELL_CMD(uptime, NULL, "Kernel uptime.", cmd_kernel_uptime),
 	SHELL_CMD(version, NULL, "Kernel version.", cmd_kernel_version),
+	SHELL_CMD_ARG(sleep, NULL, "ms", cmd_kernel_sleep, 2, 0),
 	SHELL_SUBCMD_SET_END /* Array terminated. */
 );
 
