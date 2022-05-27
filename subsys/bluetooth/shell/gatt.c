@@ -263,6 +263,7 @@ static int cmd_discover(const struct shell *sh, size_t argc, char *argv[])
 }
 
 static struct bt_gatt_read_params read_params;
+static const struct shell * sh_global;
 
 static uint8_t read_func(struct bt_conn *conn, uint8_t err,
 			 struct bt_gatt_read_params *params,
@@ -273,6 +274,8 @@ static uint8_t read_func(struct bt_conn *conn, uint8_t err,
 	if (!data) {
 		(void)memset(params, 0, sizeof(*params));
 		return BT_GATT_ITER_STOP;
+	} else {
+		shell_hexdump(sh_global, data, length);
 	}
 
 	return BT_GATT_ITER_CONTINUE;
@@ -281,6 +284,7 @@ static uint8_t read_func(struct bt_conn *conn, uint8_t err,
 static int cmd_read(const struct shell *sh, size_t argc, char *argv[])
 {
 	int err;
+	sh_global = sh;
 
 	if (!default_conn) {
 		shell_error(sh, "Not connected");
@@ -316,6 +320,7 @@ static int cmd_mread(const struct shell *sh, size_t argc, char *argv[])
 	uint16_t h[8];
 	size_t i;
 	int err;
+	sh_global = sh;
 
 	if (!default_conn) {
 		shell_error(sh, "Not connected");
