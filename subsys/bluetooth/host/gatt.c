@@ -2191,6 +2191,15 @@ static int gatt_notify(struct bt_conn *conn, uint16_t handle,
 		return -EPERM;
 	}
 
+	/* Check if client has subscribed before sending notifications.
+	 * This is not really required in the Bluetooth specification, but
+	 * follows its spirit.
+	 */
+	if (!bt_gatt_is_subscribed(conn, params->attr, BT_GATT_CCC_NOTIFY)) {
+		BT_WARN("Device is not subscribed to characteristic");
+		return -EINVAL;
+	}
+
 #if defined(CONFIG_BT_GATT_NOTIFY_MULTIPLE)
 	if (gatt_cf_notify_multi(conn)) {
 		return gatt_notify_mult(conn, handle, params);
