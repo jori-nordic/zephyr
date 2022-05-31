@@ -134,7 +134,7 @@ struct bt_conn_iso {
 	enum bt_iso_chan_type type;
 };
 
-typedef void (*bt_conn_tx_cb_t)(struct bt_conn *conn, void *user_data);
+typedef void (*bt_conn_tx_cb_t)(struct bt_conn *conn, void *user_data, int err);
 
 struct bt_conn_tx {
 	sys_snode_t node;
