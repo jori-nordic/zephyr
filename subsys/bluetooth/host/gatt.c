@@ -2084,7 +2084,7 @@ static int gatt_notify_mult(struct bt_conn *conn, uint16_t num_params,
 	struct net_buf *buf;
 	struct bt_att_notify_mult *nfy;
 	struct notify_data data;
-	uint16_t pdu_len = 0;
+	size_t pdu_len = 0;
 
 	for (uint16_t i = 0; i < num_params; i++) {
 		data.attr = params[i].attr;
