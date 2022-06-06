@@ -981,6 +981,9 @@ struct bt_gatt_notify_params {
 	bt_gatt_complete_func_t func;
 	/** Notification Value callback user data */
 	void *user_data;
+#ifdef CONFIG_BT_EATT
+	enum bt_att_chan_pref chan_pref;
+#endif /* CONFIG_BT_EATT */
 };
 
 /** @brief Notify attribute value change.
@@ -1050,6 +1053,9 @@ static inline int bt_gatt_notify(struct bt_conn *conn,
 	params.attr = attr;
 	params.data = data;
 	params.len = len;
+#if defined(CONFIG_BT_EATT)
+	params.chan_pref = BT_ATT_CHAN_ANY;
+#endif /* CONFIG_BT_EATT */
 
 	return bt_gatt_notify_cb(conn, &params);
 }
@@ -1086,6 +1092,9 @@ static inline int bt_gatt_notify_uuid(struct bt_conn *conn,
 	params.attr = attr;
 	params.data = data;
 	params.len = len;
+#if defined(CONFIG_BT_EATT)
+	params.chan_pref = BT_ATT_CHAN_ANY;
+#endif /* CONFIG_BT_EATT */
 
 	return bt_gatt_notify_cb(conn, &params);
 }
@@ -1131,6 +1140,9 @@ struct bt_gatt_indicate_params {
 	uint16_t len;
 	/** Private reference counter */
 	uint8_t _ref;
+#ifdef CONFIG_BT_EATT
+	enum bt_att_chan_pref chan_pref;
+#endif /* CONFIG_BT_EATT */
 };
 
 /** @brief Indicate attribute value change.
@@ -1359,6 +1371,9 @@ struct bt_gatt_discover_params {
 	/** Only for stack-internal use, used for automatic discovery. */
 	struct bt_gatt_subscribe_params *sub_params;
 #endif /* defined(CONFIG_BT_GATT_AUTO_DISCOVER_CCC) */
+#ifdef CONFIG_BT_EATT
+	enum bt_att_chan_pref chan_pref;
+#endif /* CONFIG_BT_EATT */
 };
 
 /** @brief GATT Discover function
@@ -1459,6 +1474,9 @@ struct bt_gatt_read_params {
 			const struct bt_uuid *uuid;
 		} by_uuid;
 	};
+#ifdef CONFIG_BT_EATT
+	enum bt_att_chan_pref chan_pref;
+#endif /* CONFIG_BT_EATT */
 };
 
 /** @brief Read Attribute Value by handle
@@ -1517,6 +1535,9 @@ struct bt_gatt_write_params {
 	const void *data;
 	/** Length of the data */
 	uint16_t length;
+#ifdef CONFIG_BT_EATT
+	enum bt_att_chan_pref chan_pref;
+#endif /* CONFIG_BT_EATT */
 };
 
 /** @brief Write Attribute Value by handle
@@ -1715,6 +1736,9 @@ struct bt_gatt_subscribe_params {
 	ATOMIC_DEFINE(flags, BT_GATT_SUBSCRIBE_NUM_FLAGS);
 
 	sys_snode_t node;
+#ifdef CONFIG_BT_EATT
+	enum bt_att_chan_pref chan_pref;
+#endif /* CONFIG_BT_EATT */
 };
 
 /** @brief Subscribe Attribute Value Notification

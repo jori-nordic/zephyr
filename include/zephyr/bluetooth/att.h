@@ -94,6 +94,12 @@ size_t bt_eatt_count(struct bt_conn *conn);
 
 #endif /* CONFIG_BT_EATT */
 
+enum bt_att_chan_pref {
+	BT_ATT_CHAN_ANY = 0x0,
+	BT_ATT_CHAN_UNENHANCED = BIT(0),
+	BT_ATT_CHAN_ENHANCED = BIT(1),
+};
+
 #ifdef __cplusplus
 }
 #endif
