@@ -641,6 +641,7 @@ static int cmd_unsubscribe(const struct shell *sh,
 	if (err) {
 		shell_error(sh, "Unsubscribe failed (err %d)", err);
 	} else {
+		subscribe_params.value_handle = 0;
 		shell_print(sh, "Unsubscribe success");
 	}
 
