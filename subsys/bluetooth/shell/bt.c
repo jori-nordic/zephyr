@@ -594,6 +594,7 @@ static void per_adv_sync_recv_cb(
 		    "RSSI %i, CTE %u, data length %u",
 		    bt_le_per_adv_sync_get_index(sync), le_addr, info->tx_power,
 		    info->rssi, info->cte_type, buf->len);
+	shell_hexdump(ctx_shell, buf->data, buf->len);
 }
 
 static void per_adv_sync_biginfo_cb(struct bt_le_per_adv_sync *sync,
