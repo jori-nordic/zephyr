@@ -78,6 +78,9 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL);
 #define BT_ASSERT_MSG(cond, msg, ...) __ASSERT(cond, msg, ##__VA_ARGS__)
 #endif/* CONFIG_BT_ASSERT*/
 
+#define BT_HEXDUMP_ERR(_data, _length, _str) \
+		LOG_HEXDUMP_ERR((const uint8_t *)_data, _length, _str)
+
 #define BT_HEXDUMP_DBG(_data, _length, _str) \
 		LOG_HEXDUMP_DBG((const uint8_t *)_data, _length, _str)
 

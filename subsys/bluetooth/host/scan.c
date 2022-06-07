@@ -743,6 +743,9 @@ void bt_hci_le_per_adv_report_recv(struct bt_le_per_adv_sync *per_adv_sync,
 	struct net_buf_simple_state state;
 	struct bt_le_per_adv_sync_cb *listener;
 
+	BT_ERR("RXPeriodic: len %d", buf->len);
+	BT_HEXDUMP_ERR(buf->data, buf->len, "data");
+
 	SYS_SLIST_FOR_EACH_CONTAINER(&pa_sync_cbs, listener, node) {
 		if (listener->recv) {
 			net_buf_simple_save(buf, &state);
