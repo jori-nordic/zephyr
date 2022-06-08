@@ -1011,7 +1011,7 @@ static int cmd_notify_mult(const struct shell *sh, size_t argc, char *argv[])
 		params[i].user_data = (void *)sh;
 	}
 
-	err = bt_gatt_notify_multiple(NULL, cnt_u16, params);
+	err = bt_gatt_notify_multiple(default_conn, cnt_u16, params);
 	if (err != 0) {
 		shell_error(sh, "bt_gatt_notify_multiple failed: %d", err);
 	} else {
