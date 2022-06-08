@@ -874,8 +874,13 @@ static int cmd_register_test_svc(const struct shell *sh,
 	char str[BT_UUID_STR_LEN];
 	int err;
 
+	if(argc == 2) {
+		vnd_uuid.val[15] = (uint8_t)strtoul(argv[1], NULL, 16);
+	}
+
 	bt_uuid_to_str(&vnd_uuid.uuid, str, sizeof(str));
 	err = bt_gatt_service_register(&vnd_svc);
+
 	if (!err) {
 		shell_print(sh, "Registered test vendor service %s", str);
 	} else {
@@ -1254,8 +1259,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(gatt_cmds,
 #if defined(CONFIG_BT_GATT_DYNAMIC_DB)
 	SHELL_CMD_ARG(metrics, NULL, "[value: on, off]", cmd_metrics, 1, 1),
 	SHELL_CMD_ARG(register, NULL,
-		      "register pre-predefined test service",
-		      cmd_register_test_svc, 1, 0),
+		      "[first-byte (hex)]\n register pre-predefined test service",
+		      cmd_register_test_svc, 1, 1),
 	SHELL_CMD_ARG(unregister, NULL,
 		      "unregister pre-predefined test service",
 		      cmd_unregister_test_svc, 1, 0),
