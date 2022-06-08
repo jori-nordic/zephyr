@@ -16,6 +16,9 @@
 #include <kernel.h>
 #include <kernel_internal.h>
 #include <stdlib.h>
+#if defined(CONFIG_LOG_RUNTIME_FILTERING)
+#include <zephyr/logging/log_ctrl.h>
+#endif
 
 static int cmd_kernel_version(const struct shell *shell,
 			      size_t argc, char **argv)
@@ -228,6 +231,44 @@ static int cmd_kernel_sleep(const struct shell *shell,
 	return 0;
 }
 
+#if defined(CONFIG_LOG_RUNTIME_FILTERING)
+static int16_t log_source_id_get(const char *name)
+{
+	int16_t count = (int16_t)log_src_cnt_get(CONFIG_LOG_DOMAIN_ID);
+
+	for (int16_t i = 0; i < count; i++) {
+		if (strcmp(log_source_name_get(CONFIG_LOG_DOMAIN_ID, i), name)
+		    == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int cmd_kernel_log_level_set(const struct shell *shell,
+				    size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	uint8_t severity = strtoul(argv[2], NULL, 10);
+	if (severity > 5) {
+		shell_error(shell, "Invalid log level: %d", severity);
+		shell_help(shell);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+
+	int16_t source_id = log_source_id_get(argv[1]);
+	if (source_id == -1) {
+		shell_error(shell, "Unable to find log source: %s", argv[1]);
+	}
+
+	log_filter_set(NULL, 0, source_id, severity);
+
+	return 0;
+}
+#endif
+
 #if defined(CONFIG_REBOOT)
 static int cmd_kernel_reboot_warm(const struct shell *shell,
 				  size_t argc, char **argv)
@@ -273,6 +314,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_kernel,
 	SHELL_CMD(uptime, NULL, "Kernel uptime.", cmd_kernel_uptime),
 	SHELL_CMD(version, NULL, "Kernel version.", cmd_kernel_version),
 	SHELL_CMD_ARG(sleep, NULL, "ms", cmd_kernel_sleep, 2, 0),
+#if defined(CONFIG_LOG_RUNTIME_FILTERING)
+	SHELL_CMD_ARG(log-level, NULL, "<module name> <severity (0-4)>", cmd_kernel_log_level_set, 3, 0),
+#endif
 	SHELL_SUBCMD_SET_END /* Array terminated. */
 );
 
