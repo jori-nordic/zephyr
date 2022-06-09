@@ -433,7 +433,8 @@ int bt_l2cap_br_server_register(struct bt_l2cap_server *server);
  *  rejected disconnected() callback is called instead.
  *
  *  @param conn Connection object.
- *  @param chans Array of channel objects.
+ *  @param chans Array of channel objects. Null-terminated. Elements after the
+ *               first 5 are silently ignored.
  *  @param psm Channel PSM to connect to.
  *
  *  @return 0 in case of success or negative value in case of error.

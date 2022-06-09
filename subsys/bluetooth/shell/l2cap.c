@@ -277,7 +277,7 @@ static int cmd_register(const struct shell *sh, size_t argc, char *argv[])
 
 static int cmd_ecred_reconfigure(const struct shell *sh, size_t argc, char *argv[])
 {
-	static struct bt_l2cap_chan * l2cap_ecred_chans[1] = {&l2ch_chan.ch.chan};
+	static struct bt_l2cap_chan * l2cap_ecred_chans[2] = {0};
 	uint16_t mtu;
 	int err;
 
@@ -292,6 +292,7 @@ static int cmd_ecred_reconfigure(const struct shell *sh, size_t argc, char *argv
 	}
 
 	mtu = strtoul(argv[1], NULL, 10);
+	l2cap_ecred_chans[0] = &l2ch_chan.ch.chan;
 
 	err = bt_l2cap_ecred_chan_reconfigure(l2cap_ecred_chans, mtu);
 	if (err < 0) {
@@ -305,7 +306,7 @@ static int cmd_ecred_reconfigure(const struct shell *sh, size_t argc, char *argv
 
 static int cmd_ecred_connect(const struct shell *sh, size_t argc, char *argv[])
 {
-	static struct bt_l2cap_chan * l2cap_ecred_chans[1] = {&l2ch_chan.ch.chan};
+	static struct bt_l2cap_chan * l2cap_ecred_chans[2] = {0};
 	uint16_t psm;
 	int err;
 
@@ -320,6 +321,7 @@ static int cmd_ecred_connect(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	psm = strtoul(argv[1], NULL, 16);
+	l2cap_ecred_chans[0] = &l2ch_chan.ch.chan;
 
 	if (argc > 2) {
 		int sec;
