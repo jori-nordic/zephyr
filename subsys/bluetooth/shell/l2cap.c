@@ -401,6 +401,14 @@ static int cmd_send(const struct shell *sh, size_t argc, char *argv[])
 		count = strtoul(argv[1], NULL, 10);
 	}
 
+	/* Only run that once */
+	if (buf_data[0] == 0xFF) {
+		shell_print(sh, "Generating data...");
+		for (int i=0; i<DATA_MTU_L; i++) {
+			buf_data[i] = (uint8_t)(i % 255);
+		}
+	}
+
 	if (argc > 2) {
 		len = strtoul(argv[2], NULL, 10);
 		if (len > DATA_MTU_L) {
