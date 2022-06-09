@@ -2566,11 +2566,16 @@ int bt_gatt_notify_multiple(struct bt_conn *conn, uint16_t num_params,
 	}
 #endif
 
+	/* TODO: add foreach here, so each connection checks the feature */
+	/* TODO: send regular notification PDUs for devices/conns that don't support it. */
+	/* Everything in this fn can probably be moved to `gatt_notify_mult`, with
+	 * this fn only calling it in a foreach loop in the case of a NULL `conn`. */
 	if (gatt_cf_notify_multi(conn)) {
 		return gatt_notify_mult(conn, num_params, params);
+	} else {
+		BT_ERR("Multiple variable length notifications is not supported");
 	}
 
-	BT_ERR("Multiple variable length notifications is not supported");
 	return -EOPNOTSUPP;
 }
 #endif /* CONFIG_BT_GATT_NOTIFY_MULTIPLE */
