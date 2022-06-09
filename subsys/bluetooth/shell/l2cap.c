@@ -31,16 +31,17 @@
 
 #include "bt.h"
 
-#define CREDITS			20
+#define CREDITS			10
 #define DATA_MTU		(23 * CREDITS)
+#define DATA_MTU_L		(500)
 
 #define L2CAP_POLICY_NONE		0x00
 #define L2CAP_POLICY_ALLOWLIST		0x01
 #define L2CAP_POLICY_16BYTE_KEY		0x02
 
 NET_BUF_POOL_FIXED_DEFINE(data_tx_pool, 1,
-			  BT_L2CAP_SDU_BUF_SIZE(DATA_MTU), 8, NULL);
-NET_BUF_POOL_FIXED_DEFINE(data_rx_pool, 1, DATA_MTU, 8, NULL);
+			  BT_L2CAP_SDU_BUF_SIZE(DATA_MTU_L), 8, NULL);
+NET_BUF_POOL_FIXED_DEFINE(data_rx_pool, 1, DATA_MTU_L, 8, NULL);
 
 static uint8_t l2cap_policy;
 static struct bt_conn *l2cap_allowlist[CONFIG_BT_MAX_CONN];
@@ -392,7 +393,7 @@ static int cmd_disconnect(const struct shell *sh, size_t argc, char *argv[])
 
 static int cmd_send(const struct shell *sh, size_t argc, char *argv[])
 {
-	static uint8_t buf_data[DATA_MTU] = { [0 ... (DATA_MTU - 1)] = 0xff };
+	static uint8_t buf_data[DATA_MTU_L] = { [0 ... (DATA_MTU_L - 1)] = 0xff };
 	int ret, len = DATA_MTU, count = 1;
 	struct net_buf *buf;
 
@@ -402,9 +403,9 @@ static int cmd_send(const struct shell *sh, size_t argc, char *argv[])
 
 	if (argc > 2) {
 		len = strtoul(argv[2], NULL, 10);
-		if (len > DATA_MTU) {
+		if (len > DATA_MTU_L) {
 			shell_print(sh,
-				    "Length exceeds (fixed) TX MTU for the channel");
+				    "Exceeds maximum local buffer length.");
 			return -ENOEXEC;
 		}
 	}
@@ -413,7 +414,7 @@ static int cmd_send(const struct shell *sh, size_t argc, char *argv[])
 
 	while (count--) {
 		shell_print(sh, "Rem %d", count);
-		buf = net_buf_alloc(&data_tx_pool, K_SECONDS(2));
+		buf = net_buf_alloc(&data_tx_pool, K_SECONDS(10));
 		if(!buf) {
 			if(l2ch_chan.ch.state != BT_L2CAP_CONNECTED) {
 				shell_print(sh, "Channel disconnected, stopping TX");
