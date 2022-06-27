@@ -695,6 +695,24 @@ static void set_tx_power(uint8_t handle_type, uint16_t handle, int8_t tx_pwr_lvl
 	net_buf_unref(rsp);
 }
 
+static int cmd_set_tx_power(const struct shell *sh, size_t argc, char *argv[])
+{
+	int err;
+
+	unsigned int type = strtoul(argv[1], NULL, 10);
+	unsigned int handle = strtoul(argv[2], NULL, 10);
+	int dbm = strtol(argv[3], NULL, 10);
+
+	/* Valid types:
+	 * #define BT_HCI_VS_LL_HANDLE_TYPE_ADV       0x00
+	 * #define BT_HCI_VS_LL_HANDLE_TYPE_SCAN      0x01
+	 * #define BT_HCI_VS_LL_HANDLE_TYPE_CONN      0x02
+	 * */
+	set_tx_power(type, handle, dbm);
+
+	return 0;
+}
+
 static int cmd_init(const struct shell *sh, size_t argc, char *argv[])
 {
 	int err;
@@ -3524,6 +3542,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(bt_cmds,
 	SHELL_CMD_ARG(test_end, NULL, HELP_NONE, cmd_test_end, 1, 0),
 #endif /* CONFIG_BT_CTLR_DTM */
 #endif /* CONFIG_BT_LL_SW_SPLIT */
+	SHELL_CMD_ARG(set-tx-power, NULL, "<type> <handle> <dBm>", cmd_set_tx_power, 4, 0),
 
 	SHELL_SUBCMD_SET_END
 );
