@@ -167,6 +167,19 @@ static inline bool z_flag_history_exit_set(const struct shell *sh, bool val)
 	return ret;
 }
 
+static inline bool z_flag_reverse_i_exit_get(const struct shell *sh)
+{
+	return sh->ctx->ctx.flags.reverse_i_exit == 1;
+}
+
+static inline bool z_flag_reverse_i_exit_set(const struct shell *sh, bool val)
+{
+	bool ret;
+
+	Z_SHELL_SET_FLAG_ATOMIC(sh, ctx, reverse_i_exit, val, ret);
+	return ret;
+}
+
 static inline bool z_flag_cmd_ctx_get(const struct shell *sh)
 {
 	return sh->ctx->ctx.flags.cmd_ctx == 1;

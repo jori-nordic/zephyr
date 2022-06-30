@@ -24,15 +24,22 @@ struct shell_history {
 	sys_dnode_t *current;
 };
 
+struct shell_reverse_i {
+	struct shell_history *history;
+	char *search_buf;
+};
+
 /**
  * @brief Create shell history instance.
  *
  * @param _name History instance name.
  * @param _size Memory dedicated for shell history.
  */
-#define Z_SHELL_HISTORY_DEFINE(_name, _size)			  \
+#define Z_SHELL_HISTORY_DEFINE(_name, _size, _search_size)	  \
 	static uint8_t __noinit __aligned(sizeof(void *))	  \
 			_name##_ring_buf_data[_size];		  \
+	static char __noinit __aligned(sizeof(void *))	          \
+			_name##_search_buffer[_search_size];	  \
 	static struct ring_buf _name##_ring_buf =		  \
 		{						  \
 			.size = _size,				  \
@@ -40,8 +47,11 @@ struct shell_history {
 		};						  \
 	static struct shell_history _name = {			  \
 		.ring_buf = &_name##_ring_buf			  \
-	}
-
+	static struct shell_reverse_i _name##_ri =                \
+                {						  \
+			.history = &_name,			  \
+			.buf = _name##_search_buffer		  \
+		};
 
 /**
  * @brief Initialize shell history module.
@@ -106,6 +116,12 @@ static inline bool z_shell_history_active(struct shell_history *history)
 {
 	return (history->current) ? true : false;
 }
+
+static inline bool z_shell_reverse_i_active(struct shell_reverse_i *ri)
+{
+	return (ri->history->current) ? true : false;
+}
+
 
 #ifdef __cplusplus
 }

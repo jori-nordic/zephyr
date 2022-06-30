@@ -189,6 +189,38 @@ static void history_put(const struct shell *shell, uint8_t *line, size_t length)
 	z_shell_history_put(shell->history, line, length);
 }
 
+static void reverse_i_search_handle(constr struct shell *shell, bool prev)
+{
+	/*optional feature */
+	if (!IS_ENABLED(CONFIG_SHELL_HISTORY)) {
+		return;
+	}
+
+	/* Checking if history process has been stopped */
+	/* Use history state until we have our own (for reverse i) */
+	if (z_flag_reverse_i_exit_get(shell)) {
+		z_flag_reverse_i_exit_set(shell, false);
+		z_shell_history_mode_exit(shell->history);
+	}
+
+	/* What we need to do:
+	 * - if ctrl-r mode not active:
+	 *   - activate ctrl-r mode
+	 *   - display "(reverse-i)" on command line
+	 * - if ctrl-r mode active:
+	 *   - when new char is typed:
+	 *     - append to current search string
+	 *     - search for string match in history
+	 *     - if match is found:
+	 *       - display "(reverse-i)`[search-string]': [matched-command]"
+	 *     - if no match is found:
+	 *       - display "(failed reverse-i)`[search-string]'"
+	 *   - if ctrl-r is pressed again, search previous match
+	 *   - if ENTER is pressed, run matched command
+	 *   - if ctrl-c is pressed, disable ctrl-r mode, and insert newline
+	 */
+}
+
 static void history_handle(const struct shell *shell, bool up)
 {
 	bool history_mode;
@@ -870,6 +902,7 @@ static void ctrl_metakeys_handle(const struct shell *shell, char data)
 			z_cursor_next_line_move(shell);
 		}
 		z_flag_history_exit_set(shell, true);
+		z_flag_reverse_i_exit_set(shell, true);
 		state_set(shell, SHELL_STATE_ACTIVE);
 		break;
 
@@ -901,6 +934,10 @@ static void ctrl_metakeys_handle(const struct shell *shell, char data)
 
 	case SHELL_VT100_ASCII_CTRL_P: /* CTRL + P */
 		history_handle(shell, true);
+		break;
+
+	case SHELL_VT100_ASCII_CTRL_R: /* CTRL + R */
+		reverse_i_search_handle(shell, true);
 		break;
 
 	case SHELL_VT100_ASCII_CTRL_U: /* CTRL + U */
