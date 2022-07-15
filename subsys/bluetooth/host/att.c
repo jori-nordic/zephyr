@@ -154,6 +154,7 @@ K_FIFO_DEFINE(free_att_tx_meta_data);
 
 static struct bt_att_tx_meta_data *tx_meta_data_alloc(k_timeout_t timeout)
 {
+	LOG_WRN("meta alloc");
 	return k_fifo_get(&free_att_tx_meta_data, timeout);
 }
 
@@ -163,6 +164,7 @@ static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
 
 	(void)memset(data, 0, sizeof(*data));
 	k_fifo_put(&free_att_tx_meta_data, data);
+	LOG_WRN("meta free");
 }
 
 static bt_conn_tx_cb_t chan_cb(const struct net_buf *buf);
@@ -2937,6 +2939,7 @@ static void bt_att_disconnected(struct bt_l2cap_chan *chan)
 	}
 
 	att_reset(att);
+	LOG_ERR("ATT disc");
 
 	bt_gatt_disconnected(le_chan->chan.conn);
 }

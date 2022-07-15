@@ -132,6 +132,7 @@ static inline void short_notify(void)
 		err = bt_gatt_notify_cb(g_conn, &params);
 
 		if (err == -ENOMEM) {
+			printk("ENOMEM, sleeping\n");
 			k_sleep(K_MSEC(10));
 		} else if (err) {
 			FAIL("Short notify failed (err %d)\n", err);
@@ -156,6 +157,7 @@ static inline void long_notify(void)
 		err = bt_gatt_notify_cb(g_conn, &params);
 
 		if (err == -ENOMEM) {
+			printk("ENOMEM, sleeping\n");
 			k_sleep(K_MSEC(10));
 		} else if (err) {
 			FAIL("Long notify failed (err %d)\n", err);
@@ -186,6 +188,9 @@ static void test_main(void)
 
 	printk("Advertising successfully started\n");
 
+	for (int i=0; i<10; i++) {
+	printk("#############################\n");
+	printk("Wait for connection\n");
 	WAIT_FOR_FLAG(flag_is_connected);
 
 	while (bt_eatt_count(g_conn) < CONFIG_BT_EATT_MAX) {
@@ -196,15 +201,21 @@ static void test_main(void)
 	WAIT_FOR_FLAG(flag_short_subscribe);
 	WAIT_FOR_FLAG(flag_long_subscribe);
 
+	printk("Notifying\n");
 	for (int i = 0; i < NOTIFICATION_COUNT / 2; i++) {
 		short_notify();
 		long_notify();
 	}
 
+	printk("Disconnecting\n");
+	bt_conn_disconnect(g_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+
 	while (num_notifications_sent < NOTIFICATION_COUNT) {
 		k_sleep(K_MSEC(100));
 	}
 
+	printk("GATT server cycle %d ok\n", i);
+	}
 	PASS("GATT server passed\n");
 }
 
