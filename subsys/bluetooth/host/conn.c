@@ -60,8 +60,10 @@ static void conn_tx_destroy(struct bt_conn *conn, struct bt_conn_tx *tx)
 	/* Free up TX metadata before calling callback in case the callback
 	 * tries to allocate metadata
 	 */
+	LOG_ERR("conn_tx_destroy");
 	tx_free(tx);
 
+	LOG_WRN("destroy cb");
 	cb(conn, user_data, -ESHUTDOWN);
 }
 
@@ -669,10 +671,12 @@ static struct k_poll_signal conn_change =
 
 static void conn_cleanup(struct bt_conn *conn)
 {
+	LOG_ERR("conn_cleanup");
 	struct net_buf *buf;
 
 	/* Give back any allocated buffers */
 	while ((buf = net_buf_get(&conn->tx_queue, K_NO_WAIT))) {
+		LOG_DBG("buf %p", buf);
 		if (tx_data(buf)->tx) {
 			conn_tx_destroy(conn, tx_data(buf)->tx);
 		}
@@ -1227,6 +1231,7 @@ struct net_buf *bt_conn_create_pdu_timeout(struct net_buf_pool *pool,
 	reserve += sizeof(struct bt_hci_acl_hdr) + BT_BUF_RESERVE;
 	net_buf_reserve(buf, reserve);
 
+	LOG_WRN("buf %p", buf);
 	return buf;
 }
 

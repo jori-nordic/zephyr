@@ -560,6 +560,7 @@ void net_buf_unref(struct net_buf *buf)
 		__ASSERT_NO_MSG(atomic_get(&pool->avail_count) <= pool->buf_count);
 #endif
 
+		LOG_WRN("destroy buf %p", buf);
 		if (pool->destroy) {
 			pool->destroy(buf);
 		} else {
