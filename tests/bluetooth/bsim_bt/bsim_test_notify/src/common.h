@@ -34,6 +34,11 @@ extern enum bst_result_t bst_result;
 	while (!(bool)atomic_get(&flag)) {                                                         \
 		(void)k_sleep(K_MSEC(1));                                                          \
 	}
+#define WAIT_FOR_FLAG_UNSET(flag)	  \
+	while ((bool)atomic_get(&flag)) { \
+		(void)k_sleep(K_MSEC(1)); \
+	}
+
 
 #define FAIL(...)                                                                                  \
 	do {                                                                                       \

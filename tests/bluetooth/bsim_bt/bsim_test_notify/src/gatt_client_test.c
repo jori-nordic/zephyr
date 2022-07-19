@@ -10,7 +10,6 @@
 #include "common.h"
 
 CREATE_FLAG(flag_is_connected);
-CREATE_FLAG(flag_is_disconnected);
 CREATE_FLAG(flag_is_encrypted);
 CREATE_FLAG(flag_discover_complete);
 CREATE_FLAG(flag_subscribed);
@@ -34,7 +33,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	printk("Connected to %s\n", addr);
 
 	SET_FLAG(flag_is_connected);
-	UNSET_FLAG(flag_is_disconnected);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -53,7 +51,6 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	g_conn = NULL;
 	UNSET_FLAG(flag_is_connected);
-	SET_FLAG(flag_is_disconnected);
 }
 
 void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
@@ -294,10 +291,9 @@ static void test_main(void)
 	while (num_notifications < NOTIFICATION_COUNT) {
 		k_sleep(K_MSEC(100));
 	}
+	WAIT_FOR_FLAG_UNSET(flag_is_connected);
 
-	WAIT_FOR_FLAG(flag_is_disconnected);
 	num_notifications = 0;
-
 	printk("GATT client cycle %d ok\n", i);
 	}
 
