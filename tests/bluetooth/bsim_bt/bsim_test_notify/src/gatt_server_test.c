@@ -135,7 +135,8 @@ static inline void short_notify(void)
 			printk("ENOMEM, sleeping\n");
 			k_sleep(K_MSEC(10));
 		} else if (err) {
-			FAIL("Short notify failed (err %d)\n", err);
+			printk("Short notify failed (err %d)\n", err);
+			return;
 		}
 	} while (err);
 }
@@ -160,11 +161,13 @@ static inline void long_notify(void)
 			printk("ENOMEM, sleeping\n");
 			k_sleep(K_MSEC(10));
 		} else if (err) {
-			FAIL("Long notify failed (err %d)\n", err);
+			printk("Long notify failed (err %d)\n", err);
+			return;
 		}
 	} while (err);
 }
 
+extern bool g_corrupt_radio;
 static void test_main(void)
 {
 	int err;
@@ -188,7 +191,7 @@ static void test_main(void)
 
 	printk("Advertising successfully started\n");
 
-	for (int i=0; i<10; i++) {
+	for (int i=0; i<5; i++) {
 	printk("#############################\n");
 	printk("Wait for connection\n");
 	WAIT_FOR_FLAG(flag_is_connected);
@@ -203,16 +206,19 @@ static void test_main(void)
 
 	printk("Notifying\n");
 	for (int i = 0; i < NOTIFICATION_COUNT / 2; i++) {
-		short_notify();
+		printk("Queue notification #%d\n", i);
+		/* short_notify(); */
 		long_notify();
 	}
+	g_corrupt_radio = true;
 
-	printk("Disconnecting\n");
-	bt_conn_disconnect(g_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+	printk("Wait for flag");
+	WAIT_FOR_FLAG_UNSET(flag_is_connected);
+	g_corrupt_radio = false;
 
-	while (num_notifications_sent < NOTIFICATION_COUNT) {
-		k_sleep(K_MSEC(100));
-	}
+	printk("..................................................");
+	printk("disconnected ok\n");
+	num_notifications_sent = 0;
 
 	printk("GATT server cycle %d ok\n", i);
 	}

@@ -322,11 +322,17 @@ void radio_whiten_iv_set(uint32_t iv)
 			    RADIO_PCNF1_WHITEEN_Msk;
 }
 
+extern bool g_corrupt_radio;
 void radio_aa_set(uint8_t *aa)
 {
 	NRF_RADIO->TXADDRESS =
 	    (((0UL) << RADIO_TXADDRESS_TXADDRESS_Pos) &
 	     RADIO_TXADDRESS_TXADDRESS_Msk);
+
+	if (g_corrupt_radio) {
+		return;
+	}
+
 	NRF_RADIO->RXADDRESSES =
 	    ((RADIO_RXADDRESSES_ADDR0_Enabled) << RADIO_RXADDRESSES_ADDR0_Pos);
 	NRF_RADIO->PREFIX0 = aa[3];
@@ -574,6 +580,10 @@ void radio_crc_configure(uint32_t polynomial, uint32_t iv)
 
 uint32_t radio_crc_is_valid(void)
 {
+	if (g_corrupt_radio) {
+		return false;
+	}
+
 	return (NRF_RADIO->CRCSTATUS != 0);
 }
 

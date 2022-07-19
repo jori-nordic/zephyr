@@ -249,17 +249,21 @@ static void gatt_subscribe_long(void)
 	/* WAIT_FOR_FLAG(flag_subscribed); */
 }
 
+bool g_corrupt_radio = false;
+
 static void test_main(void)
 {
 	int err;
+
 
 	err = bt_enable(NULL);
 	if (err != 0) {
 		FAIL("Bluetooth discover failed (err %d)\n", err);
 	}
 
-	for (int i=0; i<10; i++) {
+	for (int i=0; i<5; i++) {
 	printk("#############################\n");
+
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
 	if (err != 0) {
 		FAIL("Scanning failed to start (err %d)\n", err);
@@ -288,9 +292,6 @@ static void test_main(void)
 
 	printk("Subscribed\n");
 
-	while (num_notifications < NOTIFICATION_COUNT) {
-		k_sleep(K_MSEC(100));
-	}
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
 
 	num_notifications = 0;
