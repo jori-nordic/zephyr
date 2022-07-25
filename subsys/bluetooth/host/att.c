@@ -156,7 +156,7 @@ int meta_count = 0;
 
 static struct bt_att_tx_meta_data *tx_meta_data_alloc(k_timeout_t timeout)
 {
-	LOG_WRN("meta alloc");
+	LOG_DBG("meta alloc");
 	meta_count++;
 	return k_fifo_get(&free_att_tx_meta_data, timeout);
 }
@@ -167,7 +167,7 @@ static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
 
 	(void)memset(data, 0, sizeof(*data));
 	k_fifo_put(&free_att_tx_meta_data, data);
-	LOG_WRN("meta free");
+	LOG_DBG("meta free");
 	meta_count--;
 }
 

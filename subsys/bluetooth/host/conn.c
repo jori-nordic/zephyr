@@ -207,7 +207,7 @@ static void tx_notify(struct bt_conn *conn)
 			return;
 		}
 
-		BT_WARN("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
+		BT_DBG("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
 
 		/* Copy over the params */
 		cb = tx->cb;
@@ -670,7 +670,7 @@ static struct k_poll_signal conn_change =
 		K_POLL_SIGNAL_INITIALIZER(conn_change);
 
 static void pool_stats(struct net_buf_pool *pool) {
-	LOG_WRN("[%s] total %d avail %d", pool->name, pool->buf_count, pool->avail_count);
+	LOG_DBG("[%s] total %d avail %d", pool->name, pool->buf_count, pool->avail_count);
 }
 
 static void conn_cleanup(struct bt_conn *conn)
@@ -1240,7 +1240,7 @@ struct net_buf *bt_conn_create_pdu_timeout(struct net_buf_pool *pool,
 	reserve += sizeof(struct bt_hci_acl_hdr) + BT_BUF_RESERVE;
 	net_buf_reserve(buf, reserve);
 
-	LOG_WRN("[%s] alloc %p", pool->name, buf);
+	LOG_DBG("[%s] alloc %p", pool->name, buf);
 
 	return buf;
 }

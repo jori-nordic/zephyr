@@ -199,7 +199,7 @@ void bt_hci_host_num_completed_packets(struct net_buf *buf)
 
 	bt_conn_unref(conn);
 
-	BT_DBG("Reporting completed packet for handle %u", handle);
+	BT_WARN("Reporting completed packet for handle %u", handle);
 
 	buf = bt_hci_cmd_create(BT_HCI_OP_HOST_NUM_COMPLETED_PACKETS,
 				sizeof(*cp) + sizeof(*hc));
