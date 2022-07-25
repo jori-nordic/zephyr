@@ -10,7 +10,6 @@
 #include "common.h"
 
 CREATE_FLAG(flag_is_connected);
-CREATE_FLAG(flag_is_encrypted);
 CREATE_FLAG(flag_discover_complete);
 CREATE_FLAG(flag_subscribed);
 
@@ -33,6 +32,11 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	printk("Connected to %s\n", addr);
 
 	SET_FLAG(flag_is_connected);
+
+	UNSET_FLAG(flag_discover_complete);
+	UNSET_FLAG(flag_subscribed);
+	chrc_handle=0;
+	long_chrc_handle=0;
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -53,21 +57,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	UNSET_FLAG(flag_is_connected);
 }
 
-void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
-{
-	if (err) {
-		FAIL("Encryption failer (%d)\n", err);
-	} else if (level < BT_SECURITY_L2) {
-		FAIL("Insufficient sec level (%d)\n", level);
-	} else {
-		SET_FLAG(flag_is_encrypted);
-	}
-}
-
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
-	.security_changed = security_changed,
 };
 
 void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, struct net_buf_simple *ad)
@@ -183,9 +175,7 @@ static void test_subscribed(struct bt_conn *conn, uint8_t err, struct bt_gatt_wr
 		return;
 	}
 
-	if (params->handle == chrc_handle) {
-		printk("Subscribed to short characteristic\n");
-	} else if (params->handle == long_chrc_handle) {
+	if (params->handle == long_chrc_handle) {
 		printk("Subscribed to long characteristic\n");
 	} else {
 		FAIL("Unknown handle %d\n", params->handle);
@@ -201,15 +191,6 @@ uint8_t test_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *param
 	return BT_GATT_ITER_CONTINUE;
 }
 
-static struct bt_gatt_discover_params disc_params_short;
-static struct bt_gatt_subscribe_params sub_params_short = {
-	.notify = test_notify,
-	.write = test_subscribed,
-	.ccc_handle = 0, /* Auto-discover CCC*/
-	.disc_params = &disc_params_short, /* Auto-discover CCC */
-	.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE,
-	.value = BT_GATT_CCC_NOTIFY,
-};
 static struct bt_gatt_discover_params disc_params_long;
 static struct bt_gatt_subscribe_params sub_params_long = {
 	.notify = test_notify,
@@ -220,23 +201,14 @@ static struct bt_gatt_subscribe_params sub_params_long = {
 	.value = BT_GATT_CCC_NOTIFY,
 };
 
-static void gatt_subscribe_short(void)
-{
-	int err;
-
-	sub_params_short.value_handle = chrc_handle;
-	err = bt_gatt_subscribe(g_conn, &sub_params_short);
-	/* if (err < 0) { */
-	/* 	FAIL("Failed to subscribe\n"); */
-	/* } else { */
-	/* 	printk("Subscribe request sent\n"); */
-	/* } */
-	/* WAIT_FOR_FLAG(flag_subscribed); */
-}
-
 static void gatt_subscribe_long(void)
 {
 	int err;
+
+	sub_params_long.ccc_handle = 0, /* Auto-discover CCC*/
+	sub_params_long.disc_params = &disc_params_long, /* Auto-discover CCC */
+	sub_params_long.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE,
+	sub_params_long.value = BT_GATT_CCC_NOTIFY,
 
 	UNSET_FLAG(flag_subscribed);
 	sub_params_long.value_handle = long_chrc_handle;
@@ -273,21 +245,7 @@ static void test_main(void)
 
 	WAIT_FOR_FLAG(flag_is_connected);
 
-	err = bt_conn_set_security(g_conn, BT_SECURITY_L2);
-	if (err) {
-		FAIL("Starting encryption procedure failed (%d)\n", err);
-	}
-
-	WAIT_FOR_FLAG(flag_is_encrypted);
-
-	while (bt_eatt_count(g_conn) < CONFIG_BT_EATT_MAX) {
-		k_sleep(K_MSEC(10));
-	}
-
-	printk("EATT connected\n");
-
 	gatt_discover();
-	gatt_subscribe_short();
 	gatt_subscribe_long();
 
 	printk("Subscribed\n");

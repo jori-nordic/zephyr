@@ -53,7 +53,7 @@ extern enum bst_result_t bst_result;
 	} while (0)
 
 #define CHRC_SIZE 10
-#define LONG_CHRC_SIZE 40
+#define LONG_CHRC_SIZE 150
 
 #define TEST_SERVICE_UUID                                                                          \
 	BT_UUID_DECLARE_128(0x01, 0x23, 0x45, 0x67, 0x89, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,      \

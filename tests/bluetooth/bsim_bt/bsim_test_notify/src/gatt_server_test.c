@@ -9,8 +9,8 @@
 extern enum bst_result_t bst_result;
 
 CREATE_FLAG(flag_is_connected);
-CREATE_FLAG(flag_short_subscribe);
 CREATE_FLAG(flag_long_subscribe);
+CREATE_FLAG(flag_mtu_exchanged);
 
 static struct bt_conn *g_conn;
 
@@ -33,6 +33,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	g_conn = bt_conn_ref(conn);
 	SET_FLAG(flag_is_connected);
+	UNSET_FLAG(flag_mtu_exchanged);
+	UNSET_FLAG(flag_long_subscribe);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -78,10 +80,6 @@ static void short_subscribe(const struct bt_gatt_attr *attr, uint16_t value)
 {
 	const bool notif_enabled = (value == BT_GATT_CCC_NOTIFY);
 
-	if (notif_enabled) {
-		SET_FLAG(flag_short_subscribe);
-	}
-
 	printk("Short notifications %s\n", notif_enabled ? "enabled" : "disabled");
 }
 
@@ -115,32 +113,6 @@ static void notification_sent(struct bt_conn *conn, void *user_data)
 	printk("Sent notification #%u with length %d\n", num_notifications_sent++, *length);
 }
 
-static inline void short_notify(void)
-{
-	static size_t length = CHRC_SIZE;
-	static struct bt_gatt_notify_params params = {
-		.attr = &attr_test_svc[1],
-		.data = chrc_data,
-		.len = CHRC_SIZE,
-		.func = notification_sent,
-		.user_data = &length,
-		.uuid = NULL,
-	};
-	int err;
-
-	do {
-		err = bt_gatt_notify_cb(g_conn, &params);
-
-		if (err == -ENOMEM) {
-			printk("ENOMEM, sleeping\n");
-			k_sleep(K_MSEC(10));
-		} else if (err) {
-			printk("Short notify failed (err %d)\n", err);
-			return;
-		}
-	} while (err);
-}
-
 static inline void long_notify(void)
 {
 	static size_t length = LONG_CHRC_SIZE;
@@ -167,6 +139,16 @@ static inline void long_notify(void)
 	} while (err);
 }
 
+static void att_mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
+{
+	printk("MTU exchanged: [TX] %d [RX] %d\n", tx, rx);
+	SET_FLAG(flag_mtu_exchanged);
+}
+
+static struct bt_gatt_cb gatt_callbacks = {
+	.att_mtu_updated = att_mtu_updated,
+};
+
 extern bool g_corrupt_radio;
 static void test_main(void)
 {
@@ -176,10 +158,13 @@ static void test_main(void)
 	};
 
 	err = bt_enable(NULL);
+
 	if (err != 0) {
 		FAIL("Bluetooth init failed (err %d)\n", err);
 		return;
 	}
+
+	bt_gatt_cb_register(&gatt_callbacks);
 
 	printk("Bluetooth initialized\n");
 
@@ -196,18 +181,12 @@ static void test_main(void)
 	printk("Wait for connection\n");
 	WAIT_FOR_FLAG(flag_is_connected);
 
-	while (bt_eatt_count(g_conn) < CONFIG_BT_EATT_MAX) {
-		k_sleep(K_MSEC(100));
-	}
-	printk("EATT connected\n");
-
-	WAIT_FOR_FLAG(flag_short_subscribe);
 	WAIT_FOR_FLAG(flag_long_subscribe);
+	WAIT_FOR_FLAG(flag_mtu_exchanged);
 
 	printk("Notifying\n");
 	for (int i = 0; i < NOTIFICATION_COUNT / 2; i++) {
 		printk("Queue notification #%d\n", i);
-		/* short_notify(); */
 		long_notify();
 	}
 	g_corrupt_radio = true;

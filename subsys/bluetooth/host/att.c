@@ -2782,6 +2782,7 @@ struct net_buf *bt_att_create_pdu(struct bt_conn *conn, uint8_t op, size_t len)
 	}
 
 	BT_WARN("No ATT channel for MTU %zu", len + sizeof(op));
+	__ASSERT_NO_MSG(0);
 
 	return NULL;
 }
