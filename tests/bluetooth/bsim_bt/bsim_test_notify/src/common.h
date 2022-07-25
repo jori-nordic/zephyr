@@ -74,3 +74,5 @@ void test_init(void);
 BUILD_ASSERT(NOTIFICATION_COUNT % 2 == 0);
 
 #define TEST_CYCLES 10
+
+extern int meta_count;

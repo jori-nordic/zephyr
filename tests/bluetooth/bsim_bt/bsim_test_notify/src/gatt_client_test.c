@@ -169,7 +169,7 @@ static void gatt_discover(void)
 static void test_subscribed(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
 {
 	if (err) {
-		FAIL("Subscribe failed (err %d)\n", err);
+		printk("Subscribe failed (err %d)\n", err);
 	}
 
 	SET_FLAG(flag_subscribed);
@@ -191,7 +191,7 @@ uint8_t test_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *param
 		    uint16_t length)
 {
 	printk("Received notification #%u with length %d\n", num_notifications++, length);
-	g_corrupt_radio = true;
+	/* g_corrupt_radio = true; */
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -269,9 +269,12 @@ static void test_main(void)
 	printk("Subscribed\n");
 
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
-	g_corrupt_radio = false;
+	/* g_corrupt_radio = false; */
 
 	num_notifications = 0;
+
+	printk("Meta count: %d\n", meta_count);
+
 	printk("GATT client cycle %d ok\n", i);
 	}
 

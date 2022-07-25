@@ -187,17 +187,19 @@ static void test_main(void)
 	printk("Notifying\n");
 	for (int i = 0; i < NOTIFICATION_COUNT / 2; i++) {
 		printk("Queue notification #%d\n", i);
+	g_corrupt_radio = true;
 		long_notify();
 	}
-	/* g_corrupt_radio = true; */
 
 	printk("Wait for flag\n");
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
-	/* g_corrupt_radio = false; */
+	g_corrupt_radio = false;
 
 	printk("..................................................");
 	printk("disconnected ok\n");
 	num_notifications_sent = 0;
+	printk("Meta count: %d\n", meta_count);
+	__ASSERT(meta_count == 0, "ATT meta leak");
 
 	printk("GATT server cycle %d ok\n", i);
 	}

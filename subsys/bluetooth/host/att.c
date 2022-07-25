@@ -152,9 +152,12 @@ struct bt_att_tx_meta {
 static struct bt_att_tx_meta_data tx_meta_data[CONFIG_BT_CONN_TX_MAX];
 K_FIFO_DEFINE(free_att_tx_meta_data);
 
+int meta_count = 0;
+
 static struct bt_att_tx_meta_data *tx_meta_data_alloc(k_timeout_t timeout)
 {
 	LOG_WRN("meta alloc");
+	meta_count++;
 	return k_fifo_get(&free_att_tx_meta_data, timeout);
 }
 
@@ -165,6 +168,7 @@ static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
 	(void)memset(data, 0, sizeof(*data));
 	k_fifo_put(&free_att_tx_meta_data, data);
 	LOG_WRN("meta free");
+	meta_count--;
 }
 
 static bt_conn_tx_cb_t chan_cb(const struct net_buf *buf);
