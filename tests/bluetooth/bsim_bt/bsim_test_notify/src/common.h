@@ -72,3 +72,5 @@ void test_init(void);
 
 #define NOTIFICATION_COUNT 10
 BUILD_ASSERT(NOTIFICATION_COUNT % 2 == 0);
+
+#define TEST_CYCLES 10

@@ -142,7 +142,7 @@ static inline void long_notify(void)
 static void att_mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 {
 	printk("MTU exchanged: [TX] %d [RX] %d\n", tx, rx);
-	SET_FLAG(flag_mtu_exchanged);
+	if (tx > 100) SET_FLAG(flag_mtu_exchanged);
 }
 
 static struct bt_gatt_cb gatt_callbacks = {
@@ -176,24 +176,24 @@ static void test_main(void)
 
 	printk("Advertising successfully started\n");
 
-	for (int i=0; i<5; i++) {
+	for (int i=0; i<TEST_CYCLES; i++) {
 	printk("#############################\n");
 	printk("Wait for connection\n");
 	WAIT_FOR_FLAG(flag_is_connected);
 
-	WAIT_FOR_FLAG(flag_long_subscribe);
 	WAIT_FOR_FLAG(flag_mtu_exchanged);
+	WAIT_FOR_FLAG(flag_long_subscribe);
 
 	printk("Notifying\n");
 	for (int i = 0; i < NOTIFICATION_COUNT / 2; i++) {
 		printk("Queue notification #%d\n", i);
 		long_notify();
 	}
-	g_corrupt_radio = true;
+	/* g_corrupt_radio = true; */
 
-	printk("Wait for flag");
+	printk("Wait for flag\n");
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
-	g_corrupt_radio = false;
+	/* g_corrupt_radio = false; */
 
 	printk("..................................................");
 	printk("disconnected ok\n");

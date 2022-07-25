@@ -12,11 +12,14 @@
 CREATE_FLAG(flag_is_connected);
 CREATE_FLAG(flag_discover_complete);
 CREATE_FLAG(flag_subscribed);
+CREATE_FLAG(flag_mtu_exchanged);
 
 static struct bt_conn *g_conn;
 static uint16_t chrc_handle;
 static uint16_t long_chrc_handle;
 static struct bt_uuid *test_svc_uuid = TEST_SERVICE_UUID;
+
+bool g_corrupt_radio = false;
 
 static void connected(struct bt_conn *conn, uint8_t err)
 {
@@ -35,6 +38,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	UNSET_FLAG(flag_discover_complete);
 	UNSET_FLAG(flag_subscribed);
+	UNSET_FLAG(flag_mtu_exchanged);
 	chrc_handle=0;
 	long_chrc_handle=0;
 }
@@ -187,6 +191,7 @@ uint8_t test_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *param
 		    uint16_t length)
 {
 	printk("Received notification #%u with length %d\n", num_notifications++, length);
+	g_corrupt_radio = true;
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -221,7 +226,16 @@ static void gatt_subscribe_long(void)
 	/* WAIT_FOR_FLAG(flag_subscribed); */
 }
 
-bool g_corrupt_radio = false;
+
+static void att_mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
+{
+	printk("MTU exchanged: [TX] %d [RX] %d\n", tx, rx);
+	if (tx > 100) SET_FLAG(flag_mtu_exchanged);
+}
+
+static struct bt_gatt_cb gatt_callbacks = {
+	.att_mtu_updated = att_mtu_updated,
+};
 
 static void test_main(void)
 {
@@ -233,7 +247,9 @@ static void test_main(void)
 		FAIL("Bluetooth discover failed (err %d)\n", err);
 	}
 
-	for (int i=0; i<5; i++) {
+	bt_gatt_cb_register(&gatt_callbacks);
+
+	for (int i=0; i<TEST_CYCLES; i++) {
 	printk("#############################\n");
 
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
@@ -245,12 +261,15 @@ static void test_main(void)
 
 	WAIT_FOR_FLAG(flag_is_connected);
 
+	WAIT_FOR_FLAG(flag_mtu_exchanged);
+
 	gatt_discover();
 	gatt_subscribe_long();
 
 	printk("Subscribed\n");
 
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
+	g_corrupt_radio = false;
 
 	num_notifications = 0;
 	printk("GATT client cycle %d ok\n", i);
