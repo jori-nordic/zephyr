@@ -154,11 +154,15 @@ K_FIFO_DEFINE(free_att_tx_meta_data);
 
 int meta_count = 0;
 
-static struct bt_att_tx_meta_data *tx_meta_data_alloc(k_timeout_t timeout)
+static struct bt_att_tx_meta_data *tx_meta_data_alloc(k_timeout_t timeout, struct net_buf *buf)
 {
-	LOG_DBG("meta alloc");
+	LOG_INF("alloc buf %p", buf);
+	struct bt_att_tx_meta_data * meta = k_fifo_get(&free_att_tx_meta_data, timeout);
+
 	meta_count++;
-	return k_fifo_get(&free_att_tx_meta_data, timeout);
+	LOG_INF("alloc buf %p meta %p meta-count: %d", buf, meta, meta_count);
+
+	return meta;
 }
 
 static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
@@ -167,8 +171,8 @@ static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
 
 	(void)memset(data, 0, sizeof(*data));
 	k_fifo_put(&free_att_tx_meta_data, data);
-	LOG_DBG("meta free");
 	meta_count--;
+	LOG_INF("free meta %p meta-count: %d", data, meta_count);
 }
 
 static bt_conn_tx_cb_t chan_cb(const struct net_buf *buf);
@@ -371,6 +375,8 @@ static void bt_att_sent(struct bt_l2cap_chan *ch)
 
 static void chan_cfm_sent(struct bt_conn *conn, void *user_data, int err)
 {
+	LOG_INF("%s", __func__);
+
 	struct bt_att_tx_meta_data *data = user_data;
 	struct bt_att_chan *chan = data->att_chan;
 
@@ -385,6 +391,8 @@ static void chan_cfm_sent(struct bt_conn *conn, void *user_data, int err)
 
 static void chan_rsp_sent(struct bt_conn *conn, void *user_data, int err)
 {
+	LOG_INF("%s", __func__);
+
 	struct bt_att_tx_meta_data *data = user_data;
 	struct bt_att_chan *chan = data->att_chan;
 
@@ -399,6 +407,8 @@ static void chan_rsp_sent(struct bt_conn *conn, void *user_data, int err)
 
 static void chan_req_sent(struct bt_conn *conn, void *user_data, int err)
 {
+	LOG_INF("%s", __func__);
+
 	struct bt_att_tx_meta_data *data = user_data;
 	struct bt_att_chan *chan = data->att_chan;
 
@@ -419,6 +429,8 @@ static void chan_tx_complete(struct bt_conn *conn, void *user_data, int err)
 	bt_gatt_complete_func_t func = data->func;
 	void *ud = data->user_data;
 
+	LOG_INF("%s", __func__);
+
 	BT_DBG("TX Complete chan %p CID 0x%04X", chan, chan->chan.tx.cid);
 
 	tx_meta_data_free(data);
@@ -431,6 +443,8 @@ static void chan_tx_complete(struct bt_conn *conn, void *user_data, int err)
 
 static void chan_unknown(struct bt_conn *conn, void *user_data, int err)
 {
+	LOG_INF("%s", __func__);
+
 	tx_meta_data_free(user_data);
 }
 
@@ -553,14 +567,16 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		return NULL;
 	}
 
-	data = tx_meta_data_alloc(timeout);
+	data = tx_meta_data_alloc(timeout, buf);
 	if (!data) {
+		__ASSERT(0, "Unable to allocate ATT TX meta");
 		BT_WARN("Unable to allocate ATT TX meta");
 		net_buf_unref(buf);
 		return NULL;
 	}
 
 	bt_att_tx_meta_data(buf) = data;
+	LOG_INF("alloc: buf %p meta %p", buf, data);
 
 	hdr = net_buf_add(buf, sizeof(*hdr));
 	hdr->code = op;
@@ -3611,6 +3627,7 @@ void bt_att_req_free(struct bt_att_req *req)
 	k_mem_slab_free(&req_slab, (void **)&req);
 }
 
+extern void print_pool_stats(void);
 int bt_att_send(struct bt_conn *conn, struct net_buf *buf)
 {
 	struct bt_att *att;
@@ -3622,6 +3639,7 @@ int bt_att_send(struct bt_conn *conn, struct net_buf *buf)
 	if (!att) {
 		tx_meta_data_free(bt_att_tx_meta_data(buf));
 		net_buf_unref(buf);
+		print_pool_stats();
 		return -ENOTCONN;
 	}
 

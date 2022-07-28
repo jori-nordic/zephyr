@@ -563,6 +563,7 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 fail:
 	k_sem_give(bt_conn_get_pkts(conn));
 	if (tx) {
+		LOG_INF("%s", __func__);
 		conn_tx_destroy(conn, tx);
 	}
 
@@ -670,7 +671,13 @@ static struct k_poll_signal conn_change =
 		K_POLL_SIGNAL_INITIALIZER(conn_change);
 
 static void pool_stats(struct net_buf_pool *pool) {
-	LOG_DBG("[%s] total %d avail %d", pool->name, pool->buf_count, pool->avail_count);
+	LOG_INF("[%s] total %d avail %d", pool->name, pool->buf_count, pool->avail_count);
+}
+
+void print_pool_stats(void)
+{
+	pool_stats(&acl_tx_pool);
+	pool_stats(&frag_pool);
 }
 
 static void conn_cleanup(struct bt_conn *conn)
@@ -678,8 +685,7 @@ static void conn_cleanup(struct bt_conn *conn)
 	LOG_ERR("conn_cleanup");
 	struct net_buf *buf;
 
-	pool_stats(&acl_tx_pool);
-	pool_stats(&frag_pool);
+	print_pool_stats();
 	/* Give back any allocated buffers */
 	while ((buf = net_buf_get(&conn->tx_queue, K_NO_WAIT))) {
 		LOG_WRN("buf %p", buf);
@@ -690,6 +696,9 @@ static void conn_cleanup(struct bt_conn *conn)
 		net_buf_unref(buf);
 	}
 
+	print_pool_stats();
+
+	__ASSERT(k_fifo_is_empty(&conn->tx_queue), "TX queue not empty");
 	__ASSERT(sys_slist_is_empty(&conn->tx_pending), "Pending TX packets");
 	__ASSERT_NO_MSG(conn->pending_no_cb == 0);
 
@@ -784,6 +793,7 @@ void bt_conn_process_tx(struct bt_conn *conn)
 
 static void process_unack_tx(struct bt_conn *conn)
 {
+	LOG_INF("%s", __func__);
 	/* Return any unacknowledged packets */
 	while (1) {
 		struct bt_conn_tx *tx;
@@ -852,7 +862,7 @@ void bt_conn_set_state(struct bt_conn *conn, bt_conn_state_t state)
 {
 	bt_conn_state_t old_state;
 
-	BT_DBG("%s -> %s", state2str(conn->state), state2str(state));
+	LOG_INF("%s -> %s", state2str(conn->state), state2str(state));
 
 	if (conn->state == state) {
 		BT_WARN("no transition %s", state2str(state));

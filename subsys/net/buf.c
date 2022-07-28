@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <signal.h>
 #define LOG_MODULE_NAME net_buf
 #define LOG_LEVEL CONFIG_NET_BUF_LOG_LEVEL
 
@@ -560,7 +561,11 @@ void net_buf_unref(struct net_buf *buf)
 		__ASSERT_NO_MSG(atomic_get(&pool->avail_count) <= pool->buf_count);
 #endif
 
-		/* LOG_WRN("destroy buf %p", buf); */
+		LOG_INF("destroy %p", buf);
+		/* if ((uint32_t)buf == 0x80c0200) { */
+		/* 	raise(SIGTRAP); */
+		/* } */
+
 		if (pool->destroy) {
 			pool->destroy(buf);
 		} else {
