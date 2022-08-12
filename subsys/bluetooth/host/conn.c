@@ -1577,6 +1577,7 @@ static void deferred_work(struct k_work *work)
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
 	struct bt_conn *conn = CONTAINER_OF(dwork, struct bt_conn, deferred_work);
 	const struct bt_le_conn_param *param;
+	int err;
 
 	BT_DBG("conn %p", conn);
 
@@ -1644,7 +1645,7 @@ static void deferred_work(struct k_work *work)
 					 conn->le.interval_max,
 					 conn->le.pending_latency,
 					 conn->le.pending_timeout);
-		send_conn_le_param_update(conn, param);
+		err = send_conn_le_param_update(conn, param);
 	} else if (IS_ENABLED(CONFIG_BT_GAP_AUTO_UPDATE_CONN_PARAMS)) {
 #if defined(CONFIG_BT_GAP_PERIPHERAL_PREF_PARAMS)
 		param = BT_LE_CONN_PARAM(
@@ -1652,11 +1653,15 @@ static void deferred_work(struct k_work *work)
 				CONFIG_BT_PERIPHERAL_PREF_MAX_INT,
 				CONFIG_BT_PERIPHERAL_PREF_LATENCY,
 				CONFIG_BT_PERIPHERAL_PREF_TIMEOUT);
-		send_conn_le_param_update(conn, param);
+		err = send_conn_le_param_update(conn, param);
 #endif
 	}
 
-	atomic_set_bit(conn->flags, BT_CONN_PERIPHERAL_PARAM_UPDATE);
+	if (!err) {
+		atomic_set_bit(conn->flags, BT_CONN_PERIPHERAL_PARAM_UPDATE);
+	} else {
+		BT_DBG("failed to update conn params (err %d)", err);
+	}
 }
 
 static struct bt_conn *acl_conn_new(void)
