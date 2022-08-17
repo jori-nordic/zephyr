@@ -321,6 +321,11 @@ static void test_main(void)
 	gatt_unsubscribe_short();
 	gatt_unsubscribe_long();
 
+	/* We get to erroneous notifications here */
+	while (num_notifications < NOTIFICATION_COUNT + 2) {
+		k_sleep(K_MSEC(100));
+	}
+
 	printk("Unsubscribed\n");
 
 	PASS("GATT client Passed\n");
