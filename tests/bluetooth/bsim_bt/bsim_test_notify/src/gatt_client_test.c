@@ -136,7 +136,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 	} else if (params->type == BT_GATT_DISCOVER_CHARACTERISTIC) {
 		const struct bt_gatt_chrc *chrc = (struct bt_gatt_chrc *)attr->user_data;
 
-		if (bt_uuid_cmp(chrc->uuid, TEST_CHRC_UUID) == 0) {
+		if (bt_uuid_cmp(chrc->uuid, CHAR1_UUID) == 0) {
 			printk("Found chrc\n");
 			chrc_handle = chrc->value_handle;
 		} else if (bt_uuid_cmp(chrc->uuid, TEST_LONG_CHRC_UUID) == 0) {
@@ -170,25 +170,24 @@ static void gatt_discover(void)
 	printk("Discover complete\n");
 }
 
-static void test_subscribed(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
+static void test_subscribed(struct bt_conn *conn, uint8_t err, struct bt_gatt_subscribe_params *params)
 {
 	if (err) {
 		FAIL("Subscribe failed (err %d)\n", err);
 	}
 
-	SET_FLAG(flag_subscribed);
-
 	if (!params) {
-		printk("params NULL\n");
-		return;
+		FAIL("subscribe cb params NULL\n");
 	}
 
-	if (params->handle == chrc_handle) {
+	SET_FLAG(flag_subscribed);
+
+	if (params->value_handle == chrc_handle) {
 		printk("Subscribed to short characteristic\n");
-	} else if (params->handle == long_chrc_handle) {
+	} else if (params->value_handle == long_chrc_handle) {
 		printk("Subscribed to long characteristic\n");
 	} else {
-		FAIL("Unknown handle %d\n", params->handle);
+		FAIL("Unknown handle %d\n", params->value_handle);
 	}
 }
 
@@ -204,7 +203,7 @@ uint8_t test_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *param
 static struct bt_gatt_discover_params disc_params_short;
 static struct bt_gatt_subscribe_params sub_params_short = {
 	.notify = test_notify,
-	.write = test_subscribed,
+	.subscribe = test_subscribed,
 	.ccc_handle = 0, /* Auto-discover CCC*/
 	.disc_params = &disc_params_short, /* Auto-discover CCC */
 	.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE,
@@ -213,7 +212,7 @@ static struct bt_gatt_subscribe_params sub_params_short = {
 static struct bt_gatt_discover_params disc_params_long;
 static struct bt_gatt_subscribe_params sub_params_long = {
 	.notify = test_notify,
-	.write = test_subscribed,
+	.subscribe = test_subscribed,
 	.ccc_handle = 0, /* Auto-discover CCC*/
 	.disc_params = &disc_params_long, /* Auto-discover CCC */
 	.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE,

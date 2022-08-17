@@ -2667,9 +2667,9 @@ static int gatt_notify_multiple_verify_args(struct bt_conn *conn,
 #endif
 
 	/* This API guarantees an ATT_MULTIPLE_HANDLE_VALUE_NTF over the air. */
-	if (!gatt_cf_notify_multi(conn)) {
-		return -EOPNOTSUPP;
-	}
+	/* if (!gatt_cf_notify_multi(conn)) { */
+	/* 	return -EOPNOTSUPP; */
+	/* } */
 
 	return 0;
 }

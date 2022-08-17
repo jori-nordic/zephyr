@@ -116,21 +116,114 @@ static void notification_sent(struct bt_conn *conn, void *user_data)
 	printk("Sent notification #%u with length %d\n", num_notifications_sent++, *length);
 }
 
+/*
+ * BT_ATT_PREPARE_COUNT has to be adjusted in order to use the largest size.
+ * Partial writes will work, but partial reads are not implemented in the host
+ * test adapter yet. */
+typedef struct {
+	uint16_t len;
+	uint8_t buf[513];
+} gatt_attr_data_t;
+
+ssize_t on_attr_write_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			 const void *buf, uint16_t len, uint16_t offset,
+			 uint8_t flags) {
+	return len;
+}
+ssize_t on_attr_read_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset) {
+	return len;
+}
+void on_gatt_ccc_changed_cb(const struct bt_gatt_attr *attr, uint16_t value) {
+	const bool notif_enabled = (value == BT_GATT_CCC_NOTIFY);
+
+	if (notif_enabled) {
+		SET_FLAG(flag_short_subscribe);
+	}
+
+	printk("Custom notifications %s\n", notif_enabled ? "enabled" : "disabled");
+}
+
+static ssize_t on_attr_delayed_read_cb(struct bt_conn *conn,
+				       const struct bt_gatt_attr *attr,
+				       void *buf, uint16_t len, uint16_t offset)
+{
+	gatt_attr_data_t *data = attr->user_data;
+	/* Sleep when retrieving this attribute.
+	 * This will ensure that the second request is sent on another bearer,
+	 * as a response has not been received for the request on
+	 * the first bearer.
+	 */
+	k_sleep(K_MSEC(500));
+	ssize_t length = bt_gatt_attr_read(conn, attr, buf, len, offset,
+					   data->buf, data->len);
+	return length;
+}
+static struct bt_uuid_16 primary_service_uuid = BT_UUID_INIT_16(0xf13a);
+static struct bt_uuid_16 char_1_uuid = BT_UUID_INIT_16(0xf13b);
+static struct bt_uuid_16 char_2_uuid = BT_UUID_INIT_16(0xf13c);
+static struct bt_uuid_16 char_3_uuid = BT_UUID_INIT_16(0xf13d);
+static struct bt_uuid_16 char_4_uuid = BT_UUID_INIT_16(0xf13e);
+static gatt_attr_data_t char1_data, char2_data, char3_data, char4_data;
+
+static struct bt_gatt_attr gatt_service_attrs[] = {
+	BT_GATT_PRIMARY_SERVICE(&primary_service_uuid.uuid),
+	BT_GATT_CHARACTERISTIC(&char_1_uuid.uuid,
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE |
+				       BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       on_attr_read_cb, on_attr_write_cb, &char1_data),
+	BT_GATT_CCC(on_gatt_ccc_changed_cb,
+		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	BT_GATT_CHARACTERISTIC(&char_2_uuid.uuid,
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE |
+				       BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       on_attr_read_cb, on_attr_write_cb, &char2_data),
+	BT_GATT_CCC(on_gatt_ccc_changed_cb,
+		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	BT_GATT_CHARACTERISTIC(
+		&char_3_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+		BT_GATT_PERM_READ | BT_GATT_PERM_WRITE, on_attr_delayed_read_cb,
+		on_attr_write_cb, &char3_data),
+	BT_GATT_CHARACTERISTIC(&char_4_uuid.uuid,
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       on_attr_read_cb, on_attr_write_cb, &char4_data),
+};
+
+static struct bt_gatt_service gatt_service =
+	BT_GATT_SERVICE(gatt_service_attrs);
+
 static inline void short_notify(void)
 {
 	static size_t length = CHRC_SIZE;
-	static struct bt_gatt_notify_params params = {
-		.attr = &attr_test_svc[1],
-		.data = chrc_data,
-		.len = CHRC_SIZE,
-		.func = notification_sent,
-		.user_data = &length,
-		.uuid = NULL,
-	};
+
+	const size_t max_cnt = CONFIG_BT_L2CAP_TX_BUF_COUNT;
+	struct bt_gatt_notify_params params[max_cnt];
+
 	int err;
 
+	(void)memset(params, 0, sizeof(params));
+
+	struct bt_gatt_attr *vnd_ind_attr;
+	vnd_ind_attr = bt_gatt_find_by_uuid(NULL, 0, &char_1_uuid.uuid);
+	printk("find-by-uuid: %p direct %p\n", vnd_ind_attr, &gatt_service_attrs[1]);
+
+	for (uint16_t i = 0U; i < max_cnt; i++) {
+		/* params[i].attr = &gatt_service_attrs[1]; */
+		params[i].attr = vnd_ind_attr;
+		params[i].data = chrc_data;
+		params[i].len = CHRC_SIZE;
+		params[i].func = notification_sent;
+		params[i].user_data = &length;
+		params[i].uuid = NULL;
+	}
+
+	printk("Sending %d notifications\n\n", max_cnt);
+
 	do {
-		err = bt_gatt_notify_cb(g_conn, &params);
+		err = bt_gatt_notify_multiple(g_conn, max_cnt, params);
 
 		if (err == -ENOMEM) {
 			k_sleep(K_MSEC(10));
@@ -175,6 +268,11 @@ static void test_main(void)
 	if (err != 0) {
 		FAIL("Bluetooth init failed (err %d)\n", err);
 		return;
+	}
+
+	err = bt_gatt_service_register(&gatt_service);
+	if (err) {
+		FAIL("register err %d\n", err);
 	}
 
 	printk("Bluetooth initialized\n");
