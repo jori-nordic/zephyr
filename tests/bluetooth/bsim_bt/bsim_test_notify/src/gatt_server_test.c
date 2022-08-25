@@ -97,7 +97,7 @@ static void setup(void)
 
 
 
-	/* Create and bond id a {{{ */
+	/* Create and bond id a  */
 	printk("sync 1: Bonding id a\n");
 	addr = peripheral_id_a();
 	id_a = bt_id_create(&addr, NULL);
@@ -124,9 +124,9 @@ static void setup(void)
 	WAIT_FOR_FLAG(flag_is_connected);
 	/* Central should bond here. */
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
-	/* }}} */
 
-	/* Create and bond id b {{{ */
+
+	/* Create and bond id b  */
 	printk("sync 2: Bonding id b\n");
 	addr = peripheral_id_b();
 	id_b = bt_id_create(&addr, NULL);
@@ -154,11 +154,11 @@ static void setup(void)
 	central = *bt_conn_get_dst(g_conn);
 	/* Central should bond here. */
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
-	/* }}} */
+
 
 	bt_id_delete(id_a);
 
-	/* Directed advertisement connect {{{ */
+	/* Directed advertisement connect  */
 	adv_param3 = (struct bt_le_adv_param){};
 	adv_param3.interval_min = 0x0020;
 	adv_param3.interval_max = 0x4000;
@@ -176,7 +176,7 @@ static void setup(void)
 
 	WAIT_FOR_FLAG(flag_is_connected);
 	/* Central should verify that its bond with id_b works as expected. */
-	/* }}} */
+
 }
 
 static struct bt_conn_cb conn_callbacks = {
