@@ -33,17 +33,19 @@ extern enum bst_result_t bst_result;
 #define SET_FLAG(flag) (void)atomic_set(&flag, (atomic_t)true)
 #define UNSET_FLAG(flag) (void)atomic_set(&flag, (atomic_t)false)
 #define WAIT_FOR_FLAG(flag)                                                                        \
-	printk("wait set " #flag "\n"); \
+	printk("WAIT_SET( " #flag " )\n"); \
 	while (!(bool)atomic_get(&flag)) {                                                         \
 		(void)k_sleep(K_MSEC(1));                                                          \
 	}\
-	printk("end wait " #flag "\n");
+	printk("FLAG_SET( " #flag " )\n");
 #define WAIT_FOR_FLAG_UNSET(flag)	  \
-	printk("wait unset " #flag "\n"); \
+	printk("WAIT_UNSET( " #flag " )\n"); \
 	while ((bool)atomic_get(&flag)) { \
 		(void)k_sleep(K_MSEC(1)); \
 	}\
-	printk("end wait " #flag "\n");
+	printk("FLAG_UNSET( " #flag " )\n");
+
+#define ASSERT(expr, ...) if (! (expr)) {FAIL(__VA_ARGS__);}
 
 #define FAIL(...)                                                                                  \
 	do {                                                                                       \

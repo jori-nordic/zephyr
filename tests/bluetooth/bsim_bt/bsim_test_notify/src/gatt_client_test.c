@@ -140,6 +140,7 @@ static void setup(void)
 	BUILD_ASSERT(CONFIG_BT_MAX_PAIRED >= 2, "CONFIG_BT_MAX_PAIRED is too small.");
 
 	/* Connect and bond with remote id a  */
+	printk("\n");
 	printk("sync 1: Bonding id a\n");
 	expected_addr = BT_ADDR_LE_ANY[0];
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
@@ -167,6 +168,7 @@ static void setup(void)
 
 
 	/* Connect and bond with remote id b  */
+	printk("\n");
 	printk("sync 2: Bonding id b\n");
 	expected_addr = BT_ADDR_LE_ANY[0];
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
@@ -181,7 +183,6 @@ static void setup(void)
 	if (err) {
 		FAIL("Starting encryption procedure failed (%d)\n", err);
 	}
-	printk("bt_conn_set_security ok\n");
 
 	WAIT_FOR_FLAG(flag_is_bonded);
 

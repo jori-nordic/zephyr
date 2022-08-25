@@ -73,6 +73,22 @@ static struct bt_conn_auth_info_cb bt_conn_auth_info_cb = {
 	.pairing_complete = pairing_complete,
 };
 
+static void adv_on_id(int id, struct bt_le_adv_param *param)
+{
+	memset(param, 0, sizeof(*param));
+	param->id = id;
+
+	param->interval_min = 0x0020;
+	param->interval_max = 0x4000;
+	param->options |= BT_LE_ADV_OPT_USE_NAME;
+	param->options |= BT_LE_ADV_OPT_ONE_TIME;
+	param->options |= BT_LE_ADV_OPT_CONNECTABLE;
+	int err = bt_le_adv_start(param, NULL, 0, NULL, 0);
+	ASSERT(err == 0, "Advertising failed to start (err %d)\n", err);
+
+	printk("bt_le_adv_start ok\n");
+}
+
 static void setup(void)
 {
 	int err;
@@ -95,68 +111,32 @@ static void setup(void)
 	BUILD_ASSERT(CONFIG_BT_MAX_PAIRED >= 2, "CONFIG_BT_MAX_PAIRED is too small.");
 	BUILD_ASSERT(CONFIG_BT_ID_MAX >= 3, "CONFIG_BT_ID_MAX is too small.");
 
-
-
 	/* Create and bond id a  */
 	printk("sync 1: Bonding id a\n");
 	addr = peripheral_id_a();
 	id_a = bt_id_create(&addr, NULL);
-	if (id_a < 0) {
-		FAIL("bt_id_create id_a failed (err %d)\n", id_a);
-		return;
-	}
+	ASSERT(id_a >= 0, "bt_id_create id_a failed (err %d)\n", id_a);
 	printk("bt_id_create id_a: %d\n", id_a);
 
-	adv_param1 = (struct bt_le_adv_param){};
-	adv_param1.interval_min = 0x0020;
-	adv_param1.interval_max = 0x4000;
-	adv_param1.options |= BT_LE_ADV_OPT_USE_NAME;
-	adv_param1.options |= BT_LE_ADV_OPT_ONE_TIME;
-	adv_param1.options |= BT_LE_ADV_OPT_CONNECTABLE;
-	adv_param1.id = id_a;
-	err = bt_le_adv_start(&adv_param1, NULL, 0, NULL, 0);
-	if (err != 0) {
-		FAIL("Advertising failed to start (err %d)\n", err);
-		return;
-	}
-	printk("bt_le_adv_start ok\n");
-
+	adv_on_id(id_a, &adv_param1);
 	WAIT_FOR_FLAG(flag_is_connected);
-	/* Central should bond here. */
+	/* Central should bond here, and trigger a disconnect. */
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
-
 
 	/* Create and bond id b  */
 	printk("sync 2: Bonding id b\n");
 	addr = peripheral_id_b();
 	id_b = bt_id_create(&addr, NULL);
-	if (id_b < 0) {
-		FAIL("bt_id_create id_b failed (err %d)\n", id_b);
-		return;
-	}
+	ASSERT(id_b >= 0, "bt_id_create id_b failed (err %d)\n", id_b);
 	printk("bt_id_create: %d\n", id_b);
 
-	adv_param2 = (struct bt_le_adv_param){};
-	adv_param2.interval_min = 0x0020;
-	adv_param2.interval_max = 0x4000;
-	adv_param2.options |= BT_LE_ADV_OPT_USE_NAME;
-	adv_param2.options |= BT_LE_ADV_OPT_ONE_TIME;
-	adv_param2.options |= BT_LE_ADV_OPT_CONNECTABLE;
-	adv_param2.id = id_b;
-	err = bt_le_adv_start(&adv_param2, NULL, 0, NULL, 0);
-	if (err != 0) {
-		FAIL("Advertising failed to start (err %d)\n", err);
-		return;
-	}
-	printk("bt_le_adv_start ok\n");
-
+	adv_on_id(id_b, &adv_param2);
 	WAIT_FOR_FLAG(flag_is_connected);
 	central = *bt_conn_get_dst(g_conn);
 	/* Central should bond here. */
 	WAIT_FOR_FLAG_UNSET(flag_is_connected);
 
-
-	bt_id_delete(id_a);
+	/* bt_id_delete(id_a); */
 
 	/* Directed advertisement connect  */
 	adv_param3 = (struct bt_le_adv_param){};
@@ -176,7 +156,6 @@ static void setup(void)
 
 	WAIT_FOR_FLAG(flag_is_connected);
 	/* Central should verify that its bond with id_b works as expected. */
-
 }
 
 static struct bt_conn_cb conn_callbacks = {
