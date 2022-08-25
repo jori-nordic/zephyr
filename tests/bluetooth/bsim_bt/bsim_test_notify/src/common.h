@@ -12,10 +12,12 @@
 #include "bs_tracing.h"
 #include "time_machine.h"
 #include "bstests.h"
+#include "zephyr/sys/__assert.h"
 
 #include <zephyr/types.h>
 #include <stddef.h>
 #include <errno.h>
+#include <stdint.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -31,9 +33,17 @@ extern enum bst_result_t bst_result;
 #define SET_FLAG(flag) (void)atomic_set(&flag, (atomic_t)true)
 #define UNSET_FLAG(flag) (void)atomic_set(&flag, (atomic_t)false)
 #define WAIT_FOR_FLAG(flag)                                                                        \
+	printk("wait set " #flag "\n"); \
 	while (!(bool)atomic_get(&flag)) {                                                         \
 		(void)k_sleep(K_MSEC(1));                                                          \
-	}
+	}\
+	printk("end wait " #flag "\n");
+#define WAIT_FOR_FLAG_UNSET(flag)	  \
+	printk("wait unset " #flag "\n"); \
+	while ((bool)atomic_get(&flag)) { \
+		(void)k_sleep(K_MSEC(1)); \
+	}\
+	printk("end wait " #flag "\n");
 
 #define FAIL(...)                                                                                  \
 	do {                                                                                       \
@@ -47,23 +57,26 @@ extern enum bst_result_t bst_result;
 		bs_trace_info_time(1, __VA_ARGS__);                                                \
 	} while (0)
 
-#define CHRC_SIZE 10
-#define LONG_CHRC_SIZE 40
-
-#define TEST_SERVICE_UUID                                                                          \
-	BT_UUID_DECLARE_128(0x01, 0x23, 0x45, 0x67, 0x89, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,      \
-			    0x07, 0x08, 0x09, 0x00, 0x00)
-
-#define TEST_CHRC_UUID                                                                             \
-	BT_UUID_DECLARE_128(0x01, 0x23, 0x45, 0x67, 0x89, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,      \
-			    0x07, 0x08, 0x09, 0xFF, 0x00)
-
-#define TEST_LONG_CHRC_UUID                                                                        \
-	BT_UUID_DECLARE_128(0x01, 0x23, 0x45, 0x67, 0x89, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,      \
-			    0x07, 0x08, 0x09, 0xFF, 0x11)
-
 void test_tick(bs_time_t HW_device_time);
 void test_init(void);
 
-#define NOTIFICATION_COUNT 10
-BUILD_ASSERT(NOTIFICATION_COUNT % 2 == 0);
+static inline bt_addr_le_t peripheral_id_a() {
+	bt_addr_le_t addr;
+	int err = bt_addr_le_from_str("FC:AF:B0:2F:D2:A8", "random", &addr);
+	__ASSERT_NO_MSG(!err);
+	return addr;
+}
+
+static inline bt_addr_le_t peripheral_id_b() {
+	bt_addr_le_t addr;
+	int err = bt_addr_le_from_str("FC:75:B3:90:E6:D9", "random", &addr);
+	__ASSERT_NO_MSG(!err);
+	return addr;
+}
+
+static inline bt_addr_le_t central_id() {
+	bt_addr_le_t addr;
+	int err = bt_addr_le_from_str("FF:98:69:6B:E4:D5", "random", &addr);
+	__ASSERT_NO_MSG(!err);
+	return addr;
+}
