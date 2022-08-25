@@ -1210,6 +1210,7 @@ static int le_ext_adv_param_set(struct bt_le_ext_adv *adv,
 	atomic_set_bit(adv->flags, BT_ADV_PARAMS_SET);
 
 	if (atomic_test_and_clear_bit(adv->flags, BT_ADV_RANDOM_ADDR_PENDING)) {
+		BT_ERR("set random");
 		err = bt_id_set_adv_random_addr(adv, &adv->random_addr.a);
 		if (err) {
 			return err;

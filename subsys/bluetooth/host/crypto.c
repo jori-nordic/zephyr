@@ -106,7 +106,7 @@ int bt_encrypt_le(const uint8_t key[16], const uint8_t plaintext[16],
 	struct tc_aes_key_sched_struct s;
 	uint8_t tmp[16];
 
-	BT_DBG("key %s", bt_hex(key, 16));
+	BT_ERR("key %s", bt_hex(key, 16));
 	BT_DBG("plaintext %s", bt_hex(plaintext, 16));
 
 	sys_memcpy_swap(tmp, key, 16);
@@ -123,7 +123,7 @@ int bt_encrypt_le(const uint8_t key[16], const uint8_t plaintext[16],
 
 	sys_mem_swap(enc_data, 16);
 
-	BT_DBG("enc_data %s", bt_hex(enc_data, 16));
+	BT_ERR("enc_data %s", bt_hex(enc_data, 16));
 
 	return 0;
 }

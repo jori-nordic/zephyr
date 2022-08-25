@@ -21,12 +21,12 @@ int bt_rand(void *buf, size_t len)
 int bt_encrypt_le(const uint8_t key[16], const uint8_t plaintext[16],
 		  uint8_t enc_data[16])
 {
-	BT_DBG("key %s", bt_hex(key, 16));
-	BT_DBG("plaintext %s", bt_hex(plaintext, 16));
+	BT_ERR("key %s", bt_hex(key, 16));
+	BT_ERR("plaintext %s", bt_hex(plaintext, 16));
 
 	ecb_encrypt(key, plaintext, enc_data, NULL);
 
-	BT_DBG("enc_data %s", bt_hex(enc_data, 16));
+	BT_ERR("enc_data %s", bt_hex(enc_data, 16));
 
 	return 0;
 }

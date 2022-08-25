@@ -24,7 +24,7 @@
 
 #include "settings.h"
 
-#define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_CORE)
+#define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_ID)
 #define LOG_MODULE_NAME bt_id
 #include "common/log.h"
 
@@ -119,6 +119,7 @@ static int set_random_address(const bt_addr_t *addr)
 
 	/* Do nothing if we already have the right address */
 	if (!bt_addr_cmp(addr, &bt_dev.random_addr.a)) {
+		BT_DBG("do nothing");
 		return 0;
 	}
 
@@ -296,6 +297,7 @@ int bt_id_set_adv_private_addr(struct bt_le_ext_adv *adv)
 	}
 
 	if (adv == bt_le_adv_lookup_legacy() && adv->id == BT_ID_DEFAULT) {
+		BT_ERR("legacy");
 		/* Make sure that a Legacy advertiser using default ID has same
 		 * RPA address as scanner roles.
 		 */
@@ -312,10 +314,15 @@ int bt_id_set_adv_private_addr(struct bt_le_ext_adv *adv)
 		return 0;
 	}
 
+	char str[100];
+	bin2hex(bt_dev.irk[adv->id], sizeof(bt_dev.irk[adv->id]), str, sizeof(str));
+	BT_ERR("using IRK[%d]: %s", adv->id, str);
+	/* FIXME: the first address that this spits out is always the same */
 	err = bt_rpa_create(bt_dev.irk[adv->id], &rpa);
 	if (!err) {
 		err = bt_id_set_adv_random_addr(adv, &rpa);
 		if (!err) {
+			BT_ERR("mark rpa valid");
 			atomic_set_bit(adv->flags, BT_ADV_RPA_VALID);
 		}
 	}
@@ -747,6 +754,9 @@ static int hci_id_add(uint8_t id, const bt_addr_le_t *addr, uint8_t peer_irk[16]
 	memcpy(cp->peer_irk, peer_irk, 16);
 
 #if defined(CONFIG_BT_PRIVACY)
+	char str[100];
+	bin2hex(peer_irk, 16, str, sizeof(str));
+	BT_ERR("IRK: %s", str);
 	(void)memcpy(cp->local_irk, &bt_dev.irk[id], 16);
 #else
 	(void)memset(cp->local_irk, 0, 16);
@@ -1605,6 +1615,7 @@ int bt_id_set_adv_own_addr(struct bt_le_ext_adv *adv, uint32_t options,
 
 	/* Set which local identity address we're advertising with */
 	id_addr = &bt_dev.id_addr[adv->id];
+	BT_DBG("Using ID %d", id_addr);
 
 	if (options & BT_LE_ADV_OPT_CONNECTABLE) {
 		if (dir_adv && (options & BT_LE_ADV_OPT_DIR_ADDR_RPA) &&
@@ -1614,6 +1625,7 @@ int bt_id_set_adv_own_addr(struct bt_le_ext_adv *adv, uint32_t options,
 
 		if (IS_ENABLED(CONFIG_BT_PRIVACY) &&
 		    !(options & BT_LE_ADV_OPT_USE_IDENTITY)) {
+			BT_ERR("use private addr");
 			err = bt_id_set_adv_private_addr(adv);
 			if (err) {
 				return err;

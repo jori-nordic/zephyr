@@ -56,8 +56,8 @@ static int ah(const uint8_t irk[16], const uint8_t r[3], uint8_t out[3])
 	uint8_t res[16];
 	int err;
 
-	BT_DBG("irk %s", bt_hex(irk, 16));
-	BT_DBG("r %s", bt_hex(r, 3));
+	BT_ERR("irk %s", bt_hex(irk, 16));
+	BT_ERR("r %s", bt_hex(r, 3));
 
 	/* r' = padding || r */
 	memcpy(res, r, 3);
@@ -69,7 +69,7 @@ static int ah(const uint8_t irk[16], const uint8_t r[3], uint8_t out[3])
 	}
 
 	/* The output of the random address function ah is:
-	 *      ah(h, r) = e(k, r') mod 2^24
+	 *      ah(k, r) = e(k, r') mod 2^24
 	 * The output of the security function e is then truncated to 24 bits
 	 * by taking the least significant 24 bits of the output of e as the
 	 * result of ah.
@@ -105,6 +105,7 @@ int bt_rpa_create(const uint8_t irk[16], bt_addr_t *rpa)
 	if (err) {
 		return err;
 	}
+	LOG_HEXDUMP_ERR(rpa->val + 3, 3, "internal rand");
 
 	BT_ADDR_SET_RPA(rpa);
 
@@ -113,7 +114,7 @@ int bt_rpa_create(const uint8_t irk[16], bt_addr_t *rpa)
 		return err;
 	}
 
-	BT_DBG("Created RPA %s", bt_addr_str((bt_addr_t *)rpa->val));
+	BT_ERR("Created RPA %s", bt_addr_str((bt_addr_t *)rpa->val));
 
 	return 0;
 }

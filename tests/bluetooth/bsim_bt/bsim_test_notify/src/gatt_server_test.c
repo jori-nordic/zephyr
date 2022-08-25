@@ -73,6 +73,17 @@ static struct bt_conn_auth_info_cb bt_conn_auth_info_cb = {
 	.pairing_complete = pairing_complete,
 };
 
+static void format_id_addr(int id, char addr_str[BT_ADDR_LE_STR_LEN])
+{
+	bt_addr_le_t addrs[CONFIG_BT_ID_MAX];
+	size_t count = CONFIG_BT_ID_MAX;
+
+	bt_id_get(addrs, &count);
+	ASSERT(count > id, "");
+
+	bt_addr_le_to_str(&addrs[id], addr_str, BT_ADDR_LE_STR_LEN);
+}
+
 static void adv_on_id(int id, struct bt_le_adv_param *param)
 {
 	memset(param, 0, sizeof(*param));
@@ -86,9 +97,13 @@ static void adv_on_id(int id, struct bt_le_adv_param *param)
 	int err = bt_le_adv_start(param, NULL, 0, NULL, 0);
 	ASSERT(err == 0, "Advertising failed to start (err %d)\n", err);
 
-	printk("bt_le_adv_start ok\n");
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	format_id_addr(id, addr_str);
+	printk("Advertising started on ID %d - %s\n", id, addr_str);
 }
 
+int bt_encrypt_le(const uint8_t key[16], const uint8_t plaintext[16],
+		  uint8_t enc_data[16]);
 static void setup(void)
 {
 	int err;
@@ -129,6 +144,35 @@ static void setup(void)
 	id_b = bt_id_create(&addr, NULL);
 	ASSERT(id_b >= 0, "bt_id_create id_b failed (err %d)\n", id_b);
 	printk("bt_id_create: %d\n", id_b);
+
+
+	printk("########################################\n");
+	char irka[] = "b933c0ef1fa8d711ffa3c5e4e0e664ba";
+	char irkb[] = "73ce789b18f08f69fb06d228251eef4c";
+	char rand[] = "67635b00000000000000000000000000";
+
+	uint8_t key[16];
+	uint8_t plaintext[16];
+	uint8_t enc_data[16];
+
+	hex2bin(irka, sizeof(irka)-1, key, 16);
+	hex2bin(rand, sizeof(rand)-1, plaintext, 16);
+
+	bt_encrypt_le(key, plaintext, enc_data);
+
+	char str[100];
+	bin2hex(enc_data, 16, str, sizeof(str));
+	printk("rpa[a]: %s\n", str);
+
+	hex2bin(irkb, sizeof(irkb)-1, key, 16);
+	bt_encrypt_le(key, plaintext, enc_data);
+
+	bin2hex(enc_data, 16, str, sizeof(str));
+	/* FIXME: gives the same output wtf?? */
+	/* Maaaaybe it's just that ECB peripheral is not correctly implemented in bsim */
+	printk("rpa[b]: %s\n", str);
+
+	FAIL("a");
 
 	adv_on_id(id_b, &adv_param2);
 	WAIT_FOR_FLAG(flag_is_connected);
