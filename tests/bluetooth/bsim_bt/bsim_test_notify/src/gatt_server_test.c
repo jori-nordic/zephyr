@@ -73,6 +73,17 @@ static struct bt_conn_auth_info_cb bt_conn_auth_info_cb = {
 	.pairing_complete = pairing_complete,
 };
 
+static void format_id_addr(int id, char addr_str[BT_ADDR_LE_STR_LEN])
+{
+	bt_addr_le_t addrs[CONFIG_BT_ID_MAX];
+	size_t count = CONFIG_BT_ID_MAX;
+
+	bt_id_get(addrs, &count);
+	ASSERT(count > id, "");
+
+	bt_addr_le_to_str(&addrs[id], addr_str, BT_ADDR_LE_STR_LEN);
+}
+
 static void adv_on_id(int id, struct bt_le_adv_param *param)
 {
 	memset(param, 0, sizeof(*param));
@@ -86,7 +97,9 @@ static void adv_on_id(int id, struct bt_le_adv_param *param)
 	int err = bt_le_adv_start(param, NULL, 0, NULL, 0);
 	ASSERT(err == 0, "Advertising failed to start (err %d)\n", err);
 
-	printk("bt_le_adv_start ok\n");
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	format_id_addr(id, addr_str);
+	printk("Advertising started on ID %d - %s\n", id, addr_str);
 }
 
 static void setup(void)
