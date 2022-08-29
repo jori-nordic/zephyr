@@ -7,6 +7,7 @@
  */
 
 #include "common.h"
+#include <zephyr/sys/__assert.h>
 
 #define LOG_MODULE_NAME main_l2cap_ecred
 #include <zephyr/logging/log.h>
@@ -14,285 +15,207 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL_DBG);
 
 extern enum bst_result_t bst_result;
 
-static struct bt_conn *default_conn;
+static struct bt_conn *connections[CONFIG_BT_MAX_CONN] = {0};
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 };
 
-#define DATA_MTU CONFIG_BT_L2CAP_TX_MTU
-#define DATA_MPS 65
-#define DATA_BUF_SIZE BT_L2CAP_SDU_BUF_SIZE(DATA_MTU)
-#define L2CAP_CHANNELS 2
-#define SERVERS 1
-#define SDU_SEND_COUNT 200
-#define ECRED_CHAN_MAX 5
-#define LONG_MSG (DATA_MTU - 500)
-#define SHORT_MSG (DATA_MPS - 2)
-#define LONG_MSG_CHAN_IDX 0
-#define SHORT_MSG_CHAN_IDX 1
-
-NET_BUF_POOL_FIXED_DEFINE(rx_data_pool, L2CAP_CHANNELS, BT_L2CAP_BUF_SIZE(DATA_BUF_SIZE), 8, NULL);
-NET_BUF_POOL_FIXED_DEFINE(tx_data_pool_0, 1, BT_L2CAP_BUF_SIZE(DATA_MTU), 8, NULL);
-NET_BUF_POOL_FIXED_DEFINE(tx_data_pool_1, 1, BT_L2CAP_BUF_SIZE(DATA_MTU), 8, NULL);
-
-static struct bt_l2cap_server servers[SERVERS];
-void send_sdu_chan_worker(struct k_work *item);
-struct channel {
-	uint8_t chan_id; /* Internal number that identifies L2CAP channel. */
-	struct bt_l2cap_le_chan le;
-	bool in_use;
-	size_t sdus_received;
-	size_t bytes_to_send;
-	uint8_t iteration;
-	struct net_buf *buf;
-	struct k_work work;
-	struct k_work_q work_queue;
-	uint8_t payload[DATA_MTU];
-};
-static struct channel channels[L2CAP_CHANNELS];
-
 CREATE_FLAG(is_connected);
-CREATE_FLAG(unsequenced_data);
+CREATE_FLAG(flag_l2cap_connected);
 
-#define T_STACK_SIZE 512
-#define T_PRIORITY 5
+#define LOCAL_HOST_L2CAP_NETBUF_COUNT 20
+#define HOST_LIB_MAX_L2CAP_DATA_LEN 200
+#define L2CAP_QUEUE_SIZE 2
+#define INIT_CREDITS 20
 
-static K_THREAD_STACK_ARRAY_DEFINE(stack_area, L2CAP_CHANNELS, T_STACK_SIZE);
-static K_SEM_DEFINE(chan_conn_sem, 0, L2CAP_CHANNELS);
-static K_SEM_DEFINE(all_chan_conn_sem, 0, 1);
-static K_SEM_DEFINE(all_chan_disconn_sem, 0, 1);
-static K_SEM_DEFINE(sent_sem, 0, L2CAP_CHANNELS);
+uint16_t l2cap_mtu = 250;
 
-static void init_workqs(void)
+NET_BUF_POOL_DEFINE(local_l2cap_tx_pool, LOCAL_HOST_L2CAP_NETBUF_COUNT,
+		    BT_L2CAP_BUF_SIZE(HOST_LIB_MAX_L2CAP_DATA_LEN), 8,
+		    NULL);
+
+/* Only one SDU per link will be received at a time */
+NET_BUF_POOL_DEFINE(local_l2cap_rx_pool, CONFIG_BT_MAX_CONN,
+		    BT_L2CAP_BUF_SIZE(HOST_LIB_MAX_L2CAP_DATA_LEN), 8,
+		    NULL);
+
+/* static uint8_t tx_data[HOST_LIB_MAX_L2CAP_DATA_LEN]; */
+
+int l2cap_chan_send(uint32_t l2cap_handle, uint8_t *data, size_t len)
 {
-	for (int i = 0; i < L2CAP_CHANNELS; i++) {
-		k_work_queue_init(&channels[i].work_queue);
-		k_work_queue_start(&channels[i].work_queue, stack_area[i],
-		K_THREAD_STACK_SIZEOF(*stack_area), T_PRIORITY, NULL);
-	}
-}
+	struct bt_l2cap_chan *chan = (struct bt_l2cap_chan *)l2cap_handle;
 
-static struct net_buf *chan_alloc_buf_cb(struct bt_l2cap_chan *chan)
-{
-	LOG_DBG("Allocated on chan %p", chan);
-	return net_buf_alloc(&rx_data_pool, K_FOREVER);
-}
-
-static int chan_recv_cb(struct bt_l2cap_chan *l2cap_chan, struct net_buf *buf)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-	const uint32_t received_iterration = net_buf_pull_le32(buf);
-
-	LOG_DBG("received_iterration %i sdus_received %i, chan_id: %d, data_length: %d",
-		received_iterration, chan->sdus_received, chan->chan_id, buf->len);
-	if (!TEST_FLAG(unsequenced_data) && received_iterration != chan->sdus_received) {
-		FAIL("Received out of sequence data.");
-	}
-
-	const int retval = memcmp(buf->data + sizeof(received_iterration),
-			    chan->payload + sizeof(received_iterration),
-			    buf->len - sizeof(received_iterration));
-	if (retval) {
-		FAIL("Payload received didn't match expected value memcmp returned %i", retval);
-	}
-
-	/*By the time we rx on long msg channel we should have already rx on short msg channel*/
-	if (chan->chan_id == 0) {
-		if (channels[SHORT_MSG_CHAN_IDX].sdus_received !=
-			(channels[LONG_MSG_CHAN_IDX].sdus_received + 1)) {
-			FAIL("Didn't receive on short msg channel first");
-		}
-	}
-
-	chan->sdus_received++;
-
-	return 0;
-}
-
-static void chan_sent_cb(struct bt_l2cap_chan *l2cap_chan)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-
-	chan->buf = 0;
-	k_sem_give(&sent_sem);
-
-	LOG_DBG("chan_id: %d", chan->chan_id);
-}
-
-static void chan_connected_cb(struct bt_l2cap_chan *l2cap_chan)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-
-	LOG_DBG("chan_id: %d", chan->chan_id);
-
-	LOG_DBG("tx.mtu %d, tx.mps: %d, rx.mtu: %d, rx.mps %d", sys_cpu_to_le16(chan->le.tx.mtu),
-		sys_cpu_to_le16(chan->le.tx.mps), sys_cpu_to_le16(chan->le.rx.mtu),
-		sys_cpu_to_le16(chan->le.rx.mps));
-
-	k_sem_give(&chan_conn_sem);
-
-	if (k_sem_count_get(&chan_conn_sem) == L2CAP_CHANNELS) {
-		k_sem_give(&all_chan_conn_sem);
-		k_sem_reset(&all_chan_disconn_sem);
-	}
-}
-
-static void chan_disconnected_cb(struct bt_l2cap_chan *l2cap_chan)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-
-	LOG_DBG("chan_id: %d", chan->chan_id);
-
-	chan->in_use = false;
-	k_sem_take(&chan_conn_sem, K_FOREVER);
-
-	if (k_sem_count_get(&chan_conn_sem) == 0) {
-		k_sem_give(&all_chan_disconn_sem);
-		k_sem_reset(&all_chan_conn_sem);
-	}
-}
-
-static void chan_status_cb(struct bt_l2cap_chan *l2cap_chan, atomic_t *status)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-
-	LOG_DBG("chan_id: %d, status: %ld", chan->chan_id, *status);
-}
-
-static void chan_released_cb(struct bt_l2cap_chan *l2cap_chan)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-
-	LOG_DBG("chan_id: %d", chan->chan_id);
-}
-
-static void chan_reconfigured_cb(struct bt_l2cap_chan *l2cap_chan)
-{
-	struct channel *chan = CONTAINER_OF(l2cap_chan, struct channel, le);
-
-	LOG_DBG("chan_id: %d", chan->chan_id);
-}
-
-static const struct bt_l2cap_chan_ops l2cap_ops = {
-	.alloc_buf = chan_alloc_buf_cb,
-	.recv = chan_recv_cb,
-	.sent = chan_sent_cb,
-	.connected = chan_connected_cb,
-	.disconnected = chan_disconnected_cb,
-	.status = chan_status_cb,
-	.released = chan_released_cb,
-	.reconfigured = chan_reconfigured_cb,
-};
-
-static struct channel *get_free_channel(void)
-{
-	for (int idx = 0; idx < L2CAP_CHANNELS; idx++) {
-		struct channel *chan = &channels[idx];
-
-		if (chan->in_use) {
-			continue;
-		}
-
-		chan->chan_id = idx;
-		channels[idx].in_use = true;
-		(void)memset(chan->payload, idx, sizeof(chan->payload));
-		k_work_init(&chan->work, send_sdu_chan_worker);
-		chan->le.chan.ops = &l2cap_ops;
-		chan->le.rx.mtu = DATA_MTU;
-		chan->le.rx.mps = DATA_MPS;
-
-		return chan;
-	}
-
-	return NULL;
-}
-
-static void connect_num_channels(uint8_t num_l2cap_channels)
-{
-	struct bt_l2cap_chan *allocated_channels[ECRED_CHAN_MAX] = { NULL };
-
-	for (int i = 0; i < num_l2cap_channels; i++) {
-		struct channel *chan = get_free_channel();
-
-		if (!chan) {
-			FAIL("failed, chan not free");
-			return;
-		}
-
-		allocated_channels[i] = &chan->le.chan;
-	}
-
-	const int err = bt_l2cap_ecred_chan_connect(default_conn, allocated_channels,
-						     servers[0].psm);
-
-	if (err) {
-		FAIL("can't connect ecred %d ", err);
-	}
-}
-
-static void disconnect_all_channels(void)
-{
-	for (int i = 0; i < ARRAY_SIZE(channels); i++) {
-		if (channels[i].in_use) {
-			LOG_DBG("Disconnecting channel: %d)", channels[i].chan_id);
-			const int err = bt_l2cap_chan_disconnect(&channels[i].le.chan);
-
-			if (err) {
-				LOG_DBG("can't disconnect channel (err: %d)", err);
-			}
-
-			channels[i].in_use = false;
-		}
-	}
-}
-
-static int accept(struct bt_conn *conn, struct bt_l2cap_chan **l2cap_chan)
-{
-	struct channel *chan;
-
-	chan = get_free_channel();
-	if (!chan) {
+	struct net_buf *buf = net_buf_alloc(&local_l2cap_tx_pool, K_NO_WAIT);
+	if (buf == NULL) {
 		return -ENOMEM;
 	}
 
-	*l2cap_chan = &chan->le.chan;
+	net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
+	net_buf_add_mem(buf, data, len);
+
+	int ret = bt_l2cap_chan_send(chan, buf);
+	if (ret < 0) {
+		net_buf_unref(buf);
+	}
+
+	return ret;
+}
+
+struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
+{
+	return net_buf_alloc(&local_l2cap_rx_pool, K_NO_WAIT);
+}
+
+void sent_cb(struct bt_l2cap_chan *chan)
+{
+	/* uint32_t conn_index = bt_conn_index(chan->conn); */
+	/* TODO: do something here */
+}
+
+int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
+{
+	/* uint32_t conn_index = bt_conn_index(chan->conn); */
 
 	return 0;
 }
 
-static struct bt_l2cap_server *get_free_server(void)
+void l2cap_chan_connected_cb(struct bt_l2cap_chan *l2cap_chan)
 {
-	for (int i = 0; i < SERVERS; i++) {
-		if (servers[i].psm) {
+	struct bt_l2cap_le_chan *chan =
+		CONTAINER_OF(l2cap_chan, struct bt_l2cap_le_chan, chan);
+
+	SET_FLAG(flag_l2cap_connected);
+	LOG_DBG("%x (tx mtu %d mps %d) (tx mtu %d mps %d)",
+		l2cap_chan,
+		chan->tx.mtu,
+		chan->tx.mps,
+		chan->rx.mtu,
+		chan->rx.mps);
+}
+
+void l2cap_chan_disconnected_cb(struct bt_l2cap_chan *chan)
+{
+	UNSET_FLAG(flag_l2cap_connected);
+	LOG_DBG("%x", chan);
+}
+
+static struct bt_l2cap_chan_ops ops = {
+	.connected = l2cap_chan_connected_cb,
+	.disconnected = l2cap_chan_disconnected_cb,
+	.alloc_buf = alloc_buf_cb,
+	.recv = recv_cb,
+	.sent = sent_cb,
+};
+
+#define HOST_MAX_L2CAP_CHANNELS 10
+
+static struct bt_l2cap_le_chan l2cap_channels[HOST_MAX_L2CAP_CHANNELS];
+
+struct bt_l2cap_le_chan *get_free_l2cap_le_chan(void)
+{
+	for (int i = 0; i < HOST_MAX_L2CAP_CHANNELS; i++) {
+		struct bt_l2cap_le_chan *le_chan = &l2cap_channels[i];
+
+		if (le_chan->state != BT_L2CAP_DISCONNECTED) {
 			continue;
 		}
 
-		return &servers[i];
+		memset(le_chan, 0, sizeof(*le_chan));
+		return le_chan;
 	}
 
 	return NULL;
 }
 
-static void register_l2cap_server(void)
+int server_accept_cb(struct bt_conn *conn, struct bt_l2cap_chan **chan)
 {
-	struct bt_l2cap_server *server;
+	struct bt_l2cap_le_chan *le_chan = NULL;
 
-	server = get_free_server();
-	if (!server) {
-		FAIL("Failed to get free server");
-		return;
+	le_chan = get_free_l2cap_le_chan();
+	if (le_chan == NULL) {
+		return -ENOMEM;
 	}
 
-	server->accept = accept;
-	server->psm = 0;
+	memset(le_chan, 0, sizeof(*le_chan));
+	le_chan->chan.ops = &ops;
+	le_chan->rx.mtu = l2cap_mtu;
+	le_chan->rx.init_credits = INIT_CREDITS;
+	le_chan->tx.init_credits = INIT_CREDITS;
+	*chan = &le_chan->chan;
 
-	if (bt_l2cap_server_register(server) < 0) {
-		FAIL("Failed to get free server");
-		return;
+	return 0;
+}
+
+static struct bt_l2cap_server test_l2cap_server = {
+	.accept = server_accept_cb
+};
+
+static int l2cap_server_register(bt_security_t sec_level)
+{
+	test_l2cap_server.psm = 0;
+	test_l2cap_server.sec_level = sec_level;
+
+	__ASSERT_NO_MSG(bt_l2cap_server_register(&test_l2cap_server) == 0);
+	return test_l2cap_server.psm;
+}
+
+static int l2cap_chan_connect(struct bt_conn *conn, uint16_t psm)
+{
+	__ASSERT_NO_MSG(conn != NULL);
+
+	struct bt_l2cap_le_chan *le_chan = get_free_l2cap_le_chan();
+
+	if (le_chan == NULL) {
+		return -ENOMEM;
 	}
 
-	LOG_DBG("L2CAP server registered, PSM:0x%X", server->psm);
+	le_chan->chan.ops = &ops;
+	le_chan->rx.mtu = l2cap_mtu;
+	le_chan->rx.init_credits = INIT_CREDITS;
+	le_chan->tx.init_credits = INIT_CREDITS;
+
+	__ASSERT_NO_MSG(bt_l2cap_chan_connect(conn, &le_chan->chan, psm) == 0);
+
+	return 0;
+}
+
+static int get_connection(struct bt_conn *conn)
+{
+	for (int i=0; i<CONFIG_BT_MAX_CONN; i++) {
+		if (conn == connections[i]) return i;
+	}
+
+	return -1;
+}
+
+static int register_connection(struct bt_conn *conn)
+{
+	for (int i=0; i<CONFIG_BT_MAX_CONN; i++) {
+		if (connections[i] == NULL) {
+			LOG_DBG("[%d] %p", i, conn);
+			connections[i] = conn;
+			bt_conn_ref(conn);
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+static int deregister_connection(struct bt_conn *conn)
+{
+	int id = get_connection(conn);
+
+	if (id>=0) {
+		LOG_DBG("[%d] %p", id, conn);
+		connections[id] = NULL;
+		bt_conn_unref(conn);
+		return id;
+	} else {
+		FAIL("Connection doesn't exist\n");
+		return -1;
+	}
 }
 
 static void connected(struct bt_conn *conn, uint8_t conn_err)
@@ -303,12 +226,11 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	if (conn_err) {
 		FAIL("Failed to connect to %s (%u)", addr, conn_err);
-		bt_conn_unref(default_conn);
-		default_conn = NULL;
+		deregister_connection(conn);
 		return;
 	}
 
-	default_conn = bt_conn_ref(conn);
+	register_connection(conn);
 	LOG_DBG("%s", addr);
 
 	SET_FLAG(is_connected);
@@ -322,13 +244,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	LOG_DBG("%s (reason 0x%02x)", addr, reason);
 
-	if (default_conn != conn) {
-		FAIL("Conn mismatch disconnect %s %s)", default_conn, conn);
-		return;
-	}
-
-	bt_conn_unref(default_conn);
-	default_conn = NULL;
+	deregister_connection(conn);
 	UNSET_FLAG(is_connected);
 }
 
@@ -337,91 +253,9 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.disconnected = disconnected,
 };
 
-static void send_sdu(int iteration, int chan_idx, int bytes)
-{
-	struct bt_l2cap_chan *chan = &channels[chan_idx].le.chan;
-	struct net_buf *buf;
-
-	/* First 4 bytes in sent payload is iteration count */
-	sys_put_le32(iteration, channels[chan_idx].payload);
-
-	if (channels[chan_idx].buf != 0) {
-		FAIL("Buf should have been deallocated by now");
-		return;
-	}
-
-	if (chan_idx == 0) {
-		buf = net_buf_alloc(&tx_data_pool_0, K_NO_WAIT);
-	} else {
-		buf = net_buf_alloc(&tx_data_pool_1, K_NO_WAIT);
-	}
-
-	if (buf == NULL) {
-		FAIL("Failed to get buff on ch %i, iteration %i should never happen", chan_idx,
-		     chan_idx);
-	}
-
-	channels[chan_idx].buf = buf;
-	net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
-	net_buf_add_mem(buf, channels[chan_idx].payload, bytes);
-
-	LOG_DBG("bt_l2cap_chan_sending ch: %i bytes: %i iteration: %i", chan_idx, bytes, iteration);
-	const int ret = bt_l2cap_chan_send(chan, buf);
-
-	LOG_DBG("bt_l2cap_chan_send returned: %i", ret);
-
-	if (ret < 0) {
-		FAIL("Error: send failed error: %i", ret);
-		channels[chan_idx].buf = 0;
-		net_buf_unref(buf);
-	}
-}
-
-void send_sdu_chan_worker(struct k_work *item)
-{
-	const struct channel *ch = CONTAINER_OF(item, struct channel, work);
-
-	send_sdu(ch->iteration, ch->chan_id, ch->bytes_to_send);
-}
-
-static void send_sdu_concurrently(void)
-{
-	for (int i = 0; i < SDU_SEND_COUNT; i++) {
-		for (int k = 0; k < L2CAP_CHANNELS; k++) {
-			channels[k].iteration = i;
-			/* Assign the right msg to the right channel */
-			channels[k].bytes_to_send = (k == LONG_MSG_CHAN_IDX) ? LONG_MSG : SHORT_MSG;
-			const int err = k_work_submit_to_queue(&channels[k].work_queue,
-								&channels[k].work);
-
-			if (err < 0) {
-				FAIL("Failed to submit work to the queue, error: %d", err);
-			}
-		}
-
-		/* Wait until messages on all of the channels has been sent */
-		for (int l = 0; l < L2CAP_CHANNELS; l++) {
-			k_sem_take(&sent_sem, K_FOREVER);
-		}
-	}
-}
-
-static int change_mtu_on_channels(int num_channels, int new_mtu)
-{
-	struct bt_l2cap_chan *reconf_channels[ECRED_CHAN_MAX] = { NULL };
-
-	for (int i = 0; i < num_channels; i++) {
-		reconf_channels[i] = &(&channels[i])->le.chan;
-	}
-
-	return bt_l2cap_ecred_chan_reconfigure(reconf_channels, new_mtu);
-}
-
 static void test_peripheral_main(void)
 {
-	device_sync_init(PERIPHERAL_ID);
 	LOG_DBG("*L2CAP ECRED Peripheral started*");
-	init_workqs();
 	int err;
 
 	err = bt_enable(NULL);
@@ -442,51 +276,19 @@ static void test_peripheral_main(void)
 	LOG_DBG("Peripheral waiting for connection...");
 	WAIT_FOR_FLAG_SET(is_connected);
 	LOG_DBG("Peripheral Connected.");
-	register_l2cap_server();
-	connect_num_channels(L2CAP_CHANNELS);
-	k_sem_take(&all_chan_conn_sem, K_FOREVER);
 
-	/* Disconnect and reconnect channels *****************************************************/
-	LOG_DBG("############# Disconnect and reconnect channels");
-	disconnect_all_channels();
-	k_sem_take(&all_chan_disconn_sem, K_FOREVER);
+	int psm = l2cap_server_register(BT_SECURITY_L1);
+	LOG_DBG("Registered server PSM %x", psm);
 
-	connect_num_channels(L2CAP_CHANNELS);
-	k_sem_take(&all_chan_conn_sem, K_FOREVER);
-
-	LOG_DBG("Send sync after reconnection");
-	device_sync_send();
-
-	/* Send bytes on both channels and expect ch 1 to receive all of them before ch 0 *********/
-	LOG_DBG("############# Send bytes on both channels concurrently");
-	send_sdu_concurrently();
-
-	/* Change mtu size on all connected channels *********************************************/
-	LOG_DBG("############# Change MTU of the channels");
-	err = change_mtu_on_channels(L2CAP_CHANNELS, CONFIG_BT_L2CAP_TX_MTU + 10);
-
-	if (err) {
-		FAIL("MTU change failed (err %d)\n", err);
-	}
-
-	/* Read from both devices (Central and Peripheral) at the same time **********************/
-	LOG_DBG("############# Read from both devices (Central and Peripheral) at the same time");
-	LOG_DBG("Wait for sync before sending the msg");
-	device_sync_wait();
-	LOG_DBG("Received sync");
-	send_sdu(0, 1, 10);
-
-	k_sem_take(&sent_sem, K_FOREVER);
-	disconnect_all_channels();
 	WAIT_FOR_FLAG_UNSET(is_connected);
-	PASS("L2CAP ECRED Peripheral tests Passed");
-	bs_trace_silent_exit(0);
+	PASS("L2CAP ECRED Peripheral tests Passed\n");
 }
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
 {
 	struct bt_le_conn_param *param;
+	struct bt_conn *conn;
 	int err;
 
 	err = bt_le_scan_stop();
@@ -495,8 +297,14 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 		return;
 	}
 
+	char str[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(addr, str, sizeof(str));
+
+	LOG_DBG("Connecting to %s", str);
+
 	param = BT_LE_CONN_PARAM_DEFAULT;
-	err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, param, &default_conn);
+	err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, param, &conn);
 	if (err) {
 		FAIL("Create conn failed (err %d)", err);
 		return;
@@ -512,8 +320,6 @@ static void test_central_main(void)
 		.window = BT_GAP_SCAN_FAST_WINDOW,
 	};
 
-	device_sync_init(CENTRAL_ID);
-
 	LOG_DBG("*L2CAP ECRED Central started*");
 	int err;
 
@@ -522,56 +328,51 @@ static void test_central_main(void)
 		FAIL("Can't enable Bluetooth (err %d)\n", err);
 		return;
 	}
-	LOG_DBG("Central Bluetooth initialized.\n");
+	LOG_DBG("Central Bluetooth initialized.");
 
-	err = bt_le_scan_start(&scan_param, device_found);
-	if (err) {
-		FAIL("Scanning failed to start (err %d)\n", err);
-		return;
+	/* Connect all peripherals */
+	for (int i=0; i<4; i++) {
+		UNSET_FLAG(is_connected);
+		LOG_DBG("\nconnecting peripheral %d", i);
+		err = bt_le_scan_start(&scan_param, device_found);
+		if (err) {
+			FAIL("Scanning failed to start (err %d)\n", err);
+			return;
+		}
+
+		LOG_DBG("Scanning successfully started");
+
+		LOG_DBG("Central waiting for connection...");
+		WAIT_FOR_FLAG_SET(is_connected);
+		LOG_DBG("Central Connected.");
 	}
 
-	LOG_DBG("Scanning successfully started\n");
-
-	LOG_DBG("Central waiting for connection...\n");
-	WAIT_FOR_FLAG_SET(is_connected);
-	LOG_DBG("Central Connected.\n");
-	register_l2cap_server();
-
-	LOG_DBG("Wait for sync after reconnection");
-	device_sync_wait();
-	LOG_DBG("Received sync");
-
-	/* Read from both devices (Central and Peripheral) at the same time **********************/
-	LOG_DBG("############# Read from both devices (Central and Peripheral) at the same time");
-	LOG_DBG("Send sync for SDU send");
-	SET_FLAG(unsequenced_data);
-	device_sync_send();
-	send_sdu(0, 1, 10);
-
-	/* Wait until all of the channels are disconnected */
-	k_sem_take(&all_chan_disconn_sem, K_FOREVER);
-
-	LOG_DBG("Both l2cap channels disconnected, test over\n");
-
-	UNSET_FLAG(unsequenced_data);
-	LOG_DBG("received PDUs on long msg channel %i and short msg channel %i",
-		channels[LONG_MSG_CHAN_IDX].sdus_received,
-		channels[SHORT_MSG_CHAN_IDX].sdus_received);
-
-	if (channels[LONG_MSG_CHAN_IDX].sdus_received < SDU_SEND_COUNT ||
-	    channels[SHORT_MSG_CHAN_IDX].sdus_received < SDU_SEND_COUNT) {
-		FAIL("received less than %i", SDU_SEND_COUNT);
+	/* Connect L2CAP channels */
+	LOG_WRN("Connect L2CAP channels");
+	for (int i=0; i<CONFIG_BT_MAX_CONN; i++) {
+		struct bt_conn *conn = connections[i];
+		if (conn) {
+			UNSET_FLAG(flag_l2cap_connected);
+			l2cap_chan_connect(conn, 0x080);
+			WAIT_FOR_FLAG_SET(flag_l2cap_connected);
+		}
 	}
 
-	/* Disconnect */
+	/* Disconnect all peripherals */
 	LOG_DBG("Central Disconnecting....");
-	err = bt_conn_disconnect(default_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-	bt_conn_unref(default_conn);
-	LOG_DBG("Central tried to disconnect");
+	for (int i=0; i<CONFIG_BT_MAX_CONN; i++) {
+		struct bt_conn *conn = connections[i];
+		if (conn) {
+			SET_FLAG(is_connected);
+			err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+			LOG_DBG("Central tried to disconnect");
 
-	if (err) {
-		FAIL("Disconnection failed (err %d)", err);
-		return;
+			if (err) {
+				FAIL("Disconnection failed (err %d)", err);
+				return;
+			}
+			WAIT_FOR_FLAG_UNSET(is_connected);
+		}
 	}
 
 	LOG_DBG("Central Disconnected.");
