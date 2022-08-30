@@ -27,9 +27,12 @@ static const struct bt_data ad[] = {
 CREATE_FLAG(is_connected);
 CREATE_FLAG(flag_l2cap_connected);
 
-#define LOCAL_HOST_L2CAP_NETBUF_COUNT 2 /* TODO: increase if needed */
+#define LOCAL_HOST_L2CAP_NETBUF_COUNT 100 /* TODO: increase if needed */
 #define HOST_LIB_MAX_L2CAP_DATA_LEN 1230
-#define INIT_CREDITS 25
+
+/* TODO: two different failure modes depending on `10` or `15` */
+#define INIT_CREDITS 10
+/* #define INIT_CREDITS 15 */
 
 uint16_t l2cap_mtu = HOST_LIB_MAX_L2CAP_DATA_LEN;
 
@@ -43,6 +46,7 @@ NET_BUF_POOL_DEFINE(local_l2cap_rx_pool, CONFIG_BT_MAX_CONN,
 		    NULL);
 
 static uint8_t tx_data[HOST_LIB_MAX_L2CAP_DATA_LEN];
+static uint8_t tx_left[NUM_L2CAP_CHANS] = {0};
 
 int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 {
@@ -64,6 +68,7 @@ int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 		net_buf_unref(buf);
 	}
 
+	/* LOG_WRN("sent %d len %d", ret, len); */
 	return ret;
 }
 
@@ -72,9 +77,29 @@ struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
 	return net_buf_alloc(&local_l2cap_rx_pool, K_NO_WAIT);
 }
 
+static int get_l2cap_chan(struct bt_l2cap_chan *chan) {
+	for (int i=0; i<NUM_L2CAP_CHANS; i++) {
+		if (l2cap_chans[i] == chan) return i;
+	}
+
+	FAIL("Channel %p not found\n", chan);
+	return -1;
+}
+
+static void register_channel(struct bt_l2cap_chan *chan)
+{
+	int i = get_l2cap_chan(NULL);
+
+	l2cap_chans[i] = chan;
+}
+
 void sent_cb(struct bt_l2cap_chan *chan)
 {
 	LOG_WRN("%s %p", __func__, chan);
+	int idx = get_l2cap_chan(chan);
+	if (tx_left[idx]--) {
+		l2cap_chan_send(chan, tx_data, sizeof(tx_data));
+	}
 }
 
 uint16_t rx_cnt = 0;
@@ -85,22 +110,6 @@ int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	rx_cnt++;
 
 	return 0;
-}
-
-static int get_free_l2cap_chan(void) {
-	for (int i=0; i<NUM_L2CAP_CHANS; i++) {
-		if (l2cap_chans[i] == NULL) return i;
-	}
-
-	FAIL("No more free channels\n");
-	return -1;
-}
-
-static void register_channel(struct bt_l2cap_chan *chan)
-{
-	int i = get_free_l2cap_chan();
-
-	l2cap_chans[i] = chan;
 }
 
 void l2cap_chan_connected_cb(struct bt_l2cap_chan *l2cap_chan)
@@ -405,15 +414,16 @@ static void test_central_main(void)
 	/* TODO */
 
 	/* Send x times on multiple channels */
-	for (int j=0; j<20; j++) {
 	for (int i=0; i<NUM_L2CAP_CHANS; i++) {
 		if (l2cap_chans[i]) {
+			tx_left[i] = 20;
 			/* memset(tx_data, ((i+1)<<4) + j, sizeof(tx_data)); */
 			/* l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data)); */
 			l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data));
 		}
 	}
-	}
+
+	while(tx_left[0] || tx_left[1] || tx_left[2] || tx_left[3]) k_msleep(100);
 
 	/* Disconnect all peripherals */
 	LOG_DBG("Central Disconnecting....");
