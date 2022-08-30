@@ -48,6 +48,8 @@
 		bs_trace_info_time(1, __VA_ARGS__); \
 	} while (0)
 
+#define ASSERT(expr, ...) if (! (expr)) {FAIL(__VA_ARGS__);}
+
 #define CENTRAL_ID 0
 #define PERIPHERAL_ID 1
 #define BACK_CHANNELS 1

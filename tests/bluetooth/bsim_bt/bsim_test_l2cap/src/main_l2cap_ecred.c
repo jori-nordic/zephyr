@@ -311,41 +311,58 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 	}
 }
 
+static void connect_peripherals(int num_peers, bool connect)
+{
+	int err;
+
+	if (connect) {
+		struct bt_le_scan_param scan_param = {
+			.type = BT_LE_SCAN_TYPE_ACTIVE,
+			.options = BT_LE_SCAN_OPT_NONE,
+			.interval = BT_GAP_SCAN_FAST_INTERVAL,
+			.window = BT_GAP_SCAN_FAST_WINDOW,
+		};
+
+		for (int i=0; i<num_peers; i++) {
+			UNSET_FLAG(is_connected);
+			LOG_DBG("\nconnecting peripheral %d", i);
+
+			err = bt_le_scan_start(&scan_param, device_found);
+
+			ASSERT(!err, "Scanning failed to start (err %d)\n", err);
+			LOG_DBG("Scanning successfully started");
+
+			LOG_DBG("Central waiting for connection...");
+			WAIT_FOR_FLAG_SET(is_connected);
+			LOG_DBG("Central Connected.");
+		}
+	} else {
+		for (int i=0; i<CONFIG_BT_MAX_CONN; i++) {
+			struct bt_conn *conn = connections[i];
+			if (conn) {
+				SET_FLAG(is_connected);
+
+				err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+
+				ASSERT(!err, "Disconnection failed (err %d)", err);
+				LOG_DBG("Waiting for disconnection");
+				WAIT_FOR_FLAG_UNSET(is_connected);
+			}
+		}
+	}
+}
+
 static void test_central_main(void)
 {
-	struct bt_le_scan_param scan_param = {
-		.type = BT_LE_SCAN_TYPE_ACTIVE,
-		.options = BT_LE_SCAN_OPT_NONE,
-		.interval = BT_GAP_SCAN_FAST_INTERVAL,
-		.window = BT_GAP_SCAN_FAST_WINDOW,
-	};
-
 	LOG_DBG("*L2CAP ECRED Central started*");
 	int err;
 
 	err = bt_enable(NULL);
-	if (err) {
-		FAIL("Can't enable Bluetooth (err %d)\n", err);
-		return;
-	}
+	ASSERT(err==0, "Can't enable Bluetooth (err %d)\n", err);
 	LOG_DBG("Central Bluetooth initialized.");
 
 	/* Connect all peripherals */
-	for (int i=0; i<4; i++) {
-		UNSET_FLAG(is_connected);
-		LOG_DBG("\nconnecting peripheral %d", i);
-		err = bt_le_scan_start(&scan_param, device_found);
-		if (err) {
-			FAIL("Scanning failed to start (err %d)\n", err);
-			return;
-		}
-
-		LOG_DBG("Scanning successfully started");
-
-		LOG_DBG("Central waiting for connection...");
-		WAIT_FOR_FLAG_SET(is_connected);
-		LOG_DBG("Central Connected.");
-	}
+	connect_peripherals(4, true);
 
 	/* Connect L2CAP channels */
 	LOG_WRN("Connect L2CAP channels");
@@ -358,23 +375,11 @@ static void test_central_main(void)
 		}
 	}
 
+	/* Send */
+
 	/* Disconnect all peripherals */
 	LOG_DBG("Central Disconnecting....");
-	for (int i=0; i<CONFIG_BT_MAX_CONN; i++) {
-		struct bt_conn *conn = connections[i];
-		if (conn) {
-			SET_FLAG(is_connected);
-			err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-			LOG_DBG("Central tried to disconnect");
-
-			if (err) {
-				FAIL("Disconnection failed (err %d)", err);
-				return;
-			}
-			WAIT_FOR_FLAG_UNSET(is_connected);
-		}
-	}
-
+	connect_peripherals(4, false);
 	LOG_DBG("Central Disconnected.");
 
 	PASS("L2CAP ECRED Central tests Passed\n");
