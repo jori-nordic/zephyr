@@ -34,7 +34,8 @@
 	}
 
 
-#define WAIT_TIME (60e6) /* 60 seconds*/
+#define WAIT_SECONDS 120                         /* seconds */
+#define WAIT_TIME (WAIT_SECONDS * USEC_PER_SEC) /* microseconds*/
 
 #define FAIL(...)				       \
 	do {					       \

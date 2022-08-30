@@ -11,11 +11,14 @@
 
 #define LOG_MODULE_NAME main_l2cap_ecred
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL_INF);
 
 extern enum bst_result_t bst_result;
 
 static struct bt_conn *connections[CONFIG_BT_MAX_CONN] = {0};
+
+#define NUM_L2CAP_CHANS 10
+static struct bt_l2cap_chan *l2cap_chans[NUM_L2CAP_CHANS] = {0};
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -24,12 +27,11 @@ static const struct bt_data ad[] = {
 CREATE_FLAG(is_connected);
 CREATE_FLAG(flag_l2cap_connected);
 
-#define LOCAL_HOST_L2CAP_NETBUF_COUNT 20
-#define HOST_LIB_MAX_L2CAP_DATA_LEN 200
-#define L2CAP_QUEUE_SIZE 2
-#define INIT_CREDITS 20
+#define LOCAL_HOST_L2CAP_NETBUF_COUNT 2 /* TODO: increase if needed */
+#define HOST_LIB_MAX_L2CAP_DATA_LEN 1230
+#define INIT_CREDITS 25
 
-uint16_t l2cap_mtu = 250;
+uint16_t l2cap_mtu = HOST_LIB_MAX_L2CAP_DATA_LEN;
 
 NET_BUF_POOL_DEFINE(local_l2cap_tx_pool, LOCAL_HOST_L2CAP_NETBUF_COUNT,
 		    BT_L2CAP_BUF_SIZE(HOST_LIB_MAX_L2CAP_DATA_LEN), 8,
@@ -40,14 +42,16 @@ NET_BUF_POOL_DEFINE(local_l2cap_rx_pool, CONFIG_BT_MAX_CONN,
 		    BT_L2CAP_BUF_SIZE(HOST_LIB_MAX_L2CAP_DATA_LEN), 8,
 		    NULL);
 
-/* static uint8_t tx_data[HOST_LIB_MAX_L2CAP_DATA_LEN]; */
+static uint8_t tx_data[HOST_LIB_MAX_L2CAP_DATA_LEN];
 
-int l2cap_chan_send(uint32_t l2cap_handle, uint8_t *data, size_t len)
+int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 {
-	struct bt_l2cap_chan *chan = (struct bt_l2cap_chan *)l2cap_handle;
+	LOG_ERR("%s %p data %p len %d", __func__, chan, data, len);
+	/* LOG_DBG("%p data %p len %d", chan, data, len); */
 
 	struct net_buf *buf = net_buf_alloc(&local_l2cap_tx_pool, K_NO_WAIT);
 	if (buf == NULL) {
+		FAIL("No more memory\n");
 		return -ENOMEM;
 	}
 
@@ -56,6 +60,7 @@ int l2cap_chan_send(uint32_t l2cap_handle, uint8_t *data, size_t len)
 
 	int ret = bt_l2cap_chan_send(chan, buf);
 	if (ret < 0) {
+		FAIL("L2CAP error %d\n", ret);
 		net_buf_unref(buf);
 	}
 
@@ -69,15 +74,33 @@ struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
 
 void sent_cb(struct bt_l2cap_chan *chan)
 {
-	/* uint32_t conn_index = bt_conn_index(chan->conn); */
-	/* TODO: do something here */
+	LOG_WRN("%s %p", __func__, chan);
 }
 
+uint16_t rx_cnt = 0;
 int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
 {
-	/* uint32_t conn_index = bt_conn_index(chan->conn); */
+	LOG_WRN("%s len %d", __func__, buf->len);
+	LOG_HEXDUMP_DBG(buf->data, buf->len, "RAW");
+	rx_cnt++;
 
 	return 0;
+}
+
+static int get_free_l2cap_chan(void) {
+	for (int i=0; i<NUM_L2CAP_CHANS; i++) {
+		if (l2cap_chans[i] == NULL) return i;
+	}
+
+	FAIL("No more free channels\n");
+	return -1;
+}
+
+static void register_channel(struct bt_l2cap_chan *chan)
+{
+	int i = get_free_l2cap_chan();
+
+	l2cap_chans[i] = chan;
 }
 
 void l2cap_chan_connected_cb(struct bt_l2cap_chan *l2cap_chan)
@@ -92,6 +115,8 @@ void l2cap_chan_connected_cb(struct bt_l2cap_chan *l2cap_chan)
 		chan->tx.mps,
 		chan->rx.mtu,
 		chan->rx.mps);
+
+	register_channel(l2cap_chan);
 }
 
 void l2cap_chan_disconnected_cb(struct bt_l2cap_chan *chan)
@@ -281,6 +306,7 @@ static void test_peripheral_main(void)
 	LOG_DBG("Registered server PSM %x", psm);
 
 	WAIT_FOR_FLAG_UNSET(is_connected);
+	LOG_ERR("Total received: %d", rx_cnt);
 	PASS("L2CAP ECRED Peripheral tests Passed\n");
 }
 
@@ -375,7 +401,19 @@ static void test_central_main(void)
 		}
 	}
 
-	/* Send */
+	/* Do a conn param update to slow down traffic */
+	/* TODO */
+
+	/* Send x times on multiple channels */
+	for (int j=0; j<20; j++) {
+	for (int i=0; i<NUM_L2CAP_CHANS; i++) {
+		if (l2cap_chans[i]) {
+			/* memset(tx_data, ((i+1)<<4) + j, sizeof(tx_data)); */
+			/* l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data)); */
+			l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data));
+		}
+	}
+	}
 
 	/* Disconnect all peripherals */
 	LOG_DBG("Central Disconnecting....");
