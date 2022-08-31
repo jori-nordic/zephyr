@@ -5549,6 +5549,7 @@ int hci_acl_handle(struct net_buf *buf, struct net_buf **evt)
 
 	pdu_data->len = len;
 	memcpy(&pdu_data->lldata[0], buf->data, len);
+	BT_WARN("acl conn %d buf %p len %d", handle, buf, len);
 
 	if (ll_tx_mem_enqueue(handle, node_tx)) {
 		BT_ERR("Invalid Tx Enqueue");

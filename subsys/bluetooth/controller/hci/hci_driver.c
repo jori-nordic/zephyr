@@ -682,7 +682,7 @@ static int acl_handle(struct net_buf *buf)
 
 	err = hci_acl_handle(buf, &evt);
 	if (evt) {
-		BT_DBG("Replying with event of %u bytes", evt->len);
+		BT_ERR("Replying with event of %u bytes", evt->len);
 		bt_recv_prio(evt);
 	}
 

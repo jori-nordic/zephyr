@@ -916,6 +916,7 @@ static void l2cap_chan_tx_process(struct k_work *work)
 		sent = l2cap_chan_le_send_sdu(ch, &buf, sent);
 		if (sent < 0) {
 			if (sent == -EAGAIN) {
+				BT_ERR("%s %p sending failed", __func__, ch);
 				ch->tx_buf = buf;
 			} else {
 				net_buf_unref(buf);
@@ -951,7 +952,7 @@ static void l2cap_chan_tx_give_credits(struct bt_l2cap_le_chan *chan,
 static void l2cap_chan_rx_give_credits(struct bt_l2cap_le_chan *chan,
 				       uint16_t credits)
 {
-	BT_DBG("chan %p credits %u", chan, credits);
+	BT_ERR("%s chan %p credits %u", __func__, chan, credits);
 
 	atomic_add(&chan->rx.credits, credits);
 }
@@ -1841,9 +1842,11 @@ static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch)
 {
 	if (!atomic_get(&ch->tx.credits) ||
 	    (k_fifo_is_empty(&ch->tx_queue) && !ch->tx_buf)) {
+		BT_WARN("%s %p conn %p No more work", __func__, ch, ch->chan.conn);
 		return;
 	}
 
+	BT_WARN("%s %p conn %p submit work", __func__, ch, ch->chan.conn);
 	k_work_submit(&ch->tx_work);
 }
 
@@ -2092,7 +2095,7 @@ static void le_credits(struct bt_l2cap *l2cap, uint8_t ident,
 
 	l2cap_chan_tx_give_credits(le_chan, credits);
 
-	BT_DBG("chan %p total credits %lu",
+	BT_ERR("chan %p total credits %lu",
 	       le_chan, atomic_get(&le_chan->tx.credits));
 
 	l2cap_chan_tx_resume(le_chan);
@@ -2298,6 +2301,9 @@ static void l2cap_chan_update_credits(struct bt_l2cap_le_chan *chan,
 	credits = ((chan->_sdu_len - net_buf_frags_len(buf)) +
 		   (chan->rx.mps - 1)) / chan->rx.mps;
 
+
+	BT_DBG("cred %d old %d", credits, old_credits);
+
 	if (credits < old_credits) {
 		return;
 	}
@@ -2414,6 +2420,7 @@ static void l2cap_chan_le_recv_seg(struct bt_l2cap_le_chan *chan,
 	}
 
 	if (net_buf_frags_len(chan->_sdu) < chan->_sdu_len) {
+		BT_WARN("incomplete sdu: seg %d rxc %d initc %d", seg, atomic_get(&chan->rx.credits), chan->rx.init_credits);
 		/* Give more credits if remote has run out of them, this
 		 * should only happen if the remote cannot fully utilize the
 		 * MPS for some reason.
@@ -2447,6 +2454,7 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 	/* Check if segments already exist */
 	if (chan->_sdu) {
 		l2cap_chan_le_recv_seg(chan, buf);
+		BT_DBG("segments already exist");
 		return;
 	}
 
@@ -2476,6 +2484,7 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 		}
 		chan->_sdu_len = sdu_len;
 		l2cap_chan_le_recv_seg(chan, buf);
+		BT_DBG("recv seg");
 		return;
 	}
 
@@ -2485,6 +2494,7 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 			BT_ERR("err %d", err);
 			bt_l2cap_chan_disconnect(&chan->chan);
 		}
+		BT_DBG("err < 0");
 		return;
 	}
 

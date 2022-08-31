@@ -13,7 +13,8 @@ function Execute(){
  compile it?)\e[39m"
     exit 1
   fi
-  timeout 30 $@ & process_ids="$process_ids $!"
+  # timeout 30 $@ & process_ids="$process_ids $!"
+  $@ & process_ids="$process_ids $!"
 }
 
 : "${BSIM_OUT_PATH:?BSIM_OUT_PATH must be defined}"
@@ -29,17 +30,23 @@ Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
 Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
   -v=${verbosity_level} -s=${simulation_id} -d=1 -testid=peripheral -rs=42
 
-# Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
-#   -v=${verbosity_level} -s=${simulation_id} -d=2 -testid=peripheral -rs=10
+Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
+  -v=${verbosity_level} -s=${simulation_id} -d=2 -testid=peripheral -rs=10
 
-# Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
-#   -v=${verbosity_level} -s=${simulation_id} -d=3 -testid=peripheral -rs=23
+Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
+  -v=${verbosity_level} -s=${simulation_id} -d=3 -testid=peripheral -rs=23
 
-# Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
-#   -v=${verbosity_level} -s=${simulation_id} -d=4 -testid=peripheral -rs=7884
+Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
+  -v=${verbosity_level} -s=${simulation_id} -d=4 -testid=peripheral -rs=7884
+
+Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
+  -v=${verbosity_level} -s=${simulation_id} -d=5 -testid=peripheral -rs=230
+
+Execute ./bs_${BOARD}_tests_bluetooth_bsim_bt_bsim_test_l2cap_prj_conf \
+  -v=${verbosity_level} -s=${simulation_id} -d=6 -testid=peripheral -rs=9
 
 Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} \
-  -D=2 -sim_length=240e6 $@
+  -D=7 -sim_length=240e6 $@
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"

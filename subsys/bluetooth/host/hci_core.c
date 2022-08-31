@@ -498,8 +498,6 @@ static void hci_acl(struct net_buf *buf)
 	acl(buf)->handle = bt_acl_handle(handle);
 	acl(buf)->index = BT_CONN_INDEX_INVALID;
 
-	BT_DBG("handle %u len %u flags %u", acl(buf)->handle, len, flags);
-
 	if (buf->len != len) {
 		BT_ERR("ACL data length mismatch (%u != %u)", buf->len, len);
 		net_buf_unref(buf);
@@ -507,6 +505,9 @@ static void hci_acl(struct net_buf *buf)
 	}
 
 	conn = bt_conn_lookup_handle(acl(buf)->handle);
+
+	BT_WARN("conn %p len %u flags %u", conn, len);
+
 	if (!conn) {
 		BT_ERR("Unable to find conn for handle %u", acl(buf)->handle);
 		net_buf_unref(buf);

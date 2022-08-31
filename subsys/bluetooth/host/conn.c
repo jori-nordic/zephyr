@@ -633,7 +633,7 @@ static bool send_buf(struct bt_conn *conn, struct net_buf *buf)
 {
 	struct net_buf *frag;
 
-	BT_DBG("conn %p buf %p len %u", conn, buf, buf->len);
+	BT_ERR("conn %p buf %p len %u", conn, buf, buf->len);
 
 	/* Send directly if the packet fits the ACL MTU */
 	if (buf->len <= conn_mtu(conn)) {

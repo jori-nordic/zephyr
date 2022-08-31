@@ -31,9 +31,9 @@ CREATE_FLAG(flag_l2cap_connected);
 #define HOST_LIB_MAX_L2CAP_DATA_LEN 1230
 
 /* TODO: two different failure modes depending on `10` or `15` */
+/* #define INIT_CREDITS 10 */
+#define NUM_PERIPHERALS 6
 #define INIT_CREDITS 10
-#define NUM_PERIPHERALS 1
-/* #define INIT_CREDITS 15 */
 
 uint16_t l2cap_mtu = HOST_LIB_MAX_L2CAP_DATA_LEN;
 
@@ -51,7 +51,7 @@ static uint8_t tx_left[NUM_L2CAP_CHANS] = {0};
 
 int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 {
-	LOG_ERR("%s %p data %p len %d", __func__, chan, data, len);
+	LOG_ERR("%s chan %p conn %p data %p len %d", __func__, chan, chan->conn, data, len);
 	/* LOG_DBG("%p data %p len %d", chan, data, len); */
 
 	struct net_buf *buf = net_buf_alloc(&local_l2cap_tx_pool, K_NO_WAIT);
@@ -100,8 +100,12 @@ void sent_cb(struct bt_l2cap_chan *chan)
 {
 	LOG_WRN("%s %p", __func__, chan);
 	int idx = get_l2cap_chan(chan);
-	if (tx_left[idx]--) {
+
+	if (tx_left[idx]) {
+		tx_left[idx]--;
 		l2cap_chan_send(chan, tx_data, sizeof(tx_data));
+	} else {
+		LOG_ERR("Done sending %p", chan->conn);
 	}
 }
 
@@ -279,7 +283,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_DBG("%s (reason 0x%02x)", addr, reason);
+	LOG_ERR("%p %s (reason 0x%02x)", conn, addr, reason);
 
 	deregister_connection(conn);
 	UNSET_FLAG(is_connected);
@@ -316,6 +320,16 @@ static void test_peripheral_main(void)
 
 	int psm = l2cap_server_register(BT_SECURITY_L1);
 	LOG_DBG("Registered server PSM %x", psm);
+
+	int64_t start = k_uptime_get();
+	while (rx_cnt<20) {
+		k_msleep(100);
+		if (k_uptime_get() - start > 100000) {
+			LOG_ERR("device stalled");
+			bt_conn_disconnect(connections[0], BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+			break;
+		}
+	}
 
 	WAIT_FOR_FLAG_UNSET(is_connected);
 	LOG_ERR("Total received: %d", rx_cnt);
@@ -426,7 +440,14 @@ static void test_central_main(void)
 		}
 	}
 
-	while(tx_left[0] || tx_left[1] || tx_left[2] || tx_left[3]) k_msleep(100);
+	int left = 20;
+	while (left) {
+		left = 0;
+		for (int i=0; i<NUM_L2CAP_CHANS; i++) {
+			left += tx_left[i];
+		}
+		k_msleep(100);
+	}
 
 	/* Disconnect all peripherals */
 	LOG_DBG("Central Disconnecting....");
