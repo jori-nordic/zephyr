@@ -32,6 +32,7 @@ CREATE_FLAG(flag_l2cap_connected);
 
 /* TODO: two different failure modes depending on `10` or `15` */
 #define INIT_CREDITS 10
+#define NUM_PERIPHERALS 1
 /* #define INIT_CREDITS 15 */
 
 uint16_t l2cap_mtu = HOST_LIB_MAX_L2CAP_DATA_LEN;
@@ -63,12 +64,14 @@ int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 	net_buf_add_mem(buf, data, len);
 
 	int ret = bt_l2cap_chan_send(chan, buf);
+	/* LOG_ERR("%s ret %d", ret); */
+
 	if (ret < 0) {
 		FAIL("L2CAP error %d\n", ret);
 		net_buf_unref(buf);
 	}
 
-	/* LOG_WRN("sent %d len %d", ret, len); */
+	LOG_WRN("sent %d len %d", ret, len);
 	return ret;
 }
 
@@ -397,7 +400,7 @@ static void test_central_main(void)
 	LOG_DBG("Central Bluetooth initialized.");
 
 	/* Connect all peripherals */
-	connect_peripherals(4, true);
+	connect_peripherals(NUM_PERIPHERALS, true);
 
 	/* Connect L2CAP channels */
 	LOG_WRN("Connect L2CAP channels");
@@ -427,7 +430,7 @@ static void test_central_main(void)
 
 	/* Disconnect all peripherals */
 	LOG_DBG("Central Disconnecting....");
-	connect_peripherals(4, false);
+	connect_peripherals(NUM_PERIPHERALS, false);
 	LOG_DBG("Central Disconnected.");
 
 	PASS("L2CAP ECRED Central tests Passed\n");
