@@ -917,6 +917,11 @@ static void l2cap_chan_tx_process(struct k_work *work)
 		if (sent < 0) {
 			if (sent == -EAGAIN) {
 				ch->tx_buf = buf;
+				/* if we don't reschedule, and the app doesn't nudge l2cap, the SDU
+				 * is stuck in limbo.
+				 */
+				/* FIXME: reschedule the work in some way or another */
+				/* can be from conn.c when a packet has been sent */
 			} else {
 				net_buf_unref(buf);
 			}
@@ -1847,6 +1852,14 @@ static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch)
 	k_work_submit(&ch->tx_work);
 }
 
+static void resume_all_channels(struct bt_conn *conn, void *data) {
+	struct bt_l2cap_chan *chan;
+
+	SYS_SLIST_FOR_EACH_CONTAINER(&conn->channels, chan, node) {
+		l2cap_chan_tx_resume(BT_L2CAP_LE_CHAN(chan));
+	}
+}
+
 static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 {
 	struct l2cap_tx_meta_data *data = user_data;
@@ -1881,7 +1894,11 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 		cb(conn, cb_user_data, 0);
 	}
 
+	/* Resume the current channel */
 	l2cap_chan_tx_resume(BT_L2CAP_LE_CHAN(chan));
+	/* Also resume any other orphaned channels */
+	/* TODO: find better place to trigger this */
+	bt_conn_foreach(BT_CONN_TYPE_LE, resume_all_channels, NULL);
 }
 
 static void l2cap_chan_seg_sent(struct bt_conn *conn, void *user_data, int err)
@@ -2264,6 +2281,11 @@ static void l2cap_chan_send_credits(struct bt_l2cap_le_chan *chan,
 	/* Cap the number of credits given */
 	if (credits > chan->rx.init_credits) {
 		credits = chan->rx.init_credits;
+	}
+
+	uint16_t old_credits = atomic_get(&chan->rx.credits);
+	if (credits + old_credits > chan->rx.init_credits) {
+		credits = chan->rx.init_credits - old_credits;
 	}
 
 	buf = l2cap_create_le_sig_pdu(buf, BT_L2CAP_LE_CREDITS, get_ident(),
