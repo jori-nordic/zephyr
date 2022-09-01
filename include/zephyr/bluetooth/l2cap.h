@@ -279,6 +279,18 @@ struct bt_l2cap_chan_ops {
 	 */
 	void (*encrypt_change)(struct bt_l2cap_chan *chan, uint8_t hci_status);
 
+	/** @brief Channel alloc_seg callback
+	 *
+	 *  If this callback is provided the channel will use it to allocate
+	 *  buffers to store segments. This avoids wasting big SDU buffers with
+	 *  potentially much smaller PDUs.
+	 *
+	 *  @param chan The channel requesting a buffer.
+	 *
+	 *  @return Allocated buffer.
+	 */
+	struct net_buf *(*alloc_seg)(struct bt_l2cap_chan *chan);
+
 	/** @brief Channel alloc_buf callback
 	 *
 	 *  If this callback is provided the channel will use it to allocate

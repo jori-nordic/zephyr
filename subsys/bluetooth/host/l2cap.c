@@ -1821,7 +1821,15 @@ static struct net_buf *l2cap_chan_create_seg(struct bt_l2cap_le_chan *ch,
 	}
 
 segment:
-	seg = l2cap_alloc_seg(buf);
+	seg = NULL;
+	if (ch->chan.ops->alloc_seg) {
+		seg = ch->chan.ops->alloc_seg(&ch->chan);
+	}
+
+	if (!seg) {
+		seg = l2cap_alloc_seg(buf);
+	}
+
 	if (!seg) {
 		return NULL;
 	}
@@ -1988,12 +1996,11 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 		BT_WARN("Unable to send seg %d", err);
 		atomic_inc(&ch->tx.credits);
 
-		/* If the segment is not the original buffer release it since it
-		 * won't be needed anymore.
+		/* Release the segment, even if it is the original buf. the
+		 * caller of this function already holds a reference to this
+		 * buffer and we will get called again.
 		 */
-		if (seg != buf) {
-			net_buf_unref(seg);
-		}
+		net_buf_unref(seg);
 
 		if (err == -ENOBUFS) {
 			/* Restore state since segment could not be sent */
