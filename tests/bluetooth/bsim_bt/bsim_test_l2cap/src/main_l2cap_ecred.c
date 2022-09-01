@@ -27,38 +27,56 @@ static const struct bt_data ad[] = {
 CREATE_FLAG(is_connected);
 CREATE_FLAG(flag_l2cap_connected);
 
-#define LOCAL_HOST_L2CAP_NETBUF_COUNT 100 /* TODO: increase if needed */
+#define NUM_PERIPHERALS 6
+
+/* Has to be >90 to work */
+/* This is most likely used by the stack to allocate even more buffers */
+/* Should only be one SDU in flight per connection */
+#define LOCAL_HOST_L2CAP_NETBUF_COUNT NUM_PERIPHERALS
 #define HOST_LIB_MAX_L2CAP_DATA_LEN 1230
 
 /* TODO: two different failure modes depending on `10` or `15` */
 /* #define INIT_CREDITS 10 */
-#define NUM_PERIPHERALS 6
 #define INIT_CREDITS 10
 
 uint16_t l2cap_mtu = HOST_LIB_MAX_L2CAP_DATA_LEN;
 
+void destroy(struct net_buf *buf)
+{
+	LOG_ERR("destroy %p, avail %d #################################################################",
+		buf, net_buf_pool_get(buf->pool_id)->avail_count);
+	net_buf_destroy(buf);
+}
+
 NET_BUF_POOL_DEFINE(local_l2cap_tx_pool, LOCAL_HOST_L2CAP_NETBUF_COUNT,
 		    BT_L2CAP_BUF_SIZE(HOST_LIB_MAX_L2CAP_DATA_LEN), 8,
-		    NULL);
+		    destroy);
 
 /* Only one SDU per link will be received at a time */
 NET_BUF_POOL_DEFINE(local_l2cap_rx_pool, CONFIG_BT_MAX_CONN,
 		    BT_L2CAP_BUF_SIZE(HOST_LIB_MAX_L2CAP_DATA_LEN), 8,
 		    NULL);
 
+NET_BUF_POOL_DEFINE(local_l2cap_seg_pool, 20,
+		    BT_L2CAP_BUF_SIZE(CONFIG_BT_BUF_ACL_TX_SIZE), 8,
+		    NULL);
+
 static uint8_t tx_data[HOST_LIB_MAX_L2CAP_DATA_LEN];
 static uint8_t tx_left[NUM_L2CAP_CHANS] = {0};
 
+/* Still failing, it looks like this is called one to many times */
 int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 {
-	LOG_ERR("%s chan %p conn %p data %p len %d", __func__, chan, chan->conn, data, len);
 	/* LOG_DBG("%p data %p len %d", chan, data, len); */
+	LOG_ERR("%s chan %p, pool %p", __func__, chan, &local_l2cap_tx_pool);
 
 	struct net_buf *buf = net_buf_alloc(&local_l2cap_tx_pool, K_NO_WAIT);
+	/* LOG_WRN("alloc ok left %d", local_l2cap_tx_pool.avail_count); */
 	if (buf == NULL) {
 		FAIL("No more memory\n");
 		return -ENOMEM;
 	}
+	LOG_ERR("%s chan %p conn %p buf %p len %d left %d", __func__, chan, chan->conn, buf, len, local_l2cap_tx_pool.avail_count);
 
 	net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
 	net_buf_add_mem(buf, data, len);
@@ -75,8 +93,23 @@ int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 	return ret;
 }
 
+struct net_buf *alloc_seg_cb(struct bt_l2cap_chan *chan)
+{
+	LOG_WRN("alloc seg chan %p left(before) %d", chan, local_l2cap_seg_pool.avail_count);
+
+	struct net_buf *buf = net_buf_alloc(&local_l2cap_seg_pool, K_NO_WAIT);
+	if (!buf) {
+		FAIL("No more seg bufs\n");
+		return buf;
+	}
+
+	net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
+	return buf;
+}
+
 struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
 {
+	LOG_DBG("alloc buf chan %p", chan);
 	return net_buf_alloc(&local_l2cap_rx_pool, K_NO_WAIT);
 }
 
@@ -125,7 +158,7 @@ void l2cap_chan_connected_cb(struct bt_l2cap_chan *l2cap_chan)
 		CONTAINER_OF(l2cap_chan, struct bt_l2cap_le_chan, chan);
 
 	SET_FLAG(flag_l2cap_connected);
-	LOG_DBG("%x (tx mtu %d mps %d) (tx mtu %d mps %d)",
+	LOG_ERR("%x (tx mtu %d mps %d) (tx mtu %d mps %d)",
 		l2cap_chan,
 		chan->tx.mtu,
 		chan->tx.mps,
@@ -144,6 +177,7 @@ void l2cap_chan_disconnected_cb(struct bt_l2cap_chan *chan)
 static struct bt_l2cap_chan_ops ops = {
 	.connected = l2cap_chan_connected_cb,
 	.disconnected = l2cap_chan_disconnected_cb,
+	.alloc_seg = alloc_seg_cb,
 	.alloc_buf = alloc_buf_cb,
 	.recv = recv_cb,
 	.sent = sent_cb,

@@ -218,6 +218,7 @@ static void tx_notify(struct bt_conn *conn)
 		 * allocate new buffers since the TX should have been
 		 * unblocked by tx_free.
 		 */
+		BT_ERR("conn cb");
 		cb(conn, user_data, 0);
 	}
 }
@@ -2834,6 +2835,7 @@ struct net_buf *bt_conn_create_frag_timeout(size_t reserve, k_timeout_t timeout)
 	struct net_buf_pool *pool = NULL;
 
 #if CONFIG_BT_L2CAP_TX_FRAG_COUNT > 0
+	BT_ERR("Alloc frag");
 	pool = &frag_pool;
 #endif
 

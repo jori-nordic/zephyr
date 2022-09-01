@@ -739,8 +739,12 @@ static int hci_driver_send(struct net_buf *buf)
 	}
 
 	if (!err) {
+		BT_ERR("unref %p", buf);
 		net_buf_unref(buf);
+	} else {
+		BT_ERR("buf err %p %d", buf, err);
 	}
+
 
 	BT_DBG("exit: %d", err);
 

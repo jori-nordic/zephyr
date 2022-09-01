@@ -644,7 +644,7 @@ int bt_l2cap_send_cb(struct bt_conn *conn, uint16_t cid, struct net_buf *buf,
 {
 	struct bt_l2cap_hdr *hdr;
 
-	BT_DBG("conn %p cid %u len %zu", conn, cid, net_buf_frags_len(buf));
+	BT_WARN("conn %p cid %u len %zu", conn, cid, net_buf_frags_len(buf));
 
 	hdr = net_buf_push(buf, sizeof(*hdr));
 	hdr->len = sys_cpu_to_le16(buf->len - sizeof(*hdr));
@@ -1785,8 +1785,19 @@ static inline struct net_buf *l2cap_alloc_seg(struct net_buf *buf)
 	struct net_buf *seg;
 
 	/* Try to use original pool if possible */
+
+	/* FIXME:
+	 *
+	 * When the original buffer is huge, it needs to be allocated from a pool with huge
+	 * bufsizes.
+	 *
+	 * Problem is that this logic below will waste those huge buffers by allocating segments
+	 * which could have a way lower size. Then the application will not be able to enqueue any
+	 * more SDUs.
+	 */
 	seg = net_buf_alloc(pool, K_NO_WAIT);
 	if (seg) {
+		BT_ERR("use orig pool");
 		net_buf_reserve(seg, BT_L2CAP_CHAN_SEND_RESERVE);
 		return seg;
 	}
@@ -1818,6 +1829,7 @@ static struct net_buf *l2cap_chan_create_seg(struct bt_l2cap_le_chan *ch,
 			/* Push SDU length if set */
 			net_buf_push_le16(buf, net_buf_frags_len(buf));
 		}
+		BT_ERR("create_seg ref");
 		return net_buf_ref(buf);
 	}
 
@@ -1979,7 +1991,7 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 		return -EAGAIN;
 	}
 
-	BT_DBG("ch %p cid 0x%04x len %u credits %lu", ch, ch->tx.cid,
+	BT_DBG("buf %p ch %p cid 0x%04x len %u credits %lu", buf, ch, ch->tx.cid,
 	       seg->len, atomic_get(&ch->tx.credits));
 
 	len = seg->len - sdu_hdr_len;

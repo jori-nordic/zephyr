@@ -527,6 +527,11 @@ void net_buf_unref(struct net_buf *buf)
 {
 	__ASSERT_NO_MSG(buf);
 
+	if (net_buf_pool_get(buf->pool_id) == (void*)0x80de8d4)
+		LOG_ERR("ref--- %p total %d", buf, buf->ref);
+	/* else */
+	/* LOG_ERR("ref- %p total %d", buf, buf->ref); */
+
 	while (buf) {
 		struct net_buf *frags = buf->frags;
 		struct net_buf_pool *pool;
@@ -576,7 +581,12 @@ struct net_buf *net_buf_ref(struct net_buf *buf)
 
 	NET_BUF_DBG("buf %p (old) ref %u pool_id %u",
 		    buf, buf->ref, buf->pool_id);
+
 	buf->ref++;
+
+	if (net_buf_pool_get(buf->pool_id) == (void*)0x80de8d4)
+		LOG_ERR("ref+++ %p total %d", buf, buf->ref);
+
 	return buf;
 }
 
@@ -1043,6 +1053,10 @@ uint64_t net_buf_simple_remove_be64(struct net_buf_simple *buf)
 void *net_buf_simple_push(struct net_buf_simple *buf, size_t len)
 {
 	NET_BUF_SIMPLE_DBG("buf %p len %zu", buf, len);
+
+	/* segfault so gdb stops */
+	/* if(!(net_buf_simple_headroom(buf) >= len)) */
+	/* 	*(int*)0 = 0; */
 
 	__ASSERT_NO_MSG(net_buf_simple_headroom(buf) >= len);
 
