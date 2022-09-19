@@ -2063,6 +2063,7 @@ static int l2cap_chan_le_send_sdu(struct bt_l2cap_le_chan *ch,
 			if (ret == -EAGAIN) {
 				/* Store sent data into user_data */
 				l2cap_tx_meta_data(frag)->sent = sent;
+				BT_WARN("store sent");
 			}
 			*buf = frag;
 			return ret;
@@ -2082,6 +2083,7 @@ static int l2cap_chan_le_send_sdu(struct bt_l2cap_le_chan *ch,
 			if (ret == -EAGAIN) {
 				/* Store sent data into user_data */
 				l2cap_tx_meta_data(frag)->sent = sent;
+				BT_WARN("seg store sent");
 			}
 			*buf = frag;
 			return ret;
