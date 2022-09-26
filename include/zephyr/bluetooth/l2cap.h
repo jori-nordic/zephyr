@@ -195,7 +195,6 @@ struct bt_l2cap_le_chan {
 
 	/* Response Timeout eXpired (RTX) timer */
 	struct k_work_delayable		rtx_work;
-	struct k_work_sync		rtx_sync;
 #endif
 };
 
@@ -238,7 +237,6 @@ struct bt_l2cap_br_chan {
 
 	/* Response Timeout eXpired (RTX) timer */
 	struct k_work_delayable		rtx_work;
-	struct k_work_sync		rtx_sync;
 };
 
 /** @brief L2CAP Channel operations structure. */

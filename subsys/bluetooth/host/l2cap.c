@@ -963,11 +963,11 @@ static void l2cap_chan_destroy(struct bt_l2cap_chan *chan)
 
 	BT_DBG("chan %p cid 0x%04x", le_chan, le_chan->rx.cid);
 
-	/* Cancel ongoing work. Since the channel can be re-used after this
-	 * we need to sync to make sure that the kernel does not have it
-	 * in its queue anymore.
+	/* Cancel ongoing work. We can't sync because the API will block until
+	 * the work item has finished processing, but we are being called from
+	 * this work item.
 	 */
-	k_work_cancel_delayable_sync(&le_chan->rtx_work, &le_chan->rtx_sync);
+	k_work_cancel_delayable(&le_chan->rtx_work);
 
 	if (le_chan->tx_buf) {
 		net_buf_unref(le_chan->tx_buf);
