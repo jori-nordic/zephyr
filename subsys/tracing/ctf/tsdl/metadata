@@ -310,3 +310,11 @@ event {
 		uint32_t result;
 	};
 };
+
+event {
+	name = log;
+	id = 0x34;
+	fields := struct {
+		ctf_bounded_string_t payload[20];
+	};
+};

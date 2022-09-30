@@ -10,6 +10,8 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/__assert.h>
 #include <string.h>
+#include <stdio.h>
+#include <ctf_top.h>
 
 /* size of stack area used by each thread */
 #define STACKSIZE 1024
@@ -81,6 +83,10 @@ void blink(const struct led *led, uint32_t sleep_ms, uint32_t id)
 		memcpy(mem_ptr, &tx_data, size);
 
 		k_fifo_put(&printk_fifo, mem_ptr);
+
+		char a[20];
+		snprintf(a, sizeof(a), "%s [%s]", __func__, k_current_get()->name);
+		ctf_top_log(a);
 
 		k_msleep(sleep_ms);
 		cnt++;

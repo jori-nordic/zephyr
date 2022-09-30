@@ -134,8 +134,10 @@ def main():
             print(c + f"{dt} (+{diff_s:.6f} s): {event.name} ({event.payload_field['id']})" + Fore.RESET)
         elif event.name in ['mutex_init', 'mutex_take', 'mutex_give']:
             c = Fore.MAGENTA
-            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} ({event.payload_field['id']})" + Fore.RESET)
-
+            print(c + f"{dt} (+{diff_s:.6f} s): {event.name}: {event.payload_field['id']}" + Fore.RESET)
+        elif event.name in ['log']:
+            c = Fore.RED
+            print(c + f"{dt} (+{diff_s:.6f} s): {event.name}: {event.payload_field['payload']}" + Fore.RESET)
         else:
             print(f"{dt} (+{diff_s:.6f} s): {event.name}")
 
