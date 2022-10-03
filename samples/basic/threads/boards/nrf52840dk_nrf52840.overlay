@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+&button0 {
+	gpios = < &gpio1 0x7 0x11 >;
+	label = "Push button switch 0";
+};
+&button1 {
+	gpios = < &gpio1 0x8 0x11 >;
+	label = "Push button switch 1";
+};
