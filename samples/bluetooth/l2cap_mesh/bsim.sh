@@ -20,10 +20,12 @@ cd ${BSIM_OUT_PATH}/bin
 
 SIM_NUM_DEVICES=$1
 
-for (( i=0; i < $SIM_NUM_DEVICES; ++i ))
+for (( i=0; i < $SIM_NUM_DEVICES - 1; ++i ))
 do
-  #gdb -q -batch -ex run -ex backtrace --args ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i &
-  ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i &
+  # gdb -q -batch -ex run -ex "thread apply all bt" --args ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i &
+  ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i > /dev/null 2>&1 &
 done
+
+gdb -q -batch -ex run -ex "thread apply all bt" --args ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=19 &
 
 ./bs_2G4_phy_v1 -s=l2cap_mesh -D=$(($SIM_NUM_DEVICES+0)) -sim_length=300e6 -defmodem=BLE_simple -channel=Indoorv1 -argschannel -preset=Huge3 -speed=1.1 -at=50

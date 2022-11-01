@@ -302,6 +302,9 @@ int bt_hci_cmd_send_sync(uint16_t opcode, struct net_buf *buf,
 	net_buf_put(&bt_dev.cmd_tx_queue, net_buf_ref(buf));
 
 	err = k_sem_take(&sync_sem, HCI_CMD_TIMEOUT);
+	if (err) {
+			*(int*)0 = 0;
+	}
 	BT_ASSERT_MSG(err == 0, "k_sem_take failed with err %d", err);
 
 	status = cmd(buf)->status;
@@ -468,6 +471,8 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 		bt_conn_unref(conn);
 	}
+
+	/* *(int*)0 = 0; */
 }
 
 #if defined(CONFIG_BT_CENTRAL)

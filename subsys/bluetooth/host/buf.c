@@ -25,7 +25,7 @@
  * Having a dedicated pool for it ensures that exhaustion of the RX pool
  * cannot block the delivery of this priority event.
  */
-NET_BUF_POOL_FIXED_DEFINE(num_complete_pool, 1, NUM_COMLETE_EVENT_SIZE, NULL);
+NET_BUF_POOL_FIXED_DEFINE(num_complete_pool, 10, NUM_COMLETE_EVENT_SIZE, NULL);
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_BUF_EVT_DISCARDABLE_COUNT)
