@@ -41,6 +41,7 @@
 
 struct tx_meta {
 	struct bt_conn_tx *tx;
+	bool frag;
 };
 
 #define tx_data(buf) ((struct tx_meta *)net_buf_user_data(buf))
@@ -102,6 +103,9 @@ struct k_sem *bt_conn_get_pkts(struct bt_conn *conn)
 	}
 #endif /* CONFIG_BT_ISO */
 #if defined(CONFIG_BT_CONN)
+	/* TODO: can we make this per-conn?
+	 * - NCP event seems to support it.
+	 * - Just need a read-buffer-size-per-conn VS command. */
 	return &bt_dev.le.acl_pkts;
 #else
 	return NULL;
@@ -161,7 +165,7 @@ static void tx_notify(struct bt_conn *conn)
 		tx = (void *)sys_slist_get_not_empty(&conn->tx_complete);
 		irq_unlock(key);
 
-		BT_DBG("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
+		BT_ERR("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
 
 		/* Copy over the params */
 		cb = tx->cb;
@@ -376,6 +380,8 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 		tx_data(buf)->tx = NULL;
 	}
 
+	tx_data(buf)->frag = false;
+
 	net_buf_put(&conn->tx_queue, buf);
 	return 0;
 }
@@ -387,8 +393,15 @@ enum {
 	FRAG_END
 };
 
-static int send_acl(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
+static void prepare_acl(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 {
+	/* BT_ERR("buf %p flags %u", buf, flags); */
+	if (tx_data(buf)->frag) {
+		uint16_t pb = bt_acl_flags_pb(sys_get_le16(buf->data) >> 12);
+		/* BT_ERR("%p already a fragment: %u", buf, pb); */
+		return;
+	}
+
 	struct bt_hci_acl_hdr *hdr;
 
 	switch (flags) {
@@ -401,13 +414,23 @@ static int send_acl(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 		flags = BT_ACL_CONT;
 		break;
 	default:
-		return -EINVAL;
+		return;
 	}
 
 	hdr = net_buf_push(buf, sizeof(*hdr));
 	hdr->handle = sys_cpu_to_le16(bt_acl_handle_pack(conn->handle, flags));
 	hdr->len = sys_cpu_to_le16(buf->len - sizeof(*hdr));
+	/* BT_ERR("%s len %u", __func__, buf->len - sizeof(*hdr)); */
+}
 
+static int send_acl(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
+{
+	/* BT_ERR("send_acl"); */
+	/* prepare_acl(conn, buf, flags); */
+
+	/* Assume header has been set.
+	 * TODO: really check the PB to see if it has,
+	 */
 	bt_buf_set_type(buf, BT_BUF_ACL_OUT);
 
 	return bt_send(buf);
@@ -455,8 +478,23 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	BT_DBG("conn %p buf %p len %u flags 0x%02x", conn, buf, buf->len,
 	       flags);
 
-	/* Wait until the controller can accept ACL packets */
-	k_sem_take(bt_conn_get_pkts(conn), K_FOREVER);
+	/* Set the correct flags.
+	 * If sem_take fails, the buffer will already be ready to transmit.
+	 * If `prepare_acl` has already been called, it will have no effect.
+	 * */
+	prepare_acl(conn, buf, flags);
+
+	/* LOG_HEXDUMP_ERR(buf->data, buf->len, "send_frag"); */
+
+	/* Check if the controller can accept ACL packets */
+	if(k_sem_take(bt_conn_get_pkts(conn), K_MSEC(10))) {
+		/* not `goto fail`, we don't want to free the tx context: in the
+		 * case where it is the original buffer, it will contain the
+		 * callback ptr.
+		 */
+		tx_data(buf)->frag = true;
+		return false;
+	}
 
 	/* Check for disconnection while waiting for pkts_sem */
 	if (conn->state != BT_CONN_CONNECTED) {
@@ -466,6 +504,7 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	/* Add to pending, it must be done before bt_buf_set_type */
 	key = irq_lock();
 	if (tx) {
+		__ASSERT_NO_MSG(tx->cb);
 		sys_slist_append(&conn->tx_pending, &tx->node);
 	} else {
 		struct bt_conn_tx *tail_tx;
@@ -558,9 +597,21 @@ static struct net_buf *create_frag(struct bt_conn *conn, struct net_buf *buf)
 
 	/* Fragments never have a TX completion callback */
 	tx_data(frag)->tx = NULL;
+	tx_data(frag)->frag = false;
 
-	frag_len = MIN(conn_mtu(conn), net_buf_tailroom(frag));
+	uint8_t header_len = 0;
+	if (tx_data(buf)->frag) {
+		/* Un-reserve the ACL header
+		 * Double-check if that also works with HCI:H4,
+		 * as it uses 1 extra byte of reserve.
+		 */
+		net_buf_reset(frag);
+		header_len = 4;
+	}
+	frag_len = MIN(conn_mtu(conn) + header_len, net_buf_tailroom(frag));
 
+	/* Point to buffer memory directly.
+	 * -> this way no double-memcpy when sending fails. */
 	net_buf_add_mem(frag, buf->data, frag_len);
 	net_buf_pull(buf, frag_len);
 
@@ -571,39 +622,63 @@ static bool send_buf(struct bt_conn *conn, struct net_buf *buf)
 {
 	struct net_buf *frag;
 
-	BT_DBG("conn %p buf %p len %u", conn, buf, buf->len);
+	/* BT_ERR("conn %p buf %p len %u head %u", */
+	/*        conn, buf, buf->len, net_buf_headroom(buf)); */
+	/* if (tx_data(buf)->tx) */
+	/* BT_ERR("meta: tx %p cb %p frag %u", */
+	/*        tx_data(buf)->tx, tx_data(buf)->tx->cb, tx_data(buf)->frag); */
+	/* LOG_HEXDUMP_ERR(buf->data, buf->len, "buf@entry"); */
 
 	/* Send directly if the packet fits the ACL MTU */
 	if (buf->len <= conn_mtu(conn)) {
 		return send_frag(conn, buf, FRAG_SINGLE, false);
 	}
 
-	/* Create & enqueue first fragment */
-	frag = create_frag(conn, buf);
-	if (!frag) {
-		return false;
-	}
-
-	if (!send_frag(conn, frag, FRAG_START, true)) {
-		return false;
-	}
-
 	/*
 	 * Send the fragments. For the last one simply use the original
 	 * buffer (which works since we've used net_buf_pull on it.
 	 */
+	uint8_t flags = FRAG_START;
 	while (buf->len > conn_mtu(conn)) {
 		frag = create_frag(conn, buf);
 		if (!frag) {
 			return false;
 		}
 
-		if (!send_frag(conn, frag, FRAG_CONT, true)) {
+		if (tx_data(buf)->frag) {
+			/* Instruct the loop to add a header for the next fragments. */
+			tx_data(buf)->frag = false;
+			/* prepare_acl uses this to know if it should add the header. */
+			tx_data(frag)->frag = true;
+		}
+
+		if (!send_frag(conn, frag, flags, false)) {
+			/* BT_ERR("%p failed, mark as existing frag", buf); */
+			if (flags == FRAG_START) {
+				/* Remove header and unmark buffer as existing frag.
+				 * This is because the original `buf` likely doesn't have enough
+				 * buffer space to store the header for the first fragment.
+				 */
+				net_buf_pull(frag, sizeof(struct bt_hci_acl_hdr));
+				tx_data(buf)->frag = false;
+			} else {
+				tx_data(buf)->frag = true;
+			}
+			net_buf_push_mem(buf, frag->data, frag->len);
+			net_buf_unref(frag);
 			return false;
 		}
+
+		flags = FRAG_CONT;
 	}
 
-	return send_frag(conn, buf, FRAG_END, false);
+	if (!send_frag(conn, buf, FRAG_END, false)) {
+		/* BT_ERR("%p last frag failed, mark as existing frag", buf); */
+		tx_data(buf)->frag = true;
+		return false;
+	}
+
+	return true;
 }
 
 static struct k_poll_signal conn_change =
@@ -709,7 +784,14 @@ void bt_conn_process_tx(struct bt_conn *conn)
 	buf = net_buf_get(&conn->tx_queue, K_NO_WAIT);
 	BT_ASSERT(buf);
 	if (!send_buf(conn, buf)) {
-		net_buf_unref(buf);
+		/* Put the buffer back at the start of the FIFO */
+		/* TODO: check if another T can't insert a buffer in here. */
+		/* FIXME: hack to put it back at the end */
+		/* BT_ERR("Putting back %p on the queue", buf); */
+		/* LOG_HEXDUMP_ERR(buf->data, buf->len, "buf"); */
+		k_lifo_put((struct k_lifo*)&conn->tx_queue, buf);
+	} else {
+		/* BT_ERR("buf %p sent", buf); */
 	}
 }
 

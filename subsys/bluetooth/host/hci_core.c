@@ -427,13 +427,14 @@ static void hci_num_completed_packets(struct net_buf *buf)
 		handle = sys_le16_to_cpu(evt->h[i].handle);
 		count = sys_le16_to_cpu(evt->h[i].count);
 
-		BT_DBG("handle %u count %u", handle, count);
-
 		conn = bt_conn_lookup_handle(handle);
 		if (!conn) {
 			BT_ERR("No connection for handle %u", handle);
 			continue;
 		}
+
+		/* BT_ERR("handle %u count %u, no_cb %u", */
+		/*        handle, count, conn->pending_no_cb); */
 
 		while (count--) {
 			struct bt_conn_tx *tx;
@@ -442,12 +443,21 @@ static void hci_num_completed_packets(struct net_buf *buf)
 
 			key = irq_lock();
 
+			/* FIXME:
+			 * Pended segments will prevent the callbacks from
+			 * full packets to execute.
+			 * We should use a single-list to not mess up the order.
+			 * seems like the tx->pending_no_cb shenanigans are supposed
+			 * to address this.
+			 * */
 			if (conn->pending_no_cb) {
+				/* BT_ERR("pending_no_cb--"); */
 				conn->pending_no_cb--;
 				irq_unlock(key);
 				k_sem_give(bt_conn_get_pkts(conn));
 				continue;
 			}
+			/* BT_ERR("pending--"); */
 
 			node = sys_slist_get(&conn->tx_pending);
 			irq_unlock(key);
