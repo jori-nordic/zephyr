@@ -25,6 +25,50 @@
 
 #include <zephyr/bluetooth/buf.h>
 
+/* ----------------------------------------------------------------------------------------------- */
+#include <zephyr/logging/log_backend.h>
+#include <zephyr/logging/log_core.h>
+#include <zephyr/logging/log_output.h>
+#include <zephyr/logging/log_backend_std.h>
+#include <zephyr/drivers/pinctrl.h>
+#include <soc.h>
+
+
+/** The stimulus port from which SWO data is received and displayed */
+#define ITM_PORT_LOGGER       0
+
+/* If ITM has pin control properties, apply them for SWO pins */
+#if DT_NODE_HAS_PROP(DT_NODELABEL(itm), pinctrl_0)
+PINCTRL_DT_DEFINE(DT_NODELABEL(itm));
+#endif
+
+/* Set TPIU prescaler for the current debug trace clock frequency. */
+#if CONFIG_BT_DEBUG_MONITOR_SWO_FREQ_HZ == 0
+#define SWO_FREQ_DIV  1
+#else
+
+/* Set reference frequency which can be custom or cpu frequency. */
+#if DT_NODE_HAS_PROP(DT_NODELABEL(itm), swo_ref_frequency)
+#define SWO_REF_FREQ DT_PROP(DT_NODELABEL(itm), swo_ref_frequency)
+#elif DT_NODE_HAS_PROP(DT_PATH(cpus, cpu_0), clock_frequency)
+#define SWO_REF_FREQ DT_PROP(DT_PATH(cpus, cpu_0), clock_frequency)
+#else
+#error "Missing DT 'clock-frequency' property on cpu@0 node"
+#endif
+
+#define SWO_FREQ_DIV \
+	((SWO_REF_FREQ + (CONFIG_BT_DEBUG_MONITOR_SWO_FREQ_HZ / 2)) / \
+		CONFIG_BT_DEBUG_MONITOR_SWO_FREQ_HZ)
+
+#if SWO_FREQ_DIV > 0xFFFF
+#error CONFIG_BT_DEBUG_MONITOR_SWO_FREQ_HZ is too low. SWO clock divider is 16-bit. \
+	Minimum supported SWO clock frequency is \
+	[Reference Clock Frequency]/2^16.
+#endif
+
+#endif
+/* ----------------------------------------------------------------------------------------------- */
+
 #include "monitor.h"
 
 /* This is the same default priority as for other console handlers,
@@ -139,6 +183,21 @@ static void monitor_send(const void *data, size_t len)
 static void poll_out(char c)
 {
 	monitor_send(&c, sizeof(c));
+}
+#elif defined(CONFIG_BT_DEBUG_MONITOR_SWO)
+
+static inline void poll_out(char c)
+{
+	ITM_SendChar(c);
+}
+
+static void monitor_send(const void *data, size_t len)
+{
+	const uint8_t *buf = data;
+
+	while (len--) {
+		poll_out(*buf++);
+	}
 }
 #elif defined(CONFIG_BT_DEBUG_MONITOR_UART)
 static const struct device *const monitor_dev =
@@ -370,7 +429,40 @@ static int bt_monitor_init(const struct device *d)
 {
 	ARG_UNUSED(d);
 
-#if defined(CONFIG_BT_DEBUG_MONITOR_RTT)
+#if defined(CONFIG_BT_DEBUG_MONITOR_SWO)
+	printk("swo init\n");
+	/* Enable DWT and ITM units */
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	/* Enable access to ITM registers */
+	ITM->LAR  = 0xC5ACCE55;
+	/* Disable stimulus ports ITM_STIM0-ITM_STIM31 */
+	ITM->TER  = 0x0;
+	/* Disable ITM */
+	ITM->TCR  = 0x0;
+	/* Select NRZ (UART) encoding protocol */
+	TPI->SPPR = 2;
+	/* Set SWO baud rate prescaler value: SWO_clk = ref_clock/(ACPR + 1) */
+	TPI->ACPR = SWO_FREQ_DIV - 1;
+	/* Enable unprivileged access to ITM stimulus ports */
+	ITM->TPR  = 0x0;
+	/* Configure Debug Watchpoint and Trace */
+	DWT->CTRL &= (DWT_CTRL_POSTPRESET_Msk | DWT_CTRL_POSTINIT_Msk | DWT_CTRL_CYCCNTENA_Msk);
+	DWT->CTRL |= (DWT_CTRL_POSTPRESET_Msk | DWT_CTRL_POSTINIT_Msk);
+	/* Configure Formatter and Flush Control Register */
+	TPI->FFCR = 0x00000100;
+	/* Enable ITM, set TraceBusID=1, no local timestamp generation */
+	ITM->TCR  = 0x0001000D;
+	/* Enable stimulus port used by the logger */
+	ITM->TER  = 1 << ITM_PORT_LOGGER;
+
+	/* Initialize pin control settings, if any are defined */
+#if DT_NODE_HAS_PROP(DT_NODELABEL(itm), pinctrl_0)
+	const struct pinctrl_dev_config *pincfg =
+		PINCTRL_DT_DEV_CONFIG_GET(DT_NODELABEL(itm));
+
+	pinctrl_apply_state(pincfg, PINCTRL_STATE_DEFAULT);
+#endif
+#elif defined(CONFIG_BT_DEBUG_MONITOR_RTT)
 	static uint8_t rtt_up_buf[RTT_BUF_SIZE];
 
 	SEGGER_RTT_ConfigUpBuffer(CONFIG_BT_DEBUG_MONITOR_RTT_BUFFER,
@@ -386,11 +478,11 @@ static int bt_monitor_init(const struct device *d)
 #endif /* CONFIG_BT_DEBUG_MONITOR_UART */
 
 #if !defined(CONFIG_UART_CONSOLE) && !defined(CONFIG_RTT_CONSOLE) && !defined(CONFIG_LOG_PRINTK)
-	__printk_hook_install(monitor_console_out);
-	__stdout_hook_install(monitor_console_out);
+	/* __printk_hook_install(monitor_console_out); */
+	/* __stdout_hook_install(monitor_console_out); */
 #endif /* !CONFIG_UART_CONSOLE && !CONFIG_RTT_CONSOLE && !CONFIG_LOG_PRINTK */
 
 	return 0;
 }
 
-SYS_INIT(bt_monitor_init, PRE_KERNEL_1, MONITOR_INIT_PRIORITY);
+SYS_INIT(bt_monitor_init, PRE_KERNEL_1, 0);

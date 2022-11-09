@@ -336,6 +336,40 @@ config BT_DEBUG_MONITOR_RTT
 	  on the host side that can decode this protocol. Currently
 	  the 'btmon' tool from BlueZ is capable of doing this.
 
+config BT_DEBUG_MONITOR_SWO
+	bool "Monitor protocol over SWO"
+	depends on HAS_SWO
+	select BT_DEBUG
+	select BT_MONITOR
+	select CONSOLE_HAS_DRIVER
+	select LOG
+	help
+	  Use a custom logging protocol over SWO instead of
+	  plain-text output. Requires a special application
+	  on the host side that can decode this protocol. Currently
+	  the 'btmon' tool from BlueZ is capable of doing this.
+
+endchoice # Bluetooth debug type
+
+if BT_DEBUG_MONITOR_SWO
+
+config BT_DEBUG_MONITOR_SWO_FREQ_HZ
+	int "Set SWO output frequency"
+	default 0
+	help
+	  Set SWO output frequency. Value 0 will select maximum frequency
+	  supported by the given MCU. Not all debug probes support high
+	  frequency SWO operation. In this case the frequency has to be set
+	  manually.
+
+	  SWO value defined by this option will be configured at boot. Most SWO
+	  viewer programs will configure SWO frequency when attached to the
+	  debug probe. Such configuration will persist only until the device
+	  reset. To ensure flawless operation the frequency configured here and
+	  by the SWO viewer program has to match.
+
+endif # BT_DEBUG_MONITOR_SWO
+
 if BT_DEBUG_MONITOR_RTT
 
 config BT_DEBUG_MONITOR_RTT_BUFFER
@@ -361,8 +395,6 @@ config BT_DEBUG_MONITOR_RTT_BUFFER_SIZE
 	  Specify reserved size of up-buffer used for custom logger output.
 
 endif # BT_DEBUG_MONITOR_RTT
-
-endchoice # Bluetooth debug type
 
 if BT_DEBUG
 
