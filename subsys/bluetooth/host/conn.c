@@ -44,6 +44,7 @@
 
 struct tx_meta {
 	struct bt_conn_tx *tx;
+	bool frag;
 };
 
 #define tx_data(buf) ((struct tx_meta *)net_buf_user_data(buf))
@@ -430,6 +431,8 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 		tx_data(buf)->tx = NULL;
 	}
 
+	tx_data(buf)->frag = false;
+
 	net_buf_put(&conn->tx_queue, buf);
 	return 0;
 }
@@ -498,7 +501,7 @@ static int send_iso(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 	return bt_send(buf);
 }
 
-static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
+static int send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 		      bool always_consume)
 {
 	struct bt_conn_tx *tx = tx_data(buf)->tx;
@@ -506,16 +509,35 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	unsigned int key;
 	int err = 0;
 
-	BT_DBG("conn %p buf %p len %u flags 0x%02x", conn, buf, buf->len,
-	       flags);
+	LOG_HEXDUMP_DBG(buf->data, buf->len, "send_frag");
 
-	/* Wait until the controller can accept ACL packets */
-	k_sem_take(bt_conn_get_pkts(conn), K_FOREVER);
+	/* Check if the controller can accept ACL packets */
+	if (k_sem_take(bt_conn_get_pkts(conn), K_MSEC(100))) {
+		/* not `goto fail`, we don't want to free the tx context: in the
+		 * case where it is the original buffer, it will contain the
+		 * callback ptr.
+		 */
+		LOG_DBG("no CTLR bufs");
+		return -ENOBUFS;
+	}
+
+	if (flags == FRAG_SINGLE || flags == FRAG_END) {
+		/* De-queue the buffer now that we know we can send it.
+		 * Only applies if the buffer to be sent is the original buffer,
+		 * and not one of its fragments.
+		 * This buffer was fetched from the FIFO using a peek operation.
+		 */
+		buf = net_buf_get(&conn->tx_queue, K_NO_WAIT);
+	}
 
 	/* Check for disconnection while waiting for pkts_sem */
 	if (conn->state != BT_CONN_CONNECTED) {
+		err = -ENOTCONN;
 		goto fail;
 	}
+
+	BT_DBG("conn %p buf %p len %u flags 0x%02x", conn, buf, buf->len,
+	       flags);
 
 	/* Add to pending, it must be done before bt_buf_set_type */
 	key = irq_lock();
@@ -554,12 +576,21 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 			(*pending_no_cb)--;
 		}
 		irq_unlock(key);
+
+		/* We don't want to end up in a situation where send_acl/iso
+		 * returns the same error code as when we don't get a buffer in
+		 * time.
+		 */
+		err = -EIO;
 		goto fail;
 	}
 
-	return true;
+	return 0;
 
 fail:
+	/* If we get here, something has seriously gone wrong:
+	 * We also need to destroy the `parent` buf.
+	 */
 	k_sem_give(bt_conn_get_pkts(conn));
 	if (tx) {
 		/* `buf` might not get destroyed, and its `tx` pointer will still be reachable.
@@ -572,7 +603,7 @@ fail:
 	if (always_consume) {
 		net_buf_unref(buf);
 	}
-	return false;
+	return err;
 }
 
 static inline uint16_t conn_mtu(struct bt_conn *conn)
@@ -621,6 +652,7 @@ static struct net_buf *create_frag(struct bt_conn *conn, struct net_buf *buf)
 
 	/* Fragments never have a TX completion callback */
 	tx_data(frag)->tx = NULL;
+	tx_data(frag)->frag = false;
 
 	frag_len = MIN(conn_mtu(conn), net_buf_tailroom(frag));
 
@@ -630,42 +662,52 @@ static struct net_buf *create_frag(struct bt_conn *conn, struct net_buf *buf)
 	return frag;
 }
 
-static bool send_buf(struct bt_conn *conn, struct net_buf *buf)
+static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 {
 	struct net_buf *frag;
+	uint8_t flags;
+	int err;
 
 	BT_DBG("conn %p buf %p len %u", conn, buf, buf->len);
+	LOG_HEXDUMP_DBG(buf->data, buf->len, "buf@entry");
 
 	/* Send directly if the packet fits the ACL MTU */
-	if (buf->len <= conn_mtu(conn)) {
+	if (buf->len <= conn_mtu(conn) && !tx_data(buf)->frag) {
+		LOG_DBG("send direct");
 		return send_frag(conn, buf, FRAG_SINGLE, false);
 	}
 
-	/* Create & enqueue first fragment */
-	frag = create_frag(conn, buf);
-	if (!frag) {
-		return false;
-	}
-
-	if (!send_frag(conn, frag, FRAG_START, true)) {
-		return false;
-	}
-
+	LOG_DBG("start fragmenting");
 	/*
 	 * Send the fragments. For the last one simply use the original
 	 * buffer (which works since we've used net_buf_pull on it.
 	 */
+	flags = FRAG_START;
+	if (tx_data(buf)->frag) {
+		flags = FRAG_CONT;
+	}
+
 	while (buf->len > conn_mtu(conn)) {
 		frag = create_frag(conn, buf);
 		if (!frag) {
-			return false;
+			return -ENOMEM;
 		}
 
-		if (!send_frag(conn, frag, FRAG_CONT, true)) {
-			return false;
+		err = send_frag(conn, frag, flags, false);
+		if (err) {
+			LOG_DBG("%p failed, mark as existing frag", buf);
+			tx_data(buf)->frag = flags != FRAG_START;
+			/* Put the frag back into the original buffer */
+			net_buf_push_mem(buf, frag->data, frag->len);
+			net_buf_unref(frag);
+			return err;
 		}
+
+		flags = FRAG_CONT;
 	}
 
+	LOG_DBG("last frag");
+	tx_data(buf)->frag = true;
 	return send_frag(conn, buf, FRAG_END, false);
 }
 
@@ -781,6 +823,7 @@ int bt_conn_prepare_events(struct k_poll_event events[])
 void bt_conn_process_tx(struct bt_conn *conn)
 {
 	struct net_buf *buf;
+	int err;
 
 	BT_DBG("conn %p", conn);
 
@@ -791,10 +834,20 @@ void bt_conn_process_tx(struct bt_conn *conn)
 		return;
 	}
 
-	/* Get next ACL packet for connection */
-	buf = net_buf_get(&conn->tx_queue, K_NO_WAIT);
+	/* Get next ACL packet for connection. The buffer will only get dequeued
+	 * if there is a free controller buffer to put it in.
+	 *
+	 * Important: no operations should be done on `buf` until it is properly
+	 * dequeued from the FIFO, using the `net_buf_get()` API.
+	 */
+	buf = k_fifo_peek_head(&conn->tx_queue);
 	BT_ASSERT(buf);
-	if (!send_buf(conn, buf)) {
+
+	buf = net_buf_ref(buf);
+	err = send_buf(conn, buf);
+	net_buf_unref(buf);
+
+	if (err  == -EIO) {
 		struct bt_conn_tx *tx = tx_data(buf)->tx;
 
 		tx_data(buf)->tx = NULL;
