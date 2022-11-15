@@ -145,6 +145,9 @@ struct k_sem *bt_conn_get_pkts(struct bt_conn *conn)
 	}
 #endif /* CONFIG_BT_ISO */
 #if defined(CONFIG_BT_CONN)
+	/* TODO: can we make this per-conn?
+	 * - NCP event seems to support it.
+	 * - Just need a read-buffer-size-per-conn VS command. */
 	return &bt_dev.le.acl_pkts;
 #else
 	return NULL;
@@ -412,7 +415,7 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 	if (cb) {
 		tx = conn_tx_alloc();
 		if (!tx) {
-			BT_ERR("Unable to allocate TX context");
+			BT_WARN("Unable to allocate TX context");
 			return -ENOBUFS;
 		}
 
