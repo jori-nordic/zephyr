@@ -5507,7 +5507,9 @@ int hci_acl_handle(struct net_buf *buf, struct net_buf **evt)
 	handle = sys_le16_to_cpu(acl->handle);
 
 	if (buf->len < len) {
-		BT_ERR("Invalid HCI ACL packet length");
+		BT_ERR("Invalid HCI ACL packet length: buf %u header %u",
+		       buf->len, len);
+		__ASSERT_NO_MSG(false);
 		return -EINVAL;
 	}
 

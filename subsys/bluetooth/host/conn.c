@@ -271,6 +271,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 	case BT_ACL_START:
 		if (conn->rx) {
 			BT_ERR("Unexpected first L2CAP frame");
+			__ASSERT_NO_MSG(0);
 			bt_conn_reset_rx_state(conn);
 		}
 
@@ -283,6 +284,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 	case BT_ACL_CONT:
 		if (!conn->rx) {
 			BT_ERR("Unexpected L2CAP continuation");
+			__ASSERT_NO_MSG(0);
 			bt_conn_reset_rx_state(conn);
 			net_buf_unref(buf);
 			return;
@@ -520,7 +522,9 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	/* Add to pending, it must be done before bt_buf_set_type */
 	key = irq_lock();
 	if (tx) {
+		__ASSERT_NO_MSG(tx->cb);
 		sys_slist_append(&conn->tx_pending, &tx->node);
+		pending_no_cb = NULL;
 	} else {
 		struct bt_conn_tx *tail_tx;
 
@@ -550,6 +554,7 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 		if (tx) {
 			sys_slist_find_and_remove(&conn->tx_pending, &tx->node);
 		} else {
+			__ASSERT_NO_MSG(pending_no_cb);
 			__ASSERT_NO_MSG(*pending_no_cb > 0);
 			(*pending_no_cb)--;
 		}
