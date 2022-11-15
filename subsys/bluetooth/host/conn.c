@@ -513,7 +513,7 @@ static int send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 	LOG_HEXDUMP_DBG(buf->data, buf->len, "send_frag");
 
 	/* Check if the controller can accept ACL packets */
-	if(k_sem_take(bt_conn_get_pkts(conn), K_MSEC(100))) {
+	if(k_sem_take(bt_conn_get_pkts(conn), K_NO_WAIT)) {
 		/* not `goto fail`, we don't want to free the tx context: in the
 		 * case where it is the original buffer, it will contain the
 		 * callback ptr.
@@ -752,10 +752,31 @@ static int conn_prepare_events(struct bt_conn *conn,
 
 	BT_DBG("Adding conn %p to poll list", conn);
 
-	k_poll_event_init(&events[0],
-			K_POLL_TYPE_FIFO_DATA_AVAILABLE,
-			K_POLL_MODE_NOTIFY_ONLY,
-			&conn->tx_queue);
+	/* Here's an idea:
+	 * - put a K_NO_WAIT for the semaphore acquisition
+	 * - remove the queue from the k_poll
+	 * - add the NCP event to the k_poll
+	 * -> this way this process_tx won't get triggered all the gdamn time
+	 * */
+
+	bool buffer_available = k_sem_count_get(bt_conn_get_pkts(conn)) > 0;
+	if (buffer_available) {
+		BT_DBG("wait on host fifo");
+		/* Wait until there is more data to send. */
+		k_poll_event_init(&events[0],
+				K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+				K_POLL_MODE_NOTIFY_ONLY,
+				&conn->tx_queue);
+	} else {
+		BT_DBG("wait on ctlr buffers");
+		/* Only resume sending when the controller has buffer space
+		 * available for this connection.
+		 */
+		k_poll_event_init(&events[0],
+				K_POLL_TYPE_SEM_AVAILABLE,
+				K_POLL_MODE_NOTIFY_ONLY,
+				bt_conn_get_pkts(conn));
+	}
 	events[0].tag = BT_EVENT_CONN_TX_QUEUE;
 
 	return 0;
