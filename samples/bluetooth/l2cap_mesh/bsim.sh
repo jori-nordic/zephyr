@@ -20,10 +20,25 @@ cd ${BSIM_OUT_PATH}/bin
 
 SIM_NUM_DEVICES=$1
 
+DEV_ID=22
+SILENCE=0
+
 for (( i=0; i < $SIM_NUM_DEVICES; ++i ))
 do
-  #gdb -q -batch -ex run -ex backtrace --args ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i &
+  if [[ "$i" -eq $DEV_ID ]]; then
+      echo "Skip $i"
+      continue
+  fi
+  if [[ 1 -eq $SILENCE ]]; then
+  ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i > /dev/null 2>&1 &
+  continue
+  fi
+      # gdb -q -batch -ex run -ex "thread apply all bt" --args ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i &
   ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$i &
 done
 
-./bs_2G4_phy_v1 -s=l2cap_mesh -D=$(($SIM_NUM_DEVICES+0)) -sim_length=300e6 -defmodem=BLE_simple -channel=Indoorv1 -argschannel -preset=Huge3 -speed=1.1 -at=50
+./bs_2G4_phy_v1 -s=l2cap_mesh -D=$(($SIM_NUM_DEVICES+0)) -sim_length=300e6 -defmodem=BLE_simple -channel=Indoorv1 -argschannel -preset=Huge3 -speed=1.1 -at=50 &
+
+if [[ $DEV_ID -le $SIM_NUM_DEVICES ]]; then
+gdb --args ./bs_nrf52_bsim_build_l2cap_mesh -s=l2cap_mesh -d=$DEV_ID
+fi

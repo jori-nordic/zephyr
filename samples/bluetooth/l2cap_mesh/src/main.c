@@ -80,7 +80,7 @@ static void on_tx(struct link *link)
 	link->tx_ts = k_uptime_get();
 	format_link_recipient_addr(link);
 
-	printk("on_tx | %s | %s | \n", own_addr_str, other_addr_str);
+	/* printk("on_tx | %s | %s | \n", own_addr_str, other_addr_str); */
 }
 
 static void on_rx(struct link *link)
@@ -89,7 +89,7 @@ static void on_rx(struct link *link)
 	format_link_recipient_addr(link);
 	int avg_kbits_per_sec =
 		(link->bytes_received * 8) / MAX(1, (link->rx_ts - link->channel_up_ts));
-	printk("on_rx | %s | %s | %d kbps\n", own_addr_str, other_addr_str, avg_kbits_per_sec);
+	/* printk("on_rx | %s | %s | %d kbps\n", own_addr_str, other_addr_str, avg_kbits_per_sec); */
 }
 
 static void on_connect(struct link *link)
