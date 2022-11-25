@@ -64,10 +64,12 @@ fi
 
 find ../ -type d -name ${simulation_id} -exec rm -rf {} +
 
-Execute "./${bsim_central_exe_name}" -v=2 -s=${simulation_id} -d=0 -rs=915
 Execute "./${bsim_peripheral_exe_name}" -v=2 -s=${simulation_id} -d=1 -rs=710
 Execute "./${bsim_peripheral_exe_name}" -v=2 -s=${simulation_id} -d=2 -rs=175
 Execute ./bs_2G4_phy_v1 -dump -v=2 -s=${simulation_id} -D=3 -sim_length=30e6 &
+
+Execute "./${bsim_central_exe_name}" -v=2 -s=${simulation_id} -d=0 -rs=915
+# gdb --args "./${bsim_central_exe_name}" -v=2 -s=${simulation_id} -d=0 -rs=915
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"
