@@ -180,7 +180,6 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
 	if (!data) {
 		TERM_INFO("[UNSUBSCRIBED] addr %s", addr);
-		params->value_handle = 0U;
 		return BT_GATT_ITER_STOP;
 	}
 
@@ -192,10 +191,8 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
 	received_counter = strtoul(data_ptr, NULL, 0);
 
-	if ((conn_info_ref->notify_counter % 30) == 0) {
-		TERM_PRINT("[NOTIFICATION] addr %s conn %u data %s length %u cnt %u", addr,
-			   (conn_info_ref - conn_infos), data, length, received_counter);
-	}
+	TERM_PRINT("[NOTIFICATION] addr %s conn %u data %s length %u cnt %u", addr,
+			(conn_info_ref - conn_infos), data, length, received_counter);
 
 	__ASSERT(conn_info_ref->notify_counter == received_counter,
 		 "expected counter : %u , received counter : %u", conn_info_ref->notify_counter,
@@ -487,11 +484,27 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
 	}
 }
 
+static void len_updated(struct bt_conn *conn,
+		 struct bt_conn_le_data_len_info *info)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	TERM_INFO("LE Data Length Updated: addr %s (TX len %u time %u) (RX len %u time %u)",
+		  addr,
+		  info->tx_max_len,
+		  info->tx_max_time,
+		  info->rx_max_len,
+		  info->rx_max_time);
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
 	.le_param_req = le_param_req,
 	.le_param_updated = le_param_updated,
+	.le_data_len_updated = len_updated,
 };
 
 void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
@@ -638,8 +651,20 @@ void main(void)
 
 		bt_conn_foreach(BT_CONN_TYPE_LE, subscribe_to_service, NULL);
 
-		while (conn_count == CONFIG_BT_MAX_CONN) {
+		int i = 0;
+		while (conn_count) {
+			TERM_INFO("sleep");
 			k_sleep(K_SECONDS(1));
+			i++;
+
+			/* if (i > 5) { */
+			/* 	TERM_INFO("STOP#######"); */
+			/* 	/\* Trigger segfault to stop debugger *\/ */
+			/* 	*(int*)0 = 0; */
+			/* } */
 		}
+
+		TERM_PRINT("test passed, bye");
+		return;
 	}
 }

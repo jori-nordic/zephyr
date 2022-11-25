@@ -168,11 +168,27 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
 	atomic_set_bit(conn_info.flags, CONN_INFO_CONN_PARAMS_UPDATED);
 }
 
+static void len_updated(struct bt_conn *conn,
+		 struct bt_conn_le_data_len_info *info)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	TERM_INFO("LE Data Length Updated: addr %s (TX len %u time %u) (RX len %u time %u)",
+		  addr,
+		  info->tx_max_len,
+		  info->tx_max_time,
+		  info->rx_max_len,
+		  info->rx_max_time);
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
 	.le_param_req = le_param_req,
 	.le_param_updated = le_param_updated,
+	.le_data_len_updated = len_updated,
 };
 
 static void bt_ready(void)
@@ -238,13 +254,15 @@ void main(void)
 			memset(vnd_value, 0x00, sizeof(vnd_value));
 			snprintk(vnd_value, NOTIFICATION_DATA_LEN, "%s%u", NOTIFICATION_DATA_PREFIX,
 				 tx_notify_counter++);
+			TERM_PRINT("notify");
 			err = bt_gatt_notify(NULL, vnd_ind_attr, vnd_value, NOTIFICATION_DATA_LEN);
 			if (err) {
 				TERM_ERR("Couldn't send GATT notification");
 			}
 		}
 
-		if (((k_uptime_get() - uptime_ref) / 1000) >= 70) {
+		if (((k_uptime_get() - uptime_ref) / 1000) >= 10) {
+			TERM_PRINT("Send disconnect");
 			err = bt_conn_disconnect(conn_info.conn_ref, BT_HCI_ERR_REMOTE_POWER_OFF);
 
 			if (err) {
@@ -254,6 +272,9 @@ void main(void)
 			while (conn_info.conn_ref != NULL) {
 				k_sleep(K_MSEC(10));
 			}
+
+			TERM_PRINT("test passed, bye");
+			return;
 		}
 	}
 }
