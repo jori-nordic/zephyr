@@ -63,8 +63,8 @@ int broadcaster_multiple(void)
 		.sid = 0U, /* Supply unique SID when creating advertising set */
 		.secondary_max_skip = 0U,
 		.options = (BT_LE_ADV_OPT_EXT_ADV | BT_LE_ADV_OPT_USE_NAME),
-		.interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
-		.interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+		.interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
+		.interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
 		.peer = NULL,
 	};
 	int err;
