@@ -37,10 +37,12 @@ NET_BUF_SIMPLE_DEFINE(ext_scan_buf, CONFIG_BT_EXT_SCAN_BUF_SIZE);
 struct fragmented_advertiser {
 	bt_addr_le_t addr;
 	uint8_t sid;
+	bool complete;
 	enum {
 		FRAG_ADV_INACTIVE,
 		FRAG_ADV_REASSEMBLING,
 		FRAG_ADV_DISCARDING,
+		FRAG_ADV_COMPLETE_AWAIT,
 	} state;
 };
 
@@ -59,12 +61,15 @@ static void init_reassembling_advertiser(const bt_addr_le_t *addr, uint8_t sid)
 	bt_addr_le_copy(&reassembling_advertiser.addr, addr);
 	reassembling_advertiser.sid = sid;
 	reassembling_advertiser.state = FRAG_ADV_REASSEMBLING;
+	reassembling_advertiser.complete = false;
 }
 
 static void reset_reassembling_advertiser(void)
 {
+	BT_WARN("reset reass");
 	net_buf_simple_reset(&ext_scan_buf);
 	reassembling_advertiser.state = FRAG_ADV_INACTIVE;
+	reassembling_advertiser.complete = false;
 }
 
 #if defined(CONFIG_BT_PER_ADV_SYNC)
@@ -576,6 +581,62 @@ static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const 
 	scan_info->adv_props = get_adv_props_extended(evt->evt_type);
 }
 
+bool bt_accept_ext_adv_report(const struct bt_hci_evt_le_ext_advertising_info *report)
+{
+	if (report->evt_type & BT_HCI_LE_ADV_EVT_TYPE_LEGACY) {
+		return true;
+	}
+
+	if (reassembling_advertiser.complete) {
+		/* LOG_WRN("discard cmpt await"); */
+		return false;
+	}
+
+	/* We don't support interleaved partial ext adv reports:
+	 * we assume not getting batched advertising reports mixing legacy and fragmented.
+	 * i.e. we base this crude selection fn _only_ on the first report.
+	 *
+	 * We could totally iterate on the reports in the hci driver/buf alloc code.
+	 * - re-create a synthetic adv report events
+	 * - allocate legacy on the discardable pile
+	 * - call this fn on the partial reports to see if we want them or not
+	 */
+	bool is_new_advertiser = reassembling_advertiser.state == FRAG_ADV_INACTIVE ||
+		!fragmented_advertisers_equal(&reassembling_advertiser,
+					      &report->addr, report->sid);
+
+	uint16_t data_status = BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS(report->evt_type);
+	bool is_report_complete = data_status == BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS_COMPLETE;
+
+	char le_addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(&report->addr, le_addr, sizeof(le_addr));
+
+	if (is_new_advertiser) {
+		if (reassembling_advertiser.state == FRAG_ADV_REASSEMBLING) {
+			/* LOG_WRN("drop %s sid %u", le_addr, report->sid); */
+			return false;
+		} else if (reassembling_advertiser.state == FRAG_ADV_INACTIVE) {
+			/* LOG_WRN("init %s sid %u", le_addr, report->sid); */
+			init_reassembling_advertiser(&report->addr, report->sid);
+			return true;
+		}
+	}
+
+	char re_addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(&reassembling_advertiser.addr, re_addr, sizeof(re_addr));
+
+	/* LOG_WRN("accept %s sid %u / rea %s sid %u state %u", */
+		/* le_addr, report->sid, re_addr, reassembling_advertiser.sid, */
+		/* reassembling_advertiser.state); */
+
+	if (is_report_complete && reassembling_advertiser.state == FRAG_ADV_REASSEMBLING) {
+		LOG_ERR("report complete");
+		reassembling_advertiser.complete = true;
+	}
+
+	return true;
+}
+
 void bt_hci_le_adv_ext_report(struct net_buf *buf)
 {
 	uint8_t num_reports = net_buf_pull_u8(buf);
@@ -623,11 +684,23 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 		}
 
 		if (is_new_advertiser && reassembling_advertiser.state == FRAG_ADV_REASSEMBLING) {
-			BT_WARN("Received an incomplete advertising report while reassembling "
+			char le_addr[BT_ADDR_LE_STR_LEN];
+
+			bt_addr_le_to_str(&evt->addr, le_addr, sizeof(le_addr));
+
+			char re_addr[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(&reassembling_advertiser.addr, re_addr, sizeof(re_addr));
+
+			LOG_WRN("evt %s sid %u / rea %s sid %u state %u",
+				le_addr, evt->sid, re_addr, reassembling_advertiser.sid,
+				reassembling_advertiser.state);
+
+			BT_ERR("Received an incomplete advertising report while reassembling "
 				"advertising reports from a different advertiser. The advertising "
 				"report is discarded and future scan results may be incomplete. "
 				"Interleaving of fragmented advertising reports from different "
 				"advertisers is not yet supported.");
+			/* __ASSERT_NO_MSG(0); */
 			(void)net_buf_pull_mem(buf, evt->length);
 			continue;
 		}
@@ -637,6 +710,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 			 * We do not need to keep track of this advertiser.
 			 * Discard this report.
 			 */
+			BT_ERR("truncated");
 			(void)net_buf_pull_mem(buf, evt->length);
 			reset_reassembling_advertiser();
 			continue;
@@ -656,6 +730,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 			 * Discard this and future reports from the advertiser.
 			 */
 			reassembling_advertiser.state = FRAG_ADV_DISCARDING;
+			BT_ERR("discard");
 		}
 
 		if (reassembling_advertiser.state == FRAG_ADV_DISCARDING) {
@@ -664,6 +739,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 				/* We do no longer need to keep track of this advertiser as
 				 * all the expected data is received.
 				 */
+				BT_ERR("no more");
 				reset_reassembling_advertiser();
 			}
 			continue;
@@ -682,6 +758,11 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 		create_ext_adv_info(evt, &scan_info);
 		le_adv_recv(&evt->addr, &scan_info, &ext_scan_buf, ext_scan_buf.len);
 
+		char le_addr[BT_ADDR_LE_STR_LEN];
+
+		bt_addr_le_to_str(&evt->addr, le_addr, sizeof(le_addr));
+
+		LOG_WRN("proc done %s sid %u", le_addr, evt->sid);
 		/* We do no longer need to keep track of this advertiser. */
 		reset_reassembling_advertiser();
 
