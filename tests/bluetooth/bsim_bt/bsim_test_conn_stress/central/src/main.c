@@ -173,8 +173,10 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
 	received_counter = strtoul(data_ptr, NULL, 0);
 
-	if ((conn_info_ref->notify_counter % 30) == 0 ||
-	    (conn_info_ref->notify_counter % 187) == 0) {
+	struct bt_conn_info info;
+	bt_conn_get_info(conn, &info);
+
+	if (info.role == BT_CONN_ROLE_CENTRAL) {
 		TERM_PRINT("[NOTIFICATION] addr %s conn %u data %s length %u cnt %u", addr,
 			   (conn_info_ref - conn_infos), data, length, received_counter);
 	}
@@ -182,6 +184,7 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 	if (conn_info_ref->notify_counter != received_counter) {
 		TERM_WARN("expected counter : %u , received counter : %u",
 			  conn_info_ref->notify_counter, received_counter);
+		FAIL("wrong counter\n");
 	}
 
 	conn_info_ref->notify_counter++;
