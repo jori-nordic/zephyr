@@ -8559,6 +8559,7 @@ void hci_acl_encode(struct node_rx_pdu *node_rx, struct net_buf *buf)
 	uint8_t *data;
 
 	handle = node_rx->hdr.handle;
+	LOG_ERR("handle: %u", handle);
 
 	switch (pdu_data->ll_id) {
 	case PDU_DATA_LLID_DATA_CONTINUE:
@@ -8573,6 +8574,7 @@ void hci_acl_encode(struct node_rx_pdu *node_rx, struct net_buf *buf)
 		acl->len = sys_cpu_to_le16(pdu_data->len);
 		data = (void *)net_buf_add(buf, pdu_data->len);
 		memcpy(data, pdu_data->lldata, pdu_data->len);
+		LOG_HEXDUMP_ERR(pdu_data->lldata, pdu_data->len, "PDU data");
 #if defined(CONFIG_BT_HCI_ACL_FLOW_CONTROL)
 		if (hci_hbuf_total > 0) {
 			LL_ASSERT((hci_hbuf_sent - hci_hbuf_acked) <

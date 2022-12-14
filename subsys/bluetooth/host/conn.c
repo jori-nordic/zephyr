@@ -949,7 +949,7 @@ void bt_conn_set_state(struct bt_conn *conn, bt_conn_state_t state)
 {
 	bt_conn_state_t old_state;
 
-	LOG_DBG("%s -> %s", state2str(conn->state), state2str(state));
+	LOG_ERR("%s -> %s", state2str(conn->state), state2str(state));
 
 	if (conn->state == state) {
 		LOG_WRN("no transition %s", state2str(state));
