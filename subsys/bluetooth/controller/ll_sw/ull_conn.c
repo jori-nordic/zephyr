@@ -138,6 +138,7 @@ static inline bool ctrl_is_unexpected(struct ll_conn *conn, uint8_t opcode);
 static inline void event_conn_param_prep(struct ll_conn *conn,
 					 uint16_t event_counter,
 					 uint32_t ticks_at_expire);
+static void cpr_cache_initiate_or_complete(struct ll_conn *conn);
 #endif /* CONFIG_BT_CTLR_CONN_PARAM_REQ */
 
 #if defined(CONFIG_BT_CTLR_LE_PING)
@@ -450,7 +451,21 @@ uint8_t ll_conn_update(uint16_t handle, uint8_t cmd, uint8_t status, uint16_t in
 		} else {
 			if (conn->llcp_conn_param.req !=
 			    conn->llcp_conn_param.ack) {
-				return BT_HCI_ERR_CMD_DISALLOWED;
+				if (!conn->llcp_conn_param.remote ||
+				    conn->llcp_conn_param.cache.timeout) {
+					return BT_HCI_ERR_CMD_DISALLOWED;
+				}
+
+				conn->llcp_conn_param.cache.interval_min =
+					interval_min;
+				conn->llcp_conn_param.cache.interval_max =
+					interval_max;
+				conn->llcp_conn_param.cache.latency =
+					latency;
+				conn->llcp_conn_param.cache.timeout =
+					timeout;
+
+				return BT_HCI_ERR_SUCCESS;
 			}
 
 			conn->llcp_conn_param.status = 0U;
@@ -460,6 +475,7 @@ uint8_t ll_conn_update(uint16_t handle, uint8_t cmd, uint8_t status, uint16_t in
 			conn->llcp_conn_param.timeout = timeout;
 			conn->llcp_conn_param.state = cmd;
 			conn->llcp_conn_param.cmd = 1U;
+			conn->llcp_conn_param.remote = 0U;
 			conn->llcp_conn_param.req++;
 
 			if (IS_ENABLED(CONFIG_BT_PERIPHERAL) &&
@@ -1203,6 +1219,17 @@ int ull_conn_llcp(struct ll_conn *conn, uint32_t ticks_at_expire, uint16_t lazy)
 
 		/* check if connection update procedure is requested */
 		if (conn->llcp_cu.ack != conn->llcp_cu.req) {
+			/* Delay until all pending Tx in LLL is acknowledged,
+			 * new Tx PDUs will not be enqueued until we proceed to
+			 * initiate connection update and get acknowledged.
+			 * This is required to ensure PDU with instant can be
+			 * transmitted before instant expires.
+			 */
+			if (memq_peek(conn->lll.memq_tx.head,
+				      conn->lll.memq_tx.tail, NULL)) {
+				return 0;
+			}
+
 			/* switch to LLCP_CONN_UPD state machine */
 			conn->llcp_type = LLCP_CONN_UPD;
 			conn->llcp_ack -= 2U;
@@ -1965,6 +1992,7 @@ void ull_conn_tx_lll_enqueue(struct ll_conn *conn, uint8_t count)
 
 	while (conn->tx_head &&
 	       ((
+		 (conn->llcp_cu.req == conn->llcp_cu.ack) &&
 #if defined(CONFIG_BT_CTLR_PHY)
 		 !conn->llcp_phy.pause_tx &&
 #endif /* CONFIG_BT_CTLR_PHY */
@@ -2884,6 +2912,7 @@ static inline void ctrl_tx_pause_enqueue(struct ll_conn *conn,
 	if (
 	    /* data/ctrl packet is in the head */
 	    conn->tx_head &&
+	    !conn->llcp_cu.pause_tx &&
 #if defined(CONFIG_BT_CTLR_LE_ENC)
 	    !conn->llcp_enc.pause_tx &&
 #endif /* CONFIG_BT_CTLR_LE_ENC */
@@ -3205,7 +3234,9 @@ static inline int event_conn_upd_prep(struct ll_conn *conn, uint16_t lazy,
 			/* procedure request acked */
 			conn->llcp_ack = conn->llcp_req;
 			conn->llcp_cu.ack = conn->llcp_cu.req;
-			conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+
+			/* Check and initiate new CPR from cache, if any */
+			cpr_cache_initiate_or_complete(conn);
 
 			/* Reset CPR mutex */
 			cpr_active_reset();
@@ -3233,8 +3264,15 @@ static inline int event_conn_upd_prep(struct ll_conn *conn, uint16_t lazy,
 					     llctrl.conn_update_ind.win_offset);
 			pdu_ctrl_tx->llctrl.conn_update_ind.instant =
 				sys_cpu_to_le16(conn->llcp.conn_upd.instant);
+
 			/* move to in progress */
 			conn->llcp_cu.state = LLCP_CUI_STATE_INPROG;
+
+			/* Data PDU tx paused, as we ensure PDUs in LLL have all
+			 * been ack-ed.
+			 */
+			conn->llcp_cu.pause_tx = 1U;
+
 			/* enqueue control PDU */
 			tx = CONTAINER_OF(pdu_ctrl_tx, struct node_tx, pdu);
 			ctrl_tx_enqueue(conn, tx);
@@ -3281,6 +3319,12 @@ static inline int event_conn_upd_prep(struct ll_conn *conn, uint16_t lazy,
 					      conn->lll.latency + 6;
 		pdu_ctrl_tx->llctrl.conn_update_ind.instant =
 			sys_cpu_to_le16(conn->llcp.conn_upd.instant);
+
+		/* Data PDU tx paused, as we ensure PDUs in LLL have all been
+		 * ack-ed.
+		 */
+		conn->llcp_cu.pause_tx = 1U;
+
 		/* enqueue control PDU */
 		ctrl_tx_enqueue(conn, tx);
 #endif /* !CONFIG_BT_CTLR_SCHED_ADVANCED */
@@ -3316,7 +3360,8 @@ static inline int event_conn_upd_prep(struct ll_conn *conn, uint16_t lazy,
 #if defined(CONFIG_BT_CTLR_CONN_PARAM_REQ)
 		if ((conn->llcp_conn_param.req != conn->llcp_conn_param.ack) &&
 		    (conn->llcp_conn_param.state == LLCP_CPR_STATE_UPD)) {
-			conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+			/* Check and initiate new CPR from cache, if any */
+			cpr_cache_initiate_or_complete(conn);
 
 			/* Stop procedure timeout */
 			conn->procedure_expire = 0U;
@@ -4102,8 +4147,8 @@ static inline void event_conn_param_rsp(struct ll_conn *conn)
 
 		ctrl_tx_enqueue(conn, tx);
 
-		/* procedure request acked */
-		conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+		/* Check and initiate new CPR from cache, if any */
+		cpr_cache_initiate_or_complete(conn);
 
 		/* Reset CPR mutex */
 		cpr_active_reset();
@@ -5037,7 +5082,8 @@ static uint8_t conn_upd_recv(struct ll_conn *conn, memq_link_t *link,
 	if ((conn->llcp_conn_param.req != conn->llcp_conn_param.ack) &&
 	    ((conn->llcp_conn_param.state == LLCP_CPR_STATE_RSP_WAIT) ||
 	     (conn->llcp_conn_param.state == LLCP_CPR_STATE_UPD_WAIT))) {
-		conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+		/* Check and initiate new CPR from cache, if any */
+		cpr_cache_initiate_or_complete(conn);
 	}
 #endif /* CONFIG_BT_CTLR_CONN_PARAM_REQ */
 
@@ -5581,8 +5627,8 @@ static inline int reject_ind_conn_upd_recv(struct ll_conn *conn,
 		/* Reset CPR mutex */
 		cpr_active_reset();
 
-		/* Procedure complete */
-		conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+		/* Check and initiate new CPR from cache, if any */
+		cpr_cache_initiate_or_complete(conn);
 
 		/* Stop procedure timeout */
 		conn->procedure_expire = 0U;
@@ -5611,6 +5657,30 @@ static inline int reject_ind_conn_upd_recv(struct ll_conn *conn,
 
 	return 0;
 }
+
+static void cpr_cache_initiate_or_complete(struct ll_conn *conn)
+{
+	if (conn->llcp_conn_param.cache.timeout) {
+		conn->llcp_conn_param.status = 0U;
+		conn->llcp_conn_param.interval_min =
+			conn->llcp_conn_param.cache.interval_min;
+		conn->llcp_conn_param.interval_max =
+			conn->llcp_conn_param.cache.interval_max;
+		conn->llcp_conn_param.latency =
+			conn->llcp_conn_param.cache.latency;
+		conn->llcp_conn_param.timeout =
+			conn->llcp_conn_param.cache.timeout;
+		conn->llcp_conn_param.state = LLCP_CPR_STATE_REQ;
+		conn->llcp_conn_param.cmd = 1U;
+		conn->llcp_conn_param.remote = 0U;
+
+		/* Invalidate cache */
+		conn->llcp_conn_param.cache.timeout = 0U;
+	} else {
+		conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+	}
+}
+
 #endif /* CONFIG_BT_CTLR_CONN_PARAM_REQ */
 
 #if defined(CONFIG_BT_CTLR_DATA_LENGTH)
@@ -6593,6 +6663,12 @@ static inline void ctrl_tx_ack(struct ll_conn *conn, struct node_tx **tx,
 		conn->common.txn_lock = 0U;
 		break;
 
+#if defined(CONFIG_BT_CENTRAL)
+	case PDU_DATA_LLCTRL_TYPE_CONN_UPDATE_IND:
+		conn->llcp_cu.pause_tx = 0U;
+		break;
+#endif /* CONFIG_BT_CENTRAL */
+
 #if defined(CONFIG_BT_CTLR_LE_ENC)
 #if defined(CONFIG_BT_CENTRAL)
 	case PDU_DATA_LLCTRL_TYPE_ENC_REQ:
@@ -7257,6 +7333,8 @@ static inline int ctrl_rx(memq_link_t *link, struct node_rx_pdu **rx,
 						NODE_RX_TYPE_RELEASE;
 				}
 
+				conn->llcp_conn_param.remote = 1U;
+
 				conn->llcp_conn_param.ack--;
 
 				/* Set CPR mutex */
@@ -7337,6 +7415,8 @@ static inline int ctrl_rx(memq_link_t *link, struct node_rx_pdu **rx,
 				/* Mark for buffer for release */
 				(*rx)->hdr.type = NODE_RX_TYPE_RELEASE;
 			}
+
+			conn->llcp_conn_param.remote = 1U;
 
 			conn->llcp_conn_param.ack--;
 
@@ -7507,8 +7587,8 @@ static inline int ctrl_rx(memq_link_t *link, struct node_rx_pdu **rx,
 			/* Reset CPR mutex */
 			cpr_active_reset();
 
-			/* Procedure complete */
-			conn->llcp_conn_param.ack = conn->llcp_conn_param.req;
+			/* Check and initiate new CPR from cache, if any */
+			cpr_cache_initiate_or_complete(conn);
 
 			/* skip event generation if not cmd initiated */
 			if (!conn->llcp_conn_param.cmd) {
