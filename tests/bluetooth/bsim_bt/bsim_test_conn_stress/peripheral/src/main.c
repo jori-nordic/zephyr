@@ -187,6 +187,7 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 	if (conn_info.rcvd_notify_counter != received_counter) {
 		TERM_WARN("expected counter : %u , received counter : %u",
 			  conn_info.rcvd_notify_counter, received_counter);
+		FAIL("wrong counter\n");
 	}
 
 	conn_info.rcvd_notify_counter++;
