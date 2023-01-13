@@ -2511,6 +2511,7 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 
 	if (sdu_len > chan->rx.mtu) {
 		BT_ERR("Invalid SDU length");
+		__ASSERT_NO_MSG(0);
 		bt_l2cap_chan_disconnect(&chan->chan);
 		return;
 	}

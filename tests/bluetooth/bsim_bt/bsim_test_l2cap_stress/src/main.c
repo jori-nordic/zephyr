@@ -25,7 +25,7 @@ CREATE_FLAG(flag_l2cap_connected);
 
 /* Only one SDU per link will be transmitted at a time */
 NET_BUF_POOL_DEFINE(sdu_tx_pool,
-		    CONFIG_BT_MAX_CONN, BT_L2CAP_BUF_SIZE(SDU_LEN),
+		    CONFIG_BT_MAX_CONN * 2, BT_L2CAP_BUF_SIZE(SDU_LEN),
 		    8, NULL);
 
 NET_BUF_POOL_DEFINE(segment_pool,
@@ -388,7 +388,9 @@ static void test_central_main(void)
 	/* Send SDU_NUM SDUs to each peripheral */
 	for (int i = 0; i < NUM_PERIPHERALS; i++) {
 		tx_left[i] = SDU_NUM;
-		l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data));
+		err = l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data));
+		err = l2cap_chan_send(l2cap_chans[i], tx_data, sizeof(tx_data));
+		__ASSERT_NO_MSG(err >= 0);
 	}
 
 	LOG_DBG("Wait until all transfers are completed.");
@@ -401,7 +403,7 @@ static void test_central_main(void)
 		for (int i = 0; i < L2CAP_CHANS; i++) {
 			remaining_tx_total += tx_left[i];
 		}
-	} while (remaining_tx_total);
+	} while (remaining_tx_total != 1);
 
 	LOG_DBG("Waiting until all peripherals are disconnected..");
 	while (disconnect_counter < NUM_PERIPHERALS) {
