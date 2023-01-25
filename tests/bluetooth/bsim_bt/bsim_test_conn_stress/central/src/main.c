@@ -48,8 +48,8 @@ static struct conn_info conn_infos[CONFIG_BT_MAX_CONN];
 
 void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-	TERM_PRINT("\e[93m---> %s:%s <---", __func__,
-		   (value == BT_GATT_CCC_NOTIFY) ? "true" : "false");
+	TERM_WARN("Peer CCC write: %s <---",
+		   (value == BT_GATT_CCC_NOTIFY) ? "subscribed" : "unsubscribed");
 	simulate_vnd = (value == BT_GATT_CCC_NOTIFY) ? 1 : 0;
 }
 
@@ -657,6 +657,7 @@ static void notify_peer(struct bt_conn *conn, void *data)
 
 	/* Check if the peer has subscribed to the service */
 	if (bt_gatt_is_subscribed(conn, vnd_ind_attr, BT_GATT_CCC_NOTIFY) == false) {
+		TERM_INFO("peer not subscribed");
 		return;
 	}
 
@@ -687,6 +688,8 @@ static void notify_peer(struct bt_conn *conn, void *data)
 	if (err) {
 		TERM_WARN("Couldn't send GATT notification");
 		return;
+	} else {
+		TERM_INFO("sent notification %d", conn_info_ref->tx_notify_counter);
 	}
 
 	conn_info_ref->tx_notify_counter++;

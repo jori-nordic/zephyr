@@ -75,6 +75,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	connections_rounds++;
 	conn_info.conn_ref = conn;
+	TERM_WARN("############################# TEST ROUND %d", connections_rounds);
 	TERM_SUCCESS("Connection %p established : %s", conn, addr);
 }
 
@@ -170,7 +171,8 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 	char addr[BT_ADDR_LE_STR_LEN];
 
 	if (!data) {
-		TERM_INFO("[UNSUBSCRIBED]");
+		/* FAIL("Not supposed to unsubscribe"); */
+		TERM_WARN("[UNSUBSCRIBED]");
 		params->value_handle = 0U;
 		return BT_GATT_ITER_STOP;
 	}
@@ -321,6 +323,8 @@ void notify_peer(struct bt_gatt_attr *vnd_ind_attr)
 	if (err) {
 		TERM_WARN("Couldn't send GATT notification");
 		return;
+	} else {
+		TERM_INFO("sent notification %d", tx_notify_counter);
 	}
 
 	tx_notify_counter++;
