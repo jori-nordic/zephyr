@@ -74,7 +74,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	connections_rounds++;
-	conn_info.conn_ref = conn;
+	conn_info.conn_ref = bt_conn_ref(conn);
 	TERM_SUCCESS("Connection %p established : %s", conn, addr);
 }
 
@@ -83,6 +83,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	char addr[BT_ADDR_LE_STR_LEN];
 
 	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
+	bt_conn_unref(conn);
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 	TERM_WARN("Connection @ %p with Peer %s terminated (reason 0x%02x)", conn, addr, reason);

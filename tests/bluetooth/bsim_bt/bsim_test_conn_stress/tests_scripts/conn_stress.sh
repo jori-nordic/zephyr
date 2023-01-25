@@ -23,7 +23,7 @@ function Execute(){
 #Give a default value to BOARD if it does not have one yet:
 BOARD="${BOARD:-nrf52_bsim}"
 
-testing_apps_loc="${ZEPHYR_BASE}/tests/bluetooth/bsim_bt/bsim_test_conn_stress"
+testing_apps_loc="/home/jon/repos/zephyrproject/zephyr/tests/bluetooth/bsim_bt/bsim_test_conn_stress"
 central_app_name="central"
 peripheral_app_name="peripheral"
 bsim_central_exe_name="bs_nrf52_bsim_bluetooth_central"
@@ -37,7 +37,7 @@ if [ ! -d "${central_app_name}" -o ! -d "${peripheral_app_name}" ]; then
 fi
 
 #Remove old builds if they exist
-find . -type d -name 'build' -exec rm -rf {} +
+# find . -type d -name 'build' -exec rm -rf {} +
 
 cd "${testing_apps_loc}/${central_app_name}"
 west build -b ${BOARD} .
@@ -70,7 +70,7 @@ for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"
 done
 
-find . -type f -name ${bsim_central_exe_name} -delete
-find . -type f -name ${bsim_peripheral_exe_name} -delete
+# find . -type f -name ${bsim_central_exe_name} -delete
+# find . -type f -name ${bsim_peripheral_exe_name} -delete
 
 exit $exit_code

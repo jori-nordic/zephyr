@@ -57,8 +57,7 @@ static struct conn_info *get_new_conn_info_ref(struct bt_conn *conn)
 	char addr[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_t const *peer_addr = bt_conn_get_dst(conn);
 
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
+	/* return the test context if we already have a matching one */
 	for (size_t i = 0; i < ARRAY_SIZE(conn_infos); i++) {
 		if (bt_addr_le_cmp(&conn_infos[i].peer_addr, BT_ADDR_LE_ANY) != 0) {
 			if (!bt_addr_le_cmp(&conn_infos[i].peer_addr, peer_addr)) {
@@ -67,6 +66,7 @@ static struct conn_info *get_new_conn_info_ref(struct bt_conn *conn)
 		}
 	}
 
+	/* find a free context slot and return it */
 	for (size_t i = 0; i < ARRAY_SIZE(conn_infos); i++) {
 		if (conn_infos[i].conn_ref == NULL) {
 			return &conn_infos[i];
@@ -397,6 +397,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	conn_count++;
 	TERM_INFO("Active connections count : %u", conn_count);
 
+	bt_conn_ref(conn);
 	conn_info_ref = get_new_conn_info_ref(conn);
 	CHECKIF(conn_info_ref == NULL) {
 		TERM_WARN("Invalid reference returned for conn : %p", conn);
@@ -668,11 +669,11 @@ static void notify_peer(struct bt_conn *conn, void *data)
 	 *
 	 * This should be removed when issue #53043 is solved
 	 */
-	if (conn_info_ref->tx_notify_counter == 0) {
-		if ((k_uptime_get() - conn_info_ref->tx_notify_time_ref) < 1000) {
-			return;
-		}
-	}
+	/* if (conn_info_ref->tx_notify_counter == 0) { */
+	/* 	if ((k_uptime_get() - conn_info_ref->tx_notify_time_ref) < 1000) { */
+	/* 		return; */
+	/* 	} */
+	/* } */
 
 	if ((k_uptime_get() - conn_info_ref->tx_notify_time_ref) < 100) {
 		return;
@@ -690,8 +691,9 @@ static void notify_peer(struct bt_conn *conn, void *data)
 	snprintk(conn_info_ref->vnd_value, notification_size, "%s%u", NOTIFICATION_DATA_PREFIX,
 		 conn_info_ref->tx_notify_counter);
 	err = bt_gatt_notify(conn, vnd_ind_attr, conn_info_ref->vnd_value, dyn_data_size);
+
 	if (err) {
-		FAIL("Couldn't send GATT notification conn %p", conn);
+		FAIL("Couldn't send GATT notification err %d conn %p", err, conn);
 		return;
 	}
 
