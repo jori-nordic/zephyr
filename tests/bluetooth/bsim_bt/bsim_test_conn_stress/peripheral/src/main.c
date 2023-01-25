@@ -181,7 +181,7 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
 	received_counter = strtoul(data_ptr, NULL, 0);
 
-	if ((conn_info.rcvd_notify_counter % 30) == 0) {
+	if (1) {
 		TERM_PRINT("[NOTIFICATION] addr %s data %s length %u cnt %u", addr, data, length,
 			   received_counter);
 	}
