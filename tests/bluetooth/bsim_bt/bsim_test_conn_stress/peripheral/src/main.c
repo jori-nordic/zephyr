@@ -438,6 +438,31 @@ static void subscribe_to_service(struct bt_conn *conn)
 	}
 }
 
+void update_characteristic_value(uint32_t count) {
+	memset(vnd_value, 0x00, sizeof(vnd_value));
+	snprintk(vnd_value, notification_size, "%s%u", NOTIFICATION_DATA_PREFIX,
+		 count);
+}
+void disconnect(void) {
+	int err = bt_conn_disconnect(conn_info.conn_ref,
+				     BT_HCI_ERR_REMOTE_POWER_OFF);
+
+	if (err) {
+		TERM_ERR("Terminating conn failed (err %d)", err);
+	}
+
+	/* wait for disconnection callback */
+	while (conn_info.conn_ref != NULL) {
+		k_sleep(K_MSEC(10));
+	}
+}
+
+void validate_procedure(uint8_t procedure_id) {
+	if (atomic_test_bit(conn_info.flags, procedure_id) == false) {
+		TERM_ERR("Procedure %u did not complete at least once.", procedure_id);
+	}
+}
+
 void test_peripheral_main(void)
 {
 	struct bt_gatt_attr *vnd_ind_attr;
@@ -461,31 +486,11 @@ void test_peripheral_main(void)
 	bt_uuid_to_str(&vnd_enc_uuid.uuid, str, sizeof(str));
 	TERM_PRINT("Indicate VND attr %p (UUID %s)", vnd_ind_attr, str);
 
-	/* Implement notification. At the moment there is no suitable way
-	 * of starting delayed work so we do it here
-	 */
 	while (true) {
-
-		if (conn_info.conn_ref == NULL) {
+		TERM_PRINT("wait conn");
+		/* Wait for connection from central */
+		while (conn_info.conn_ref == NULL) {
 			k_sleep(K_MSEC(10));
-			continue;
-		}
-
-#if defined(CONFIG_BT_SMP)
-		if (atomic_test_bit(conn_info.flags, CONN_INFO_SECURITY_LEVEL_UPDATED) == false) {
-			k_sleep(K_MSEC(10));
-			continue;
-		}
-#endif
-
-		if (atomic_test_bit(conn_info.flags, CONN_INFO_CONN_PARAMS_UPDATED) == false) {
-			k_sleep(K_MSEC(10));
-			continue;
-		}
-
-		if (atomic_test_bit(conn_info.flags, CONN_INFO_MTU_EXCHANGED) == false) {
-			k_sleep(K_MSEC(10));
-			continue;
 		}
 
 #if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
@@ -494,38 +499,36 @@ void test_peripheral_main(void)
 
 		subscribe_to_service(conn_info.conn_ref);
 
-		if (atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED_TO_SERVICE) == false) {
+		TERM_PRINT("wait sub");
+		while (!simulate_vnd) {
 			k_sleep(K_MSEC(10));
-			continue;
 		}
 
-		k_sleep(K_SECONDS(1));
-
 		/* Vendor indication simulation */
-		if (simulate_vnd && vnd_ind_attr) {
+		while (simulate_vnd) {
 			if (tx_notify_counter == 0) {
 				uptime_ref = k_uptime_get();
 			}
-			memset(vnd_value, 0x00, sizeof(vnd_value));
-			snprintk(vnd_value, notification_size, "%s%u", NOTIFICATION_DATA_PREFIX,
-				 tx_notify_counter++);
+
+			update_characteristic_value(tx_notify_counter++);
 			err = bt_gatt_notify(NULL, vnd_ind_attr, vnd_value, notification_size);
 			if (err) {
 				TERM_ERR("Couldn't send GATT notification");
 			}
 
 			if (((k_uptime_get() - uptime_ref) / 1000) >= 70) {
-				err = bt_conn_disconnect(conn_info.conn_ref,
-							 BT_HCI_ERR_REMOTE_POWER_OFF);
-
-				if (err) {
-					TERM_ERR("Terminating conn failed (err %d)", err);
-				}
-
-				while (conn_info.conn_ref != NULL) {
-					k_sleep(K_MSEC(10));
-				}
+				TERM_PRINT("disconnect");
+				disconnect();
 			}
+
+			TERM_PRINT("validate");
+			/* validate that all the procedures have run at least once */
+			validate_procedure(CONN_INFO_SECURITY_LEVEL_UPDATED);
+			validate_procedure(CONN_INFO_CONN_PARAMS_UPDATED);
+			validate_procedure(CONN_INFO_LL_DATA_LEN_TX_UPDATED);
+			validate_procedure(CONN_INFO_LL_DATA_LEN_RX_UPDATED);
+			validate_procedure(CONN_INFO_MTU_EXCHANGED);
+			validate_procedure(CONN_INFO_SUBSCRIBED_TO_SERVICE);
 		}
 	}
 }
