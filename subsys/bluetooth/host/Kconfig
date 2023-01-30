@@ -217,6 +217,14 @@ config BT_SETTINGS_CCC_STORE_ON_WRITE
 	  been updated. If the option is disabled, the CCC is only stored on
 	  disconnection.
 
+config BT_SETTINGS_CF_STORE_ON_WRITE
+	bool "Store CF value immediately after it has been written"
+	depends on BT_CONN
+	default y
+	help
+	  Store CF value right after it has been updated. If the option is
+	  disabled, the CF is only stored on disconnection.
+
 config BT_SETTINGS_USE_PRINTK
 	bool "Use snprintk to encode Bluetooth settings key strings"
 	depends on SETTINGS && PRINTK

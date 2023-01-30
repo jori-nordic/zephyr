@@ -50,7 +50,7 @@
 LOG_MODULE_REGISTER(bt_gatt);
 
 #define SC_TIMEOUT	K_MSEC(10)
-#define CCC_STORE_DELAY	K_SECONDS(1)
+#define STORE_DELAY	K_SECONDS(1)
 
 #define DB_HASH_TIMEOUT	K_MSEC(10)
 
@@ -606,6 +606,14 @@ static bool cf_set_value(struct gatt_cf_cfg *cfg, const uint8_t *value, uint16_t
 	return true;
 }
 
+enum delayed_store_flags {
+	DELAYED_STORE_CCC,
+	DELAYED_STORE_CF,
+	DELAYED_STORE_NUM_FLAGS
+};
+
+static void gatt_delayed_store_enqueue(struct bt_conn *conn, enum delayed_store_flags flag);
+
 static ssize_t cf_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -639,6 +647,12 @@ static ssize_t cf_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	bt_addr_le_copy(&cfg->peer, &conn->le.dst);
 	cfg->id = conn->id;
 	atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
+
+	/* Save the new configuration to NVM (in another thread) */
+	if (IS_ENABLED(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE)) {
+		LOG_DBG("trigger CF write");
+		gatt_delayed_store_enqueue(conn, DELAYED_STORE_CF);
+	}
 
 	return len;
 }
@@ -1211,45 +1225,78 @@ static void clear_ccc_cfg(struct bt_gatt_ccc_cfg *cfg)
 	cfg->value = 0U;
 }
 
-#if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE)
-static struct gatt_ccc_store {
-	struct bt_conn *conn_list[CONFIG_BT_MAX_CONN];
+#if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE) ||	\
+	defined(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE)
+
+/* Does it make sense to actually use a kernel queue?
+ * The whole conn index business is iffy at best
+ * -> will use 4 bytes bookkeeping per-el
+ * -> freeing will be harder */
+static struct gatt_delayed_store {
+	struct conn_list {
+		struct bt_conn *conn;
+		ATOMIC_DEFINE(flags, DELAYED_STORE_NUM_FLAGS);
+	} conn_list[CONFIG_BT_MAX_CONN];
 	struct k_work_delayable work;
-} gatt_ccc_store;
+} gatt_delayed_store;
 
-static bool gatt_ccc_conn_is_queued(struct bt_conn *conn)
-{
-	return (conn == gatt_ccc_store.conn_list[bt_conn_index(conn)]);
-}
-
-static void gatt_ccc_conn_unqueue(struct bt_conn *conn)
+static bool gatt_delayed_store_is_queued(struct bt_conn *conn, enum delayed_store_flags flag)
 {
 	uint8_t index = bt_conn_index(conn);
+	struct conn_list *el = &gatt_delayed_store.conn_list[index];
 
-	if (gatt_ccc_store.conn_list[index] != NULL) {
-		bt_conn_unref(gatt_ccc_store.conn_list[index]);
-		gatt_ccc_store.conn_list[index] = NULL;
+	return (conn == el->conn) && atomic_test_bit(el->flags, flag);
+}
+
+static bool gatt_delayed_store_is_last_queued(struct conn_list *el, enum delayed_store_flags flag)
+{
+	return atomic_get(el->flags) == 1 << flag;
+}
+
+static void gatt_delayed_store_dequeue(struct bt_conn *conn, enum delayed_store_flags flag)
+{
+	uint8_t index = bt_conn_index(conn);
+	struct conn_list *el = &gatt_delayed_store.conn_list[index];
+
+	if (el->conn != NULL) {
+		if (gatt_delayed_store_is_last_queued(el, flag)) {
+			bt_conn_unref(el->conn);
+			el->conn = NULL;
+		} else {
+			__ASSERT_NO_MSG(el->conn == conn);
+			atomic_clear_bit(el->flags, flag);
+		}
 	}
 }
 
-static void gatt_ccc_conn_enqueue(struct bt_conn *conn)
+static void gatt_delayed_store_enqueue(struct bt_conn *conn, enum delayed_store_flags flag)
 {
-	if ((!gatt_ccc_conn_is_queued(conn)) &&
-	    bt_addr_le_is_bonded(conn->id, &conn->le.dst)) {
+	bool queued = gatt_delayed_store_is_queued(conn, flag);
+	bool bonded = bt_addr_le_is_bonded(conn->id, &conn->le.dst);
+
+	if (!queued && bonded) {
 		/* Store the connection with the same index it has in
 		 * the conns array
 		 */
-		gatt_ccc_store.conn_list[bt_conn_index(conn)] =
-			bt_conn_ref(conn);
+		uint8_t index = bt_conn_index(conn);
+		struct conn_list *el = &gatt_delayed_store.conn_list[index];
 
-		k_work_reschedule(&gatt_ccc_store.work, CCC_STORE_DELAY);
+		if (el->conn == NULL) {
+			el->conn = bt_conn_ref(conn);
+			atomic_set_bit(el->flags, flag);
+		} else {
+			__ASSERT_NO_MSG(el->conn == conn);
+			atomic_set_bit(el->flags, flag);
+		}
+
+		k_work_reschedule(&gatt_delayed_store.work, STORE_DELAY);
 	}
 }
 
-static bool gatt_ccc_conn_queue_is_empty(void)
+static bool gatt_delayed_work_queue_is_empty(void)
 {
 	for (size_t i = 0; i < CONFIG_BT_MAX_CONN; i++) {
-		if (gatt_ccc_store.conn_list[i]) {
+		if (gatt_delayed_store.conn_list[i].conn) {
 			return false;
 		}
 	}
@@ -1257,27 +1304,37 @@ static bool gatt_ccc_conn_queue_is_empty(void)
 	return true;
 }
 
-static void ccc_delayed_store(struct k_work *work)
+static void delayed_store(struct k_work *work)
 {
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
-	struct gatt_ccc_store *ccc_store =
-		CONTAINER_OF(dwork, struct gatt_ccc_store, work);
+	struct gatt_delayed_store *store =
+		CONTAINER_OF(dwork, struct gatt_delayed_store, work);
 
 	for (size_t i = 0; i < CONFIG_BT_MAX_CONN; i++) {
-		struct bt_conn *conn = ccc_store->conn_list[i];
+		struct bt_conn *conn = store->conn_list[i].conn;
 
 		if (!conn) {
 			continue;
 		}
 
 		if (bt_addr_le_is_bonded(conn->id, &conn->le.dst)) {
-			ccc_store->conn_list[i] = NULL;
-			bt_gatt_store_ccc(conn->id, &conn->le.dst);
-			bt_conn_unref(conn);
+			if (IS_ENABLED(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE) &&
+			    gatt_delayed_store_is_queued(conn, DELAYED_STORE_CCC)) {
+				bt_gatt_store_ccc(conn->id, &conn->le.dst);
+				gatt_delayed_store_dequeue(conn, DELAYED_STORE_CCC);
+			}
+
+			if (IS_ENABLED(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE) &&
+			    gatt_delayed_store_is_queued(conn, DELAYED_STORE_CF)) {
+				bt_gatt_store_cf(conn);
+				gatt_delayed_store_dequeue(conn, DELAYED_STORE_CF);
+			}
 		}
 	}
 }
-#endif
+#endif	/* CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE ||
+	 * CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE
+	 */
 
 static void bt_gatt_service_init(void)
 {
@@ -1324,7 +1381,7 @@ void bt_gatt_init(void)
 #endif /* defined(CONFIG_BT_GATT_SERVICE_CHANGED) */
 
 #if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE)
-	k_work_init_delayable(&gatt_ccc_store.work, ccc_delayed_store);
+	k_work_init_delayable(&gatt_delayed_store.work, delayed_store);
 #endif
 
 #if defined(CONFIG_BT_GATT_CLIENT) && defined(CONFIG_BT_SETTINGS) && defined(CONFIG_BT_SMP)
@@ -1431,7 +1488,7 @@ static void gatt_unregister_ccc(struct _bt_gatt_ccc *ccc)
 			if (conn) {
 				if (conn->state == BT_CONN_CONNECTED) {
 #if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE)
-					gatt_ccc_conn_enqueue(conn);
+					gatt_delayed_store_enqueue(conn, DELAYED_STORE_CCC);
 #endif
 					store = false;
 				}
@@ -1998,7 +2055,7 @@ ssize_t bt_gatt_attr_write_ccc(struct bt_conn *conn,
 	if (value_changed) {
 #if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE)
 		/* Enqueue CCC store if value has changed for the connection */
-		gatt_ccc_conn_enqueue(conn);
+		gatt_delayed_store_enqueue(conn, DELAYED_STORE_CCC);
 #endif
 	}
 
@@ -6068,10 +6125,17 @@ void bt_gatt_disconnected(struct bt_conn *conn)
 #endif /* CONFIG_BT_GATT_NOTIFY_MULTIPLE */
 
 #if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE)
-	gatt_ccc_conn_unqueue(conn);
+	gatt_delayed_store_dequeue(conn, DELAYED_STORE_CCC);
+#endif
 
-	if (gatt_ccc_conn_queue_is_empty()) {
-		k_work_cancel_delayable(&gatt_ccc_store.work);
+#if defined(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE)
+	gatt_delayed_store_dequeue(conn, DELAYED_STORE_CF);
+#endif
+
+#if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE) ||	\
+    defined(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE)
+	if (gatt_delayed_work_queue_is_empty()) {
+		k_work_cancel_delayable(&gatt_delayed_store.work);
 	}
 #endif
 
