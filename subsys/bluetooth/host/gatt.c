@@ -517,6 +517,7 @@ enum {
 
 #define CF_NUM_BITS             (CF_BIT_LAST + 1)
 #define CF_NUM_BYTES            ((CF_BIT_LAST / 8) + 1)
+#define CF_FLAGS_NUM_BYTES      1
 
 #define CF_ROBUST_CACHING(_cfg) (_cfg->data[0] & BIT(CF_BIT_ROBUST_CACHING))
 #define CF_EATT(_cfg) (_cfg->data[0] & BIT(CF_BIT_EATT))
@@ -545,6 +546,29 @@ static void clear_cf_cfg(struct gatt_cf_cfg *cfg)
 }
 
 #if defined(CONFIG_BT_GATT_CACHING)
+enum delayed_store_flags {
+	DELAYED_STORE_CCC,
+	DELAYED_STORE_CF,
+	DELAYED_STORE_NUM_FLAGS
+};
+
+static void gatt_delayed_store_enqueue(struct bt_conn *conn, enum delayed_store_flags flag);
+
+void set_change_aware(struct bt_conn *conn, struct gatt_cf_cfg *cfg, bool aware)
+{
+	if (aware) {
+		atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
+		LOG_DBG("%s change-aware", bt_addr_le_str(&cfg->peer));
+		gatt_delayed_store_enqueue(conn, DELAYED_STORE_CF);
+		return;
+	}
+
+	if (atomic_test_and_clear_bit(cfg->flags, CF_CHANGE_AWARE)) {
+		LOG_DBG("%s change-unaware", bt_addr_le_str(&cfg->peer));
+		gatt_delayed_store_enqueue(conn, DELAYED_STORE_CF);
+	}
+}
+
 static struct gatt_cf_cfg *find_cf_cfg(struct bt_conn *conn)
 {
 	int i;
@@ -606,14 +630,6 @@ static bool cf_set_value(struct gatt_cf_cfg *cfg, const uint8_t *value, uint16_t
 	return true;
 }
 
-enum delayed_store_flags {
-	DELAYED_STORE_CCC,
-	DELAYED_STORE_CF,
-	DELAYED_STORE_NUM_FLAGS
-};
-
-static void gatt_delayed_store_enqueue(struct bt_conn *conn, enum delayed_store_flags flag);
-
 static ssize_t cf_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -646,7 +662,7 @@ static ssize_t cf_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 
 	bt_addr_le_copy(&cfg->peer, &conn->le.dst);
 	cfg->id = conn->id;
-	atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
+	set_change_aware(conn, cfg, true);
 
 	/* Save the new configuration to NVM (in another thread) */
 	if (IS_ENABLED(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE)) {
@@ -934,6 +950,7 @@ static int bt_gatt_store_cf(struct bt_conn *conn)
 #if defined(CONFIG_BT_GATT_CACHING)
 	struct gatt_cf_cfg *cfg;
 	char key[BT_SETTINGS_KEY_MAX];
+	char dst[CF_NUM_BYTES + CF_FLAGS_NUM_BYTES];
 	char *str;
 	size_t len;
 	int err;
@@ -955,6 +972,18 @@ static int bt_gatt_store_cf(struct bt_conn *conn)
 			bt_settings_encode_key(key, sizeof(key), "cf",
 					       &conn->le.dst, id_str);
 		}
+
+		/* add the data to a temp variable */
+		memcpy(dst, str, len);
+
+		/* add the change-aware flag */
+		bool change_aware = atomic_test_bit(cfg->flags, CF_CHANGE_AWARE);
+		LOG_ERR("change aware? %u", change_aware);
+
+		dst[len] = (uint8_t)(change_aware ? 1U : 0);
+		len += CF_FLAGS_NUM_BYTES;
+
+		str = dst;
 	}
 
 	if (!cfg || !conn->id) {
@@ -969,6 +998,7 @@ static int bt_gatt_store_cf(struct bt_conn *conn)
 	}
 
 	LOG_DBG("Stored CF for %s (%s)", bt_addr_le_str(&conn->le.dst), key);
+	LOG_HEXDUMP_DBG(str, len, "Saved data");
 #endif /* CONFIG_BT_GATT_CACHING */
 	return 0;
 
@@ -1176,8 +1206,7 @@ static void sc_indicate_rsp(struct bt_conn *conn,
 	if (bt_att_fixed_chan_only(conn)) {
 		cfg = find_cf_cfg(conn);
 		if (cfg && CF_ROBUST_CACHING(cfg)) {
-			atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
-			LOG_DBG("%s change-aware", bt_addr_le_str(&cfg->peer));
+			set_change_aware(conn, cfg, true);
 		}
 	}
 #endif /* CONFIG_BT_GATT_CACHING */
@@ -1464,10 +1493,7 @@ static void db_changed(void)
 			}
 
 			atomic_clear_bit(cfg->flags, CF_DB_HASH_READ);
-			if (atomic_test_and_clear_bit(cfg->flags,
-						      CF_CHANGE_AWARE)) {
-				LOG_DBG("%s change-unaware", bt_addr_le_str(&cfg->peer));
-			}
+			set_change_aware(conn, cfg, false);
 		}
 	}
 #endif
@@ -3008,8 +3034,7 @@ static void sc_restore_rsp(struct bt_conn *conn,
 	if (bt_att_fixed_chan_only(conn)) {
 		cfg = find_cf_cfg(conn);
 		if (cfg && CF_ROBUST_CACHING(cfg)) {
-			atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
-			LOG_DBG("%s change-aware", bt_addr_le_str(&cfg->peer));
+			set_change_aware(conn, cfg, true);
 		}
 	}
 #endif /* CONFIG_BT_GATT_CACHING */
@@ -5636,8 +5661,7 @@ bool bt_gatt_change_aware(struct bt_conn *conn, bool req)
 	 */
 	if (atomic_test_and_clear_bit(cfg->flags, CF_DB_HASH_READ)) {
 		bt_att_clear_out_of_sync_sent(conn);
-		atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
-		LOG_DBG("%s change-aware", bt_addr_le_str(&cfg->peer));
+		set_change_aware(conn, cfg, true);
 		return true;
 	}
 
@@ -5652,8 +5676,7 @@ bool bt_gatt_change_aware(struct bt_conn *conn, bool req)
 	if (bt_att_fixed_chan_only(conn) && bt_att_out_of_sync_sent_on_fixed(conn)) {
 		atomic_clear_bit(cfg->flags, CF_DB_HASH_READ);
 		bt_att_clear_out_of_sync_sent(conn);
-		atomic_set_bit(cfg->flags, CF_CHANGE_AWARE);
-		LOG_DBG("%s change-aware", bt_addr_le_str(&cfg->peer));
+		set_change_aware(conn, cfg, true);
 		return true;
 	}
 
@@ -5910,6 +5933,20 @@ static int cf_set(const char *name, size_t len_rd, settings_read_cb read_cb,
 		}
 
 		LOG_DBG("Read CF: len %zd", len);
+
+		uint8_t change_aware = 0;
+
+		len = read_cb(cb_arg, &change_aware, sizeof(change_aware));
+		if (len < 0) {
+			LOG_DBG("Change-aware status not stored (err %zd)", len);
+			return len;
+		}
+		/* TODO: check this doens't trigger a useless write to FLASH */
+		LOG_ERR("recall change-awareness");
+		/* set_change_aware(conn, cfg, change_aware == true); */
+		atomic_set(cfg->flags, (change_aware & 1) << CF_CHANGE_AWARE);
+
+		LOG_DBG("Read state: change-%saware", change_aware ? "" : "un");
 	} else {
 		clear_cf_cfg(cfg);
 	}

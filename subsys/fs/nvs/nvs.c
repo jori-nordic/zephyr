@@ -1052,6 +1052,7 @@ ssize_t nvs_write(struct nvs_fs *fs, uint16_t id, const void *data, size_t len)
 			/* compare the data and if equal return 0 */
 			rc = nvs_flash_block_cmp(fs, rd_addr, data, len);
 			if (rc <= 0) {
+				LOG_ERR("NVS: early return");
 				return rc;
 			}
 		}
@@ -1069,6 +1070,7 @@ ssize_t nvs_write(struct nvs_fs *fs, uint16_t id, const void *data, size_t len)
 	}
 
 	k_mutex_lock(&fs->nvs_lock, K_FOREVER);
+	LOG_ERR("NVS: write to flash");
 
 	gc_count = 0;
 	while (1) {
