@@ -15,6 +15,14 @@
 
 void server_procedure(void)
 {
-	bst_result = Passed;
+	int err;
+	struct bt_conn *conn;
+
+	err = bt_enable(NULL);
+
+	conn = connect_as_central();
+	printk("connected: conn %p\n", conn);
+	disconnect(conn);
+
 	PASS("PASS\n");
 }

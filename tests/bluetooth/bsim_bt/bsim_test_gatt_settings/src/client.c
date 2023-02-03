@@ -14,5 +14,14 @@
 
 void client_procedure(void)
 {
+	int err;
+	struct bt_conn *conn;
+
+	err = bt_enable(NULL);
+
+	conn = connect_as_peripheral();
+	printk("connected: conn %p\n", conn);
+	disconnect(conn);
+
 	PASS("PASS\n");
 }

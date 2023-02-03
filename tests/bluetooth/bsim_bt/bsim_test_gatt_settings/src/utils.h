@@ -69,3 +69,7 @@ void test_init(void);
 void backchannel_init(uint peer);
 void backchannel_sync_send(void);
 void backchannel_sync_wait(void);
+
+struct bt_conn* connect_as_central(void);
+struct bt_conn* connect_as_peripheral(void);
+void disconnect(struct bt_conn *conn);
