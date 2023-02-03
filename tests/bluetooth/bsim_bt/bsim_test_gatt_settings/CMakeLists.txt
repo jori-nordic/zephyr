@@ -13,9 +13,10 @@ find_package(Zephyr HINTS $ENV{ZEPHYR_BASE})
 project(bsim_test_gatt_settings)
 
 target_sources(app PRIVATE
-	src/utils.c
 	src/server.c
 	src/client.c
+	src/utils.c
+	src/gatt_utils.c
 	src/main.c
 )
 

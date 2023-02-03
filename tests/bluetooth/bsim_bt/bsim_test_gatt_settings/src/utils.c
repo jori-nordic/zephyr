@@ -119,6 +119,7 @@ static void get_active_conn_cb(struct bt_conn *src, void *dst)
 	*(struct bt_conn **)dst = src;
 }
 
+/* TODO: move to public */
 struct bt_conn* get_conn(void)
 {
 	struct bt_conn *ret;

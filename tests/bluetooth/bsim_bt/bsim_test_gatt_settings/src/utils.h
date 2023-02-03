@@ -73,3 +73,9 @@ void backchannel_sync_wait(void);
 struct bt_conn* connect_as_central(void);
 struct bt_conn* connect_as_peripheral(void);
 void disconnect(struct bt_conn *conn);
+struct bt_conn* get_conn(void);
+
+void gatt_register_service(void);
+void gatt_discover(void);
+void activate_robust_caching(void);
+void read_test_char(bool expect_err);

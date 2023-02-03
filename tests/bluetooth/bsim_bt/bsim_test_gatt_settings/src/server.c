@@ -19,10 +19,13 @@ void server_procedure(void)
 	struct bt_conn *conn;
 
 	err = bt_enable(NULL);
+	gatt_register_service();
+
+	/* TODO: remove. Wait for GATT hash to complete */
+	k_sleep(K_SECONDS(10));
 
 	conn = connect_as_central();
 	printk("connected: conn %p\n", conn);
-	disconnect(conn);
 
 	PASS("PASS\n");
 }

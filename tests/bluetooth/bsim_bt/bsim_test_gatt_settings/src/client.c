@@ -21,6 +21,10 @@ void client_procedure(void)
 
 	conn = connect_as_peripheral();
 	printk("connected: conn %p\n", conn);
+	gatt_discover();
+	activate_robust_caching();
+	read_test_char(false);
+
 	disconnect(conn);
 
 	PASS("PASS\n");
