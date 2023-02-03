@@ -149,9 +149,12 @@ static struct bt_conn_auth_info_cb bt_conn_auth_info_cb = {
 	.pairing_complete = pairing_complete,
 };
 
-static void set_security(struct bt_conn *conn, bt_security_t sec)
+/* Public functions */
+void set_security(struct bt_conn *conn, bt_security_t sec)
 {
 	int err;
+
+	UNSET_FLAG(flag_encrypted);
 
 	err = bt_conn_set_security(conn, sec);
 	ASSERT(!err, "Err bt_conn_set_security %d", err);
@@ -159,8 +162,16 @@ static void set_security(struct bt_conn *conn, bt_security_t sec)
 	WAIT_FOR_FLAG(flag_encrypted);
 }
 
-static void bond(struct bt_conn *conn)
+void wait_secured(void)
 {
+	UNSET_FLAG(flag_encrypted);
+	WAIT_FOR_FLAG(flag_encrypted);
+}
+
+void bond(struct bt_conn *conn)
+{
+	UNSET_FLAG(flag_pairing_complete);
+
 	int err = bt_conn_auth_info_cb_register(&bt_conn_auth_info_cb);
 	ASSERT(!err, "bt_conn_auth_info_cb_register failed.\n");
 
@@ -169,8 +180,11 @@ static void bond(struct bt_conn *conn)
 	WAIT_FOR_FLAG(flag_pairing_complete);
 }
 
-static void wait_bonded(void)
+void wait_bonded(void)
 {
+	UNSET_FLAG(flag_encrypted);
+	UNSET_FLAG(flag_pairing_complete);
+
 	int err = bt_conn_auth_info_cb_register(&bt_conn_auth_info_cb);
 	ASSERT(!err, "bt_conn_auth_info_cb_register failed.\n");
 
@@ -178,7 +192,6 @@ static void wait_bonded(void)
 	WAIT_FOR_FLAG(flag_pairing_complete);
 }
 
-/* Public functions */
 struct bt_conn* connect_as_central(void)
 {
 	struct bt_conn *conn;
@@ -186,8 +199,6 @@ struct bt_conn* connect_as_central(void)
 	scan_connect_to_first_result();
 	wait_connected();
 	conn = get_conn();
-
-	bond(conn);
 
 	return conn;
 }
@@ -200,24 +211,48 @@ struct bt_conn* connect_as_peripheral(void)
 	wait_connected();
 	conn = get_conn();
 
-	wait_bonded();
-
 	return conn;
 }
 
 /* TODO: move to backchannel.c/h */
-#define CHANNEL_ID 0
+#define CHANNEL_WAIT 1
+#define CHANNEL_SEND 0
 #define MSG_SIZE 1
 
-void backchannel_init(uint peer)
+void backchannel_init(void)
 {
 	uint device_number = get_device_nbr();
-	uint device_numbers[] = { peer };
-	uint channel_numbers[] = { CHANNEL_ID };
+	uint channel_numbers[2] = { 0, 0, };
+	uint device_numbers[2];
+	uint num_ch;
 	uint *ch;
 
+	/* No backchannels to next/prev device if only device */
+	if (get_test_round() == 0 && is_final_round()) {
+		return;
+	}
+
+	if (get_test_round() == 0) {
+		device_numbers[0] = get_device_nbr() + 1;
+		num_ch = 1;
+
+	} else if (is_final_round()){
+		device_numbers[0] = get_device_nbr() - 1;
+		num_ch = 1;
+
+	} else {
+		device_numbers[0] = get_device_nbr() + 1;
+		device_numbers[1] = get_device_nbr() - 1;
+		num_ch = 2;
+	}
+
+	printk("Opening backchannels\n");
+	for (int i=0; i<num_ch; i++) {
+		printk("num[%u] = %d\n", i, device_numbers[i]);
+	}
+
 	ch = bs_open_back_channel(device_number, device_numbers,
-				  channel_numbers, ARRAY_SIZE(channel_numbers));
+				  channel_numbers, num_ch);
 	if (!ch) {
 		FAIL("Unable to open backchannel\n");
 	}
@@ -228,16 +263,23 @@ void backchannel_sync_send(void)
 	uint8_t sync_msg[MSG_SIZE] = { get_device_nbr() };
 
 	printk("Sending sync\n");
-	bs_bc_send_msg(CHANNEL_ID, sync_msg, ARRAY_SIZE(sync_msg));
+	bs_bc_send_msg(CHANNEL_SEND, sync_msg, ARRAY_SIZE(sync_msg));
 }
 
 void backchannel_sync_wait(void)
 {
 	uint8_t sync_msg[MSG_SIZE];
+	uint channel;
+
+	if (is_final_round()){
+		channel = 0;
+	} else {
+		channel = 1;
+	}
 
 	while (true) {
-		if (bs_bc_is_msg_received(CHANNEL_ID) > 0) {
-			bs_bc_receive_msg(CHANNEL_ID, sync_msg,
+		if (bs_bc_is_msg_received(channel) > 0) {
+			bs_bc_receive_msg(channel, sync_msg,
 					  ARRAY_SIZE(sync_msg));
 			if (sync_msg[0] != get_device_nbr()) {
 				/* Received a message from another device, exit */
@@ -249,4 +291,17 @@ void backchannel_sync_wait(void)
 	}
 
 	printk("Sync received\n");
+}
+
+void signal_next_test_round(void)
+{
+	backchannel_sync_send();
+	PASS("round %d over\n", get_test_round());
+}
+
+void wait_for_round_start(void)
+{
+	if (get_test_round() != 0) {
+		backchannel_sync_wait();
+	}
 }

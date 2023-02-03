@@ -13,20 +13,31 @@
 #include <stdint.h>
 #include <string.h>
 
-void client_procedure(void)
+void client_round_0(void)
 {
 	struct bt_conn *conn;
 
-	bt_enable(NULL);
-	settings_load();
+	printk("start round...........\n");
 
 	conn = connect_as_peripheral();
 	printk("connected: conn %p\n", conn);
+	wait_secured();
+	printk("encrypted\n");
+
 	gatt_discover();
 	activate_robust_caching();
 	read_test_char(false);
 
 	disconnect(conn);
+}
+
+void client_procedure(void)
+{
+	bt_enable(NULL);
+	settings_load();
+
+	client_round_0();
+	client_round_0();
 
 	PASS("PASS\n");
 }

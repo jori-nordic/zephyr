@@ -138,6 +138,7 @@ void gatt_discover(void)
 	int err;
 
 	printk("Discovering services and characteristics\n");
+	UNSET_FLAG(flag_discovered);
 
 	discover_params.uuid = NULL;
 	discover_params.func = discover_func;
@@ -179,7 +180,10 @@ void activate_robust_caching(void)
 	};
 
 	write_params.handle = gatt_handles[CLIENT_FEATURES];
+
+	UNSET_FLAG(flag_written);
 	err = bt_gatt_write(get_conn(), &write_params);
+
 	ASSERT(!err, "Failed to enable robust caching\n");
 
 	WAIT_FOR_FLAG(flag_written);
@@ -229,6 +233,8 @@ void read_test_char(bool expect_err)
 	} else {
 		read_params.func = _expect_success;
 	}
+
+	UNSET_FLAG(flag_read);
 
 	err = bt_gatt_read(get_conn(), &read_params);
 	ASSERT(!err, "Failed to read char\n");

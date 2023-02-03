@@ -66,16 +66,28 @@ DECLARE_FLAG(flag_test_end);
 
 void test_tick(bs_time_t HW_device_time);
 void test_init(void);
-void backchannel_init(uint peer);
-void backchannel_sync_send(void);
-void backchannel_sync_wait(void);
+void backchannel_init(void);
+void signal_next_test_round(void);
+void wait_for_round_start(void);
 
 struct bt_conn* connect_as_central(void);
 struct bt_conn* connect_as_peripheral(void);
 void disconnect(struct bt_conn *conn);
 struct bt_conn* get_conn(void);
 
+void set_security(struct bt_conn *conn, bt_security_t sec);
+void wait_secured(void);
+void bond(struct bt_conn *conn);
+void wait_bonded(void);
+
 void gatt_register_service(void);
 void gatt_discover(void);
 void activate_robust_caching(void);
 void read_test_char(bool expect_err);
+
+char *get_settings_file(void);
+int get_test_round(void);
+void signal_next_test_round(void);
+void wait_for_round_start(void);
+
+bool is_final_round(void);

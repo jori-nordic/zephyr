@@ -209,7 +209,7 @@ static struct settings_store settings_custom_store = {
 
 int settings_backend_init(void)
 {
-	snprintf(setting_file, sizeof(setting_file), "%s_%d.log", get_simid(), get_device_nbr());
+	snprintf(setting_file, sizeof(setting_file), "%s_%s.log", get_simid(), get_settings_file());
 	snprintf(setting_file_tmp, sizeof(setting_file_tmp), "~%s", setting_file);
 
 	LOG_INF("file path: %s", SETTINGS_FILE);
@@ -222,7 +222,7 @@ int settings_backend_init(void)
 
 void settings_test_backend_clear(void)
 {
-	snprintf(setting_file, sizeof(setting_file), "%s_%d.log", get_simid(), get_device_nbr());
+	snprintf(setting_file, sizeof(setting_file), "%s_%s.log", get_simid(), get_settings_file());
 
 	if (remove(setting_file)) {
 		LOG_INF("error deleting file: %s", setting_file);

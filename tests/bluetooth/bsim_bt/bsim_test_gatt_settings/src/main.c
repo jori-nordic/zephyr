@@ -13,6 +13,37 @@ void client_procedure(void);
 #define BS_SECONDS(dur_sec)    ((bs_time_t)dur_sec * USEC_PER_SEC)
 #define TEST_TIMEOUT_SIMULATED BS_SECONDS(60)
 
+static int test_round;
+static int total_rounds;
+static char * settings_file;
+
+int get_test_round(void)
+{
+	return test_round;
+}
+
+bool is_final_round(void)
+{
+	return test_round == total_rounds - 1;
+}
+
+char *get_settings_file(void)
+{
+	return settings_file;
+}
+
+static void test_args(int argc, char **argv)
+{
+	ASSERT(argc == 3, "Please specify only 3 test arguments\n");
+
+	test_round = atol(argv[0]);
+	total_rounds = atol(argv[1]);
+	settings_file = argv[2];
+
+	bs_trace_raw(0, "Test round %u\n", test_round);
+	bs_trace_raw(0, "Total rounds %u\n", total_rounds);
+}
+
 void test_tick(bs_time_t HW_device_time)
 {
 	bs_trace_debug_time(0, "Simulation ends now.\n");
@@ -34,12 +65,14 @@ static const struct bst_test_instance test_to_add[] = {
 		.test_pre_init_f = test_init,
 		.test_tick_f = test_tick,
 		.test_main_f = server_procedure,
+		.test_args_f = test_args,
 	},
 	{
 		.test_id = "client",
 		.test_pre_init_f = test_init,
 		.test_tick_f = test_tick,
 		.test_main_f = client_procedure,
+		.test_args_f = test_args,
 	},
 	BSTEST_END_MARKER,
 };
