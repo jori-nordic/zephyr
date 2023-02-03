@@ -36,9 +36,21 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	SET_FLAG(flag_is_connected);
 }
 
+DEFINE_FLAG(flag_encrypted);
+
+void security_changed(struct bt_conn *conn, bt_security_t level,
+		      enum bt_security_err err)
+{
+	ASSERT(err == 0, "Error setting security\n");
+
+	printk("Encrypted\n");
+	SET_FLAG(flag_encrypted);
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
+	.security_changed = security_changed,
 };
 
 static void scan_connect_to_first_result_device_found(const bt_addr_le_t *addr, int8_t rssi,
@@ -116,18 +128,80 @@ struct bt_conn* get_conn(void)
 	return ret;
 }
 
+DEFINE_FLAG(flag_pairing_complete);
+
+static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
+{
+	FAIL("Pairing failed (unexpected): reason %u", reason);
+}
+
+static void pairing_complete(struct bt_conn *conn, bool bonded)
+{
+	ASSERT(bonded, "Bonding failed\n");
+
+	printk("Paired\n");
+	SET_FLAG(flag_pairing_complete);
+}
+
+static struct bt_conn_auth_info_cb bt_conn_auth_info_cb = {
+	.pairing_failed = pairing_failed,
+	.pairing_complete = pairing_complete,
+};
+
+static void set_security(struct bt_conn *conn, bt_security_t sec)
+{
+	int err;
+
+	err = bt_conn_set_security(conn, sec);
+	ASSERT(!err, "Err bt_conn_set_security %d", err);
+
+	WAIT_FOR_FLAG(flag_encrypted);
+}
+
+static void bond(struct bt_conn *conn)
+{
+	int err = bt_conn_auth_info_cb_register(&bt_conn_auth_info_cb);
+	ASSERT(!err, "bt_conn_auth_info_cb_register failed.\n");
+
+	set_security(conn, BT_SECURITY_L2);
+
+	WAIT_FOR_FLAG(flag_pairing_complete);
+}
+
+static void wait_bonded(void)
+{
+	int err = bt_conn_auth_info_cb_register(&bt_conn_auth_info_cb);
+	ASSERT(!err, "bt_conn_auth_info_cb_register failed.\n");
+
+	WAIT_FOR_FLAG(flag_encrypted);
+	WAIT_FOR_FLAG(flag_pairing_complete);
+}
+
+/* Public functions */
 struct bt_conn* connect_as_central(void)
 {
+	struct bt_conn *conn;
+
 	scan_connect_to_first_result();
 	wait_connected();
-	return get_conn();
+	conn = get_conn();
+
+	bond(conn);
+
+	return conn;
 }
 
 struct bt_conn* connect_as_peripheral(void)
 {
+	struct bt_conn *conn;
+
 	advertise_connectable();
 	wait_connected();
-	return get_conn();
+	conn = get_conn();
+
+	wait_bonded();
+
+	return conn;
 }
 
 /* TODO: move to backchannel.c/h */
