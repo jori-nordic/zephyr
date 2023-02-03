@@ -37,4 +37,8 @@ Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s="${simulation_id}" \
 for process_id in $process_ids; do
     wait $process_id || let "exit_code=$?"
 done
+
+# Remove the files used by the custom SETTINGS backend
+rm ${simulation_id}_*.log
+
 exit $exit_code #the last exit code != 0

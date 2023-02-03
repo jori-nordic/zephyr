@@ -9,17 +9,18 @@
 #include "zephyr/bluetooth/bluetooth.h"
 #include "zephyr/bluetooth/conn.h"
 #include "zephyr/toolchain/gcc.h"
+#include <zephyr/settings/settings.h>
 
 #include <stdint.h>
 #include <string.h>
 
 void server_procedure(void)
 {
-	int err;
 	struct bt_conn *conn;
 
-	err = bt_enable(NULL);
+	bt_enable(NULL);
 	gatt_register_service();
+	settings_load();
 
 	/* TODO: remove. Wait for GATT hash to complete */
 	k_sleep(K_SECONDS(10));
