@@ -10,6 +10,9 @@
 static struct bt_uuid_128 test_uuid = BT_UUID_INIT_128(
 	0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
 	0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
+static struct bt_uuid_128 test_uuid_2 = BT_UUID_INIT_128(
+	0xf1, 0xdd, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
+	0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
 static struct bt_uuid_128 test_chrc_uuid = BT_UUID_INIT_128(
 	0xf2, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
 	0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
@@ -53,11 +56,30 @@ static struct bt_gatt_attr test_attrs[] = {
 			       read_test, write_test, test_value),
 };
 
-static struct bt_gatt_service test_svc = BT_GATT_SERVICE(test_attrs);
+static struct bt_gatt_attr test_attrs_2[] = {
+	/* Vendor Primary Service Declaration */
+	BT_GATT_PRIMARY_SERVICE(&test_uuid_2),
 
-void gatt_register_service(void)
+	BT_GATT_CHARACTERISTIC(&test_chrc_uuid.uuid,
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+			       BT_GATT_PERM_READ_ENCRYPT |
+			       BT_GATT_PERM_WRITE_ENCRYPT,
+			       read_test, write_test, test_value),
+};
+
+static struct bt_gatt_service test_svc = BT_GATT_SERVICE(test_attrs);
+static struct bt_gatt_service test_svc_2 = BT_GATT_SERVICE(test_attrs_2);
+
+void gatt_register_service(bool other)
 {
-	int err = bt_gatt_service_register(&test_svc);
+	int err;
+
+	if (other) {
+		err = bt_gatt_service_register(&test_svc);
+	} else {
+		printk("................................. registering gatt\n");
+		err = bt_gatt_service_register(&test_svc_2);
+	}
 
 	ASSERT(!err, "Failed to register GATT service (err %d)\n", err);
 }

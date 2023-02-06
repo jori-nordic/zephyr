@@ -73,6 +73,7 @@ void wait_for_round_start(void);
 struct bt_conn* connect_as_central(void);
 struct bt_conn* connect_as_peripheral(void);
 void disconnect(struct bt_conn *conn);
+void wait_disconnected(void);
 struct bt_conn* get_conn(void);
 
 void set_security(struct bt_conn *conn, bt_security_t sec);
@@ -80,7 +81,7 @@ void wait_secured(void);
 void bond(struct bt_conn *conn);
 void wait_bonded(void);
 
-void gatt_register_service(void);
+void gatt_register_service(bool other);
 void gatt_discover(void);
 void activate_robust_caching(void);
 void read_test_char(bool expect_err);

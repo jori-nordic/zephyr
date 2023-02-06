@@ -11,7 +11,7 @@ void server_procedure(void);
 void client_procedure(void);
 
 #define BS_SECONDS(dur_sec)    ((bs_time_t)dur_sec * USEC_PER_SEC)
-#define TEST_TIMEOUT_SIMULATED BS_SECONDS(60)
+#define TEST_TIMEOUT_SIMULATED BS_SECONDS(120)
 
 static int test_round;
 static int total_rounds;

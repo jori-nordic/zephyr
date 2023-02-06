@@ -568,10 +568,21 @@ void set_change_aware(struct bt_conn *conn, struct gatt_cf_cfg *cfg, bool aware)
 	}
 
 	if (changed) {
-		LOG_DBG("peer is now change-%saware", aware ? "" : "un");
+		LOG_ERR("peer is now change-%saware", aware ? "" : "un");
 #if defined(CONFIG_BT_SETTINGS_DELAYED_STORE)
 		gatt_delayed_store_enqueue(conn, DELAYED_STORE_CF);
 #endif
+	}
+}
+
+static void set_all_change_aware(bool aware)
+{
+	for (int i = 0; i < ARRAY_SIZE(cf_cfg); i++) {
+		struct gatt_cf_cfg *cfg = &cf_cfg[i];
+
+		if (!bt_addr_le_eq(&cfg->peer, BT_ADDR_LE_ANY)) {
+			set_change_aware(NULL, cfg, aware);
+		}
 	}
 }
 
@@ -873,6 +884,9 @@ static void db_hash_process(struct k_work *work)
 		 * discovery on reconnect.
 		 */
 		sc_indicate(0x0001, 0xffff);
+
+		/* Mark all bonded peers as change-unaware */
+		set_all_change_aware(false);
 
 		/* Hash did not match, overwrite with current hash */
 		db_hash_store();
@@ -1447,6 +1461,8 @@ submit:
 		return;
 	}
 
+	/* Maybe set change-aware here? */
+
 	/* Reschedule since the range has changed */
 	sc_work_submit(SC_TIMEOUT);
 }
@@ -1476,6 +1492,10 @@ static void db_changed(void)
 		struct gatt_cf_cfg *cfg = &cf_cfg[i];
 
 		if (bt_addr_le_eq(&cfg->peer, BT_ADDR_LE_ANY)) {
+			/* FIXME: this doesn't reliably work when :
+			 * - peer isn't connected
+			 * - settings aren't loaded yet (cf_cfg is empty)
+			 */
 			continue;
 		}
 
@@ -1491,6 +1511,7 @@ static void db_changed(void)
 				bt_conn_unref(conn);
 			}
 
+			LOG_ERR("db-changed");
 			atomic_clear_bit(cfg->flags, CF_DB_HASH_READ);
 			set_change_aware(conn, cfg, false);
 		}
@@ -5947,7 +5968,7 @@ static int cf_set(const char *name, size_t len_rd, settings_read_cb read_cb,
 				LOG_ERR("Read bad change-aware value: 0x%x", change_aware);
 			} else {
 				atomic_set_bit_to(cfg->flags, CF_CHANGE_AWARE, change_aware);
-				LOG_DBG("Read state: change-%saware", change_aware ? "" : "un");
+				LOG_ERR("Read state: change-%saware", change_aware ? "" : "un");
 			}
 		}
 	} else {
@@ -5981,6 +6002,8 @@ static int db_hash_commit(void)
 {
 	int err;
 
+	/* Called when there is an actual NVS write OR when the setting is read from */
+	LOG_ERR("DB hash written to flash");
 	atomic_set_bit(gatt_sc.flags, DB_HASH_LOAD);
 	/* Reschedule work to calculate and compare against the Hash value
 	 * loaded from flash.

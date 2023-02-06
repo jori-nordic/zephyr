@@ -260,6 +260,7 @@ static int commit_settings(void)
 	int err;
 
 	LOG_DBG("");
+	LOG_ERR("SETTINGS COMMIT");
 
 	if (!atomic_test_bit(bt_dev.flags, BT_DEV_ENABLE)) {
 		/* The Bluetooth settings loader needs to communicate with the Bluetooth
@@ -313,7 +314,7 @@ int bt_settings_init(void)
 {
 	int err;
 
-	LOG_DBG("");
+	LOG_ERR("SETTINGS INNIT");
 
 	err = settings_subsys_init();
 	if (err) {
