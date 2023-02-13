@@ -1423,18 +1423,22 @@ static void delayed_store(struct k_work *work)
 	struct gatt_delayed_store *store =
 		CONTAINER_OF(dwork, struct gatt_delayed_store, work);
 
+	LOG_WRN("delayed_store");
 	for (size_t i = 0; i < ARRAY_SIZE(gatt_delayed_store.peer_list); i++) {
 		el = &store->peer_list[i];
 
 		if (bt_addr_le_is_bonded(el->id, &el->peer)) {
+			LOG_WRN("ds: peer is bonded");
 			if (IS_ENABLED(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE) &&
 			    atomic_test_bit(el->flags, DELAYED_STORE_CCC)) {
+				LOG_WRN("ds: write CCC");
 				atomic_clear_bit(el->flags, DELAYED_STORE_CCC);
 				bt_gatt_store_ccc(el->id, &el->peer);
 			}
 
 			if (IS_ENABLED(CONFIG_BT_SETTINGS_CF_STORE_ON_WRITE) &&
 			    atomic_test_bit(el->flags, DELAYED_STORE_CF)) {
+				LOG_WRN("ds: write CF");
 				atomic_clear_bit(el->flags, DELAYED_STORE_CF);
 				bt_gatt_store_cf(el->id, &el->peer);
 			}
@@ -6273,6 +6277,7 @@ void bt_gatt_disconnected(struct bt_conn *conn)
 
 	if (IS_ENABLED(CONFIG_BT_SETTINGS) &&
 	    bt_addr_le_is_bonded(conn->id, &conn->le.dst)) {
+		LOG_ERR("peer is bonded");
 		bt_gatt_store_ccc(conn->id, &conn->le.dst);
 		bt_gatt_store_cf(conn->id, &conn->le.dst);
 	}
