@@ -40,6 +40,10 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		return;
 	}
 
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
+	printk("connected: %s", addr_str);
+
 	bt_conn_ref(conn);
 	SET_FLAG(flag_is_connected);
 }

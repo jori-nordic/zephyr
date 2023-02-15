@@ -11,6 +11,7 @@
 #include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/controller.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/toolchain/gcc.h>
 
@@ -19,9 +20,11 @@
 
 void set_public_addr(void)
 {
-	bt_addr_le_t addr = {BT_ADDR_LE_RANDOM,
-			     {{0x0A, 0x89, 0x67, 0x45, 0x23, 0xC1}}};
-	bt_id_create(&addr, NULL);
+	/* bt_addr_le_t addr = {BT_ADDR_LE_RANDOM, */
+	/* 		     {{0x0A, 0x89, 0x67, 0x45, 0x23, 0xC1}}}; */
+	/* bt_id_create(&addr, NULL); */
+	uint8_t addr[] = {0x0A, 0x89, 0x67, 0x45, 0x23, 0xC1};
+	bt_ctlr_set_public_addr(addr);
 }
 
 void server_round_0(void)
