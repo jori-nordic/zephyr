@@ -943,7 +943,7 @@ static void l2cap_chan_tx_init(struct bt_l2cap_le_chan *chan)
 static void l2cap_chan_tx_give_credits(struct bt_l2cap_le_chan *chan,
 				       uint16_t credits)
 {
-	LOG_DBG("chan %p credits %u", chan, credits);
+	LOG_ERR("chan %p got TX credits %u", chan, credits);
 
 	atomic_add(&chan->tx.credits, credits);
 
@@ -1859,6 +1859,7 @@ static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch)
 {
 	if (!atomic_get(&ch->tx.credits) ||
 	    (k_fifo_is_empty(&ch->tx_queue) && !ch->tx_buf)) {
+		LOG_WRN("can't resume (creds %ld buf %p)", atomic_get(&ch->tx.credits), ch->tx_buf);
 		return;
 	}
 
@@ -1881,7 +1882,7 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 	struct l2cap_tx_meta_data *data = user_data;
 	struct bt_l2cap_chan *chan;
 	bt_conn_tx_cb_t cb = data->cb;
-	void *cb_user_data = data->user_data;
+
 	uint16_t cid = data->cid;
 
 	LOG_DBG("conn %p CID 0x%04x err %d", conn, cid, err);
@@ -1889,9 +1890,11 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 	free_tx_meta_data(data);
 
 	if (err) {
-		if (cb) {
-			cb(conn, cb_user_data, err);
-		}
+		/* if (cb) { */
+		/* 	cb(conn, cb_user_data, err); */
+		/* } */
+		LOG_ERR("whoops");
+		k_oops();
 
 		return;
 	}
@@ -1907,7 +1910,7 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 	}
 
 	if (cb) {
-		cb(conn, cb_user_data, 0);
+		cb(conn, data->user_data, 0);
 	}
 
 	/* Resume the current channel */
@@ -2128,7 +2131,7 @@ static void le_credits(struct bt_l2cap *l2cap, uint8_t ident,
 
 	l2cap_chan_tx_give_credits(le_chan, credits);
 
-	LOG_DBG("chan %p total credits %lu", le_chan, atomic_get(&le_chan->tx.credits));
+	LOG_WRN("chan %p total credits %lu", le_chan, atomic_get(&le_chan->tx.credits));
 
 	l2cap_chan_tx_resume(le_chan);
 }

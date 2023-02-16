@@ -103,7 +103,7 @@ static int net_bt_send(struct net_if *iface, struct net_pkt *pkt)
 	int length;
 	int ret;
 
-	NET_DBG("iface %p pkt %p len %zu", iface, pkt, net_pkt_get_len(pkt));
+	NET_WARN("iface %p pkt %p len %zu", iface, pkt, net_pkt_get_len(pkt));
 
 	/* Only accept IPv6 packets */
 	if (net_pkt_family(pkt) != AF_INET6) {
@@ -112,7 +112,7 @@ static int net_bt_send(struct net_if *iface, struct net_pkt *pkt)
 
 	ret = net_6lo_compress(pkt, true);
 	if (ret < 0) {
-		NET_DBG("Packet compression failed");
+		NET_ERR("Packet compression failed");
 		return ret;
 	}
 
@@ -139,7 +139,7 @@ static int net_bt_send(struct net_if *iface, struct net_pkt *pkt)
 
 static int net_bt_enable(struct net_if *iface, bool state)
 {
-	NET_DBG("iface %p %s", iface, state ? "up" : "down");
+	NET_ERR("iface %p %s", iface, state ? "up" : "down");
 
 	return 0;
 }
@@ -168,16 +168,20 @@ static void ipsp_connected(struct bt_l2cap_chan *chan)
 		return;
 	}
 
-	if (CONFIG_NET_L2_BT_LOG_LEVEL >= LOG_LEVEL_DBG) {
+	if (1) {
 		char src[BT_ADDR_LE_STR_LEN];
 		char dst[BT_ADDR_LE_STR_LEN];
 
 		bt_addr_le_to_str(info.le.src, src, sizeof(src));
 		bt_addr_le_to_str(info.le.dst, dst, sizeof(dst));
 
-		NET_DBG("Channel %p Source %s connected to Destination %s",
+		NET_ERR("Channel %p Source %s connected to Destination %s",
 			chan, src, dst);
 	}
+
+	/* Try to delay sending the 3 SDUs in case that's the issue.
+	 * edit: doesn't seem to have any effect. */
+	k_msleep(2);
 
 	/* Swap bytes since net APIs expect big endian address */
 	sys_memcpy_swap(conn->src.val, info.le.src->a.val, sizeof(conn->src));

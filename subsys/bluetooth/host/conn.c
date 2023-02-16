@@ -448,6 +448,9 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 		tx_data(buf)->tx = NULL;
 	}
 
+	/* FIXME: add size check for user-data, we need enough room to store a
+	 * struct tx_meta. This is only a problem when processing bufs allocated
+	 * from outside the stack. */
 	tx_data(buf)->is_cont = false;
 
 	net_buf_put(&conn->tx_queue, buf);
