@@ -754,6 +754,7 @@ config NET_BUF_DATA_POOL_SIZE
 
 config NET_PKT_BUF_USER_DATA_SIZE
 	int "Size of user_data available in rx and tx network buffers"
+	default BT_L2CAP_TX_USER_DATA_SIZE if NET_L2_BT
 	default 4
 	range 4 16
 	help

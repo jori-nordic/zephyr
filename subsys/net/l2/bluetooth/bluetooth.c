@@ -56,6 +56,9 @@ extern int net_bt_shell_init(void);
 #define IPSP_FRAG_LEN L2CAP_IPSP_MTU
 #endif /* CONFIG_NET_BUF_FIXED_DATA_SIZE */
 
+BUILD_ASSERT(CONFIG_NET_PKT_BUF_USER_DATA_SIZE >= CONFIG_BT_L2CAP_TX_USER_DATA_SIZE,
+	     "net buf user data size is too small for sending over L2CAP.");
+
 struct bt_if_conn {
 	struct net_if *iface;
 	struct bt_l2cap_le_chan ipsp_chan;
