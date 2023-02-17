@@ -44,6 +44,13 @@ config BT_L2CAP_TX_MTU
 	help
 	  Maximum L2CAP MTU for L2CAP TX buffers.
 
+config BT_L2CAP_TX_USER_DATA_SIZE
+	int
+	default 8
+	help
+	  Necessary user_data size for allowing packet fragmentation when
+	  sending over HCI. See `struct tx_meta` in conn.c.
+
 config BT_L2CAP_DYNAMIC_CHANNEL
 	bool "L2CAP Dynamic Channel support"
 	depends on BT_SMP
