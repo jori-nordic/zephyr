@@ -73,11 +73,14 @@ struct l2cap_tx_meta_data {
 	void *user_data;
 };
 
+BUILD_ASSERT(16 == sizeof(struct l2cap_tx_meta_data), "tx_meta struct is packed!");
+
 struct l2cap_tx_meta {
 	struct l2cap_tx_meta_data *data;
 };
 
-static struct l2cap_tx_meta_data l2cap_tx_meta_data_storage[CONFIG_BT_CONN_TX_MAX];
+static struct l2cap_tx_meta_data l2cap_tx_meta_data_storage[CONFIG_BT_CONN_TX_MAX] __aligned(4);
+
 K_FIFO_DEFINE(free_l2cap_tx_meta_data);
 
 static struct l2cap_tx_meta_data *alloc_tx_meta_data(void)
