@@ -1885,39 +1885,47 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 	void *cb_user_data = data->user_data;
 	uint16_t cid = data->cid;
 
-	LOG_DBG("conn %p CID 0x%04x err %d", conn, cid, err);
+	LOG_DBG("conn %p CID 0x%04x err %d userdata %p", conn, cid, err, user_data);
 
+	LOG_DBG("free metadata");
 	free_tx_meta_data(data);
 
 	if (err) {
 		if (cb) {
+			LOG_DBG("call cb %p w/ data %p err %d", cb, cb_user_data, err);
 			cb(conn, cb_user_data, err);
 		}
 
 		return;
 	}
 
+	LOG_DBG("lookup cid");
 	chan = bt_l2cap_le_lookup_tx_cid(conn, cid);
 	if (!chan) {
 		/* Received SDU sent callback for disconnected channel */
+		LOG_DBG("Received SDU sent callback for disconnected channel");
 		return;
 	}
 
 	if (chan->ops->sent) {
+		LOG_DBG("call chanops sent cb");
 		chan->ops->sent(chan);
 	}
 
 	if (cb) {
+		LOG_DBG("call cb %p w/ data %p", cb, cb_user_data);
 		cb(conn, cb_user_data, 0);
 	}
 
 	/* Resume the current channel */
+	LOG_DBG("resume curr channel");
 	l2cap_chan_tx_resume(BT_L2CAP_LE_CHAN(chan));
 
 	if (IS_ENABLED(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)) {
 		/* Resume all other channels in case one might be stuck.
 		 * The current channel has already been given priority.
 		 */
+		LOG_DBG("resume all channels");
 		bt_conn_foreach(BT_CONN_TYPE_LE, resume_all_channels, NULL);
 	}
 }
@@ -1927,7 +1935,7 @@ static void l2cap_chan_seg_sent(struct bt_conn *conn, void *user_data, int err)
 	struct l2cap_tx_meta_data *data = user_data;
 	struct bt_l2cap_chan *chan;
 
-	LOG_DBG("conn %p CID 0x%04x err %d", conn, data->cid, err);
+	LOG_DBG("conn %p CID 0x%04x err %d userdata %p", conn, data->cid, err, user_data);
 
 	if (err) {
 		return;
@@ -1936,9 +1944,11 @@ static void l2cap_chan_seg_sent(struct bt_conn *conn, void *user_data, int err)
 	chan = bt_l2cap_le_lookup_tx_cid(conn, data->cid);
 	if (!chan) {
 		/* Received segment sent callback for disconnected channel */
+		LOG_DBG("Received segment sent callback for disconnected channel");
 		return;
 	}
 
+	LOG_DBG("resume curr chan");
 	l2cap_chan_tx_resume(BT_L2CAP_LE_CHAN(chan));
 }
 

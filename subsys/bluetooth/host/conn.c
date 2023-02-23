@@ -221,7 +221,7 @@ static void tx_notify(struct bt_conn *conn)
 			return;
 		}
 
-		LOG_DBG("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
+		LOG_WRN("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
 
 		/* Copy over the params */
 		cb = tx->cb;
@@ -234,6 +234,10 @@ static void tx_notify(struct bt_conn *conn)
 		 * allocate new buffers since the TX should have been
 		 * unblocked by tx_free.
 		 */
+		if (!cb) {
+			LOG_ERR("tx_notify w/ null callback");
+			continue;
+		}
 		cb(conn, user_data, 0);
 	}
 }
