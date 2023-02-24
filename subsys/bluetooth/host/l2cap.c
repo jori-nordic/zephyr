@@ -1882,16 +1882,19 @@ static void resume_all_channels(struct bt_conn *conn, void *data)
 
 static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 {
-	struct l2cap_tx_meta_data *data = user_data;
 	struct bt_l2cap_chan *chan;
 
 	LOG_DBG("conn %p user_data %p err %d", conn, user_data, err);
 
-	__NOP();
+	/* Double-check that `data` belongs to `l2cap_tx_meta_data_storage` */
+	__ASSERT(user_data >= &l2cap_tx_meta_data_storage[0] &&
+		 user_data <= &l2cap_tx_meta_data_storage[CONFIG_BT_CONN_TX_MAX],
+		 "user_data field has been corrupted");
+
+	struct l2cap_tx_meta_data *data = user_data;
 	bt_conn_tx_cb_t cb = data->cb;
 	void *cb_user_data = data->user_data;
 	uint16_t cid = data->cid;
-	__NOP();
 
 	LOG_DBG("conn %p CID 0x%04x err %d userdata %p", conn, cid, err, user_data);
 
