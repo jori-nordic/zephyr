@@ -902,9 +902,15 @@ static int l2cap_chan_le_send_sdu(struct bt_l2cap_le_chan *ch,
 static void l2cap_chan_tx_process(struct k_work *work)
 {
 	struct bt_l2cap_le_chan *ch;
+	struct bt_l2cap_chan *chan;
+
 	struct net_buf *buf;
 
 	ch = CONTAINER_OF(work, struct bt_l2cap_le_chan, tx_work);
+	chan = &ch->chan;
+
+	if (!chan->conn) return;
+	LOG_DBG("chan %p conn %d", chan, bt_conn_index(chan->conn));
 
 	/* Resume tx in case there are buffers in the queue */
 	while ((buf = l2cap_chan_le_get_tx_buf(ch))) {
@@ -922,7 +928,7 @@ static void l2cap_chan_tx_process(struct k_work *work)
 				 * channel on every connection when an SDU has successfully been
 				 * sent.
 				 */
-				k_work_schedule(&ch->tx_work, K_MSEC(100));
+				k_work_schedule(&ch->tx_work, K_MSEC(200));
 			} else {
 				net_buf_unref(buf);
 			}
@@ -944,7 +950,7 @@ static void l2cap_chan_tx_init(struct bt_l2cap_le_chan *chan)
 static void l2cap_chan_tx_give_credits(struct bt_l2cap_le_chan *chan,
 				       uint16_t credits)
 {
-	LOG_DBG("chan %p credits %u", chan, credits);
+	LOG_ERR("chan %p credits %u", chan, credits);
 
 	atomic_add(&chan->tx.credits, credits);
 
@@ -1858,10 +1864,22 @@ segment:
 
 static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch)
 {
-	if (!atomic_get(&ch->tx.credits) ||
-	    (k_fifo_is_empty(&ch->tx_queue) && !ch->tx_buf)) {
+	struct bt_l2cap_chan *chan = &ch->chan;
+
+	if (!chan->conn) return;
+	LOG_WRN("chan %p conn %u", chan, bt_conn_index(ch->chan.conn));
+
+	if (!atomic_get(&ch->tx.credits)) {
+		LOG_WRN("no creds");
 		return;
 	}
+
+	if ((k_fifo_is_empty(&ch->tx_queue) && !ch->tx_buf)) {
+		LOG_WRN("empty queue / no initial buf");
+		return;
+	}
+
+	LOG_WRN("ok");
 
 	k_work_schedule(&ch->tx_work, K_NO_WAIT);
 }
@@ -1976,7 +1994,7 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 	int len, err;
 
 	if (!test_and_dec(&ch->tx.credits)) {
-		LOG_WRN("No credits to transmit packet");
+		LOG_DBG("No credits to transmit packet");
 		return -EAGAIN;
 	}
 
@@ -2331,7 +2349,7 @@ static void l2cap_chan_send_credits(struct bt_l2cap_le_chan *chan,
 
 	l2cap_send(chan->chan.conn, BT_L2CAP_CID_LE_SIG, buf);
 
-	LOG_DBG("chan %p credits %lu", chan, atomic_get(&chan->rx.credits));
+	LOG_ERR("chan %p credits %lu", chan, atomic_get(&chan->rx.credits));
 }
 
 static void l2cap_chan_update_credits(struct bt_l2cap_le_chan *chan,
@@ -2341,10 +2359,10 @@ static void l2cap_chan_update_credits(struct bt_l2cap_le_chan *chan,
 	atomic_val_t old_credits = atomic_get(&chan->rx.credits);
 
 	/* Restore enough credits to complete the sdu */
-	credits = ((chan->_sdu_len - net_buf_frags_len(buf)) +
-		   (chan->rx.mps - 1)) / chan->rx.mps;
+	credits = ((chan->_sdu_len - net_buf_frags_len(buf)) + (chan->rx.mps - 1))
+		/ chan->rx.mps;
 
-	LOG_DBG("cred %d old %d", credits, (int)old_credits);
+	LOG_ERR("cred %d old %d", credits, (int)old_credits);
 
 	if (credits < old_credits) {
 		return;
@@ -2371,7 +2389,8 @@ int bt_l2cap_chan_recv_complete(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		return -ENOTSUP;
 	}
 
-	LOG_DBG("chan %p buf %p", chan, buf);
+	LOG_ERR("chan %p buf %p", chan, buf);
+	k_oops();
 
 	if (bt_l2cap_chan_get_state(&le_chan->chan) == BT_L2CAP_CONNECTED) {
 		uint16_t credits;
@@ -2447,10 +2466,11 @@ static void l2cap_chan_le_recv_seg(struct bt_l2cap_le_chan *chan,
 	}
 
 	seg++;
-	/* Store received segments in user_data */
+	/* Store received segment count in user_data */
 	memcpy(net_buf_user_data(chan->_sdu), &seg, sizeof(seg));
 
-	LOG_DBG("chan %p seg %d len %zu", chan, seg, net_buf_frags_len(buf));
+	uint16_t lenn = net_buf_frags_len(buf);
+	LOG_WRN("chan %p seg %d len %u remcreds %u", chan, seg, lenn, atomic_get(&chan->rx.credits));
 
 	/* Append received segment to SDU */
 	len = net_buf_append_bytes(chan->_sdu, buf->len, buf->data, K_NO_WAIT,
@@ -2461,13 +2481,28 @@ static void l2cap_chan_le_recv_seg(struct bt_l2cap_le_chan *chan,
 		return;
 	}
 
+	/* Give more credits if the remote has run out of them.
+	 *
+	 * This can happen if the SDU being sent doesn't fit within the initial
+	 * credits. We are kind of forced to do this since the application
+	 * doesn't get a callback for each segment, and thus can't tell the
+	 * stack that it has buffer space available in order to send more
+	 * credits _during_ the SDU transfer.
+	 *
+	 * Instead we have 'faith' that the app will:
+	 * - either have allocated an initial SDU buffer with enough room to
+	 *   receive the whole SDU
+	 * OR
+	 * - that it has enough buffers in the same pool to chain them together
+	 *   in order to receive that SDU
+	 * OR
+	 * - that it has custom fallback logic in its SDU buf allocator
+	 *
+	 * If none are true, then the stack will disconnect the channel when
+	 * `net_buf_append_bytes()` returns too small a value.
+	 */
 	if (net_buf_frags_len(chan->_sdu) < chan->_sdu_len) {
-		/* Give more credits if remote has run out of them, this
-		 * should only happen if the remote cannot fully utilize the
-		 * MPS for some reason.
-		 */
-		if (!atomic_get(&chan->rx.credits) &&
-		    seg == chan->rx.init_credits) {
+		if (!atomic_get(&chan->rx.credits)) {
 			l2cap_chan_update_credits(chan, buf);
 		}
 		return;

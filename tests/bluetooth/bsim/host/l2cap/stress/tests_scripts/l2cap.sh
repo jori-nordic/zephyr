@@ -22,20 +22,27 @@ function Execute(){
 #Give a default value to BOARD if it does not have one yet:
 BOARD="${BOARD:-nrf52_bsim}"
 
+bsim_exe=bs_nrf52_bsim_tests_bluetooth_bsim_host_l2cap_stress_prj_conf
+rm -rf ${BSIM_OUT_PATH}/bin/bs_nrf52_bsim_tests*
+
+west build -b $BOARD || exit 1
+cp build/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_exe}
+
+${BSIM_COMPONENTS_PATH}/common/stop_bsim.sh
+
 cd ${BSIM_OUT_PATH}/bin
 
-bsim_exe=./bs_${BOARD}_tests_bluetooth_bsim_host_l2cap_stress_prj_conf
 
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=0 -testid=central -rs=43
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=1 -testid=peripheral -rs=42
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=2 -testid=peripheral -rs=10
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=3 -testid=peripheral -rs=23
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=4 -testid=peripheral -rs=7884
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=5 -testid=peripheral -rs=230
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=6 -testid=peripheral -rs=9
 
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=1 -testid=peripheral -rs=42
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=2 -testid=peripheral -rs=10
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=3 -testid=peripheral -rs=23
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=4 -testid=peripheral -rs=7884
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=5 -testid=peripheral -rs=230
-Execute "${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=6 -testid=peripheral -rs=9
+Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} -D=7 -sim_length=500e6 $@
 
-Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} -D=7 -sim_length=270e6 $@
+Execute "./${bsim_exe}" -v=${verbosity_level} -s=${simulation_id} -d=0 -testid=central -rs=43
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"

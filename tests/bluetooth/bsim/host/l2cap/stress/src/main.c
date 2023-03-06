@@ -18,9 +18,9 @@ CREATE_FLAG(flag_l2cap_connected);
 
 #define NUM_PERIPHERALS 6
 #define L2CAP_CHANS	NUM_PERIPHERALS
-#define INIT_CREDITS	10
+#define INIT_CREDITS	10	/* peer has to have enough credits for the whole SDU */
 #define SDU_NUM		20
-#define SDU_LEN		1230
+#define SDU_LEN		2000
 #define NUM_SEGMENTS	10
 #define RESCHEDULE_DELAY K_MSEC(100)
 
@@ -52,17 +52,20 @@ struct test_ctx {
 
 static struct test_ctx contexts[L2CAP_CHANS];
 
-void reschedule_send(struct bt_l2cap_chan *chan)
+struct test_ctx *get_ctx(struct bt_l2cap_chan *chan)
 {
 	struct bt_l2cap_le_chan *le_chan = CONTAINER_OF(chan, struct bt_l2cap_le_chan, chan);
 	struct test_ctx *ctx = CONTAINER_OF(le_chan, struct test_ctx, le_chan);
 
-	k_work_reschedule(&ctx->work_item, RESCHEDULE_DELAY);
+	ASSERT(ctx >= &contexts[0] &&
+	       ctx <= &contexts[L2CAP_CHANS], "memory corruption");
+
+	return ctx;
 }
 
 int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 {
-	LOG_DBG("chan %p conn %p data %p len %d", chan, chan->conn, data, len);
+	LOG_DBG("chan %p conn %u data %p len %d", chan, bt_conn_index(chan->conn), data, len);
 
 	struct net_buf *buf = net_buf_alloc(&sdu_tx_pool, K_NO_WAIT);
 
@@ -75,10 +78,13 @@ int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 	net_buf_add_mem(buf, data, len);
 
 	int ret = bt_l2cap_chan_send(chan, buf);
+	ASSERT(ret >= 0, "Failed sending: err %d", ret);
 
 	if (ret == -EAGAIN) {
 		LOG_DBG("L2CAP error %d, attempting to reschedule sending", ret);
 		net_buf_unref(buf);
+		k_oops();
+		k_work_reschedule(&(get_ctx(chan)->work_item), RESCHEDULE_DELAY);
 
 		return ret;
 	}
@@ -102,12 +108,14 @@ struct net_buf *alloc_seg_cb(struct bt_l2cap_chan *chan)
 
 struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
 {
+	LOG_ERR("alloc-buf");
 	return net_buf_alloc(&sdu_rx_pool, K_NO_WAIT);
 }
 
 void continue_sending(struct test_ctx *ctx)
 {
-	LOG_DBG("%p, left %d", ctx->le_chan.chan, ctx->tx_left);
+	struct bt_l2cap_chan *chan = &ctx->le_chan.chan;
+	LOG_ERR("%p, left %d", chan, ctx->tx_left);
 
 	ASSERT(ctx->tx_left != 0, "unexpected callback");
 
@@ -116,17 +124,15 @@ void continue_sending(struct test_ctx *ctx)
 	}
 
 	if (ctx->tx_left == 0) {
-		LOG_DBG("Done sending %p", ctx->le_chan.chan.conn);
+		LOG_ERR("Done sending %u", bt_conn_index(ctx->le_chan.chan.conn));
 	}
 }
 
 void sent_cb(struct bt_l2cap_chan *chan)
 {
-	struct test_ctx *ctx = CONTAINER_OF(chan, struct test_ctx, le_chan);
-
 	LOG_DBG("%p", chan);
 
-	continue_sending(ctx);
+	continue_sending(get_ctx(chan));
 }
 
 int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
@@ -172,6 +178,7 @@ static struct bt_l2cap_chan_ops ops = {
 void deferred_send(struct k_work *item)
 {
 	struct test_ctx *ctx = CONTAINER_OF(item, struct test_ctx, work_item);
+	k_oops();
 
 	continue_sending(ctx);
 }
