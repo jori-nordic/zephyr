@@ -922,6 +922,7 @@ static void l2cap_chan_tx_process(struct k_work *work)
 				 * channel on every connection when an SDU has successfully been
 				 * sent.
 				 */
+				k_work_schedule(&ch->tx_work, K_MSEC(100));
 			} else {
 				net_buf_unref(buf);
 			}
@@ -937,7 +938,7 @@ static void l2cap_chan_tx_init(struct bt_l2cap_le_chan *chan)
 	(void)memset(&chan->tx, 0, sizeof(chan->tx));
 	atomic_set(&chan->tx.credits, 0);
 	k_fifo_init(&chan->tx_queue);
-	k_work_init(&chan->tx_work, l2cap_chan_tx_process);
+	k_work_init_delayable(&chan->tx_work, l2cap_chan_tx_process);
 }
 
 static void l2cap_chan_tx_give_credits(struct bt_l2cap_le_chan *chan,
@@ -1862,7 +1863,7 @@ static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch)
 		return;
 	}
 
-	k_work_submit(&ch->tx_work);
+	k_work_schedule(&ch->tx_work, K_NO_WAIT);
 }
 
 #if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
@@ -2005,7 +2006,11 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 	}
 
 	if (err) {
-		LOG_WRN("Unable to send seg %d", err);
+		if (err != -ENOBUFS) {
+			LOG_WRN("Unable to send seg %d", err);
+		} else {
+			LOG_DBG("Unable to send seg %d", err);
+		}
 		atomic_inc(&ch->tx.credits);
 
 		/* The host takes ownership of the reference in seg when
@@ -3043,7 +3048,7 @@ int bt_l2cap_chan_send_cb(struct bt_l2cap_chan *chan, struct net_buf *buf, bt_co
 	    !atomic_get(&le_chan->tx.credits)) {
 		l2cap_tx_meta_data(buf)->sent = 0;
 		net_buf_put(&le_chan->tx_queue, buf);
-		k_work_submit(&le_chan->tx_work);
+		k_work_schedule(&le_chan->tx_work, K_NO_WAIT);
 		return 0;
 	}
 

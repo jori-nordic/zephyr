@@ -176,8 +176,9 @@ struct bt_l2cap_le_chan {
 	struct k_fifo                   tx_queue;
 	/** Channel Pending Transmission buffer  */
 	struct net_buf                  *tx_buf;
+	/* FIXME: ifdef out for normal */
 	/** Channel Transmission work  */
-	struct k_work			tx_work;
+	struct k_work_delayable		tx_work;
 	/** Segment SDU packet from upper layer */
 	struct net_buf			*_sdu;
 	uint16_t			_sdu_len;
