@@ -9,6 +9,9 @@ simulation_id="l2cap_stress"
 verbosity_level=2
 EXECUTE_TIMEOUT=120
 
+# terminate running simulations (if any)
+${BSIM_COMPONENTS_PATH}/common/stop_bsim.sh
+
 cd ${BSIM_OUT_PATH}/bin
 
 bsim_exe=./bs_${BOARD}_tests_bsim_bluetooth_host_l2cap_stress_prj_conf
