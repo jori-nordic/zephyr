@@ -2269,27 +2269,12 @@ static inline bt_l2cap_chan_state_t bt_l2cap_chan_get_state(struct bt_l2cap_chan
 #endif
 }
 
-static void l2cap_chan_send_credits(struct bt_l2cap_le_chan *chan,
-				    struct net_buf *buf, uint16_t credits)
+static void l2cap_chan_send_credits_pdu(struct bt_l2cap_le_chan *chan, uint16_t credits)
 {
 	struct bt_l2cap_le_credits *ev;
-	uint16_t old_credits;
 
-	__ASSERT_NO_MSG(bt_l2cap_chan_get_state(&chan->chan) == BT_L2CAP_CONNECTED);
-
-	/* Cap the number of credits given */
-	if (credits > chan->rx.init_credits) {
-		credits = chan->rx.init_credits;
-	}
-
-	/* Don't send back more than the initial amount. */
-	old_credits = atomic_get(&chan->rx.credits);
-	if (credits + old_credits > chan->rx.init_credits) {
-		credits = chan->rx.init_credits - old_credits;
-	}
-
-	buf = l2cap_create_le_sig_pdu(buf, BT_L2CAP_LE_CREDITS, get_ident(),
-				      sizeof(*ev));
+	struct net_buf *buf = l2cap_create_le_sig_pdu(NULL, BT_L2CAP_LE_CREDITS, get_ident(),
+						      sizeof(*ev));
 	if (!buf) {
 		LOG_ERR("Unable to send credits update");
 		/* Disconnect would probably not work either so the only
@@ -2310,17 +2295,43 @@ static void l2cap_chan_send_credits(struct bt_l2cap_le_chan *chan,
 	LOG_DBG("chan %p credits %lu", chan, atomic_get(&chan->rx.credits));
 }
 
+static void l2cap_chan_send_credits(struct bt_l2cap_le_chan *chan,
+				    struct net_buf *buf, uint16_t credits)
+{
+	uint16_t old_credits;
+
+	__ASSERT_NO_MSG(bt_l2cap_chan_get_state(&chan->chan) == BT_L2CAP_CONNECTED);
+
+	LOG_DBG("chan %p credits %d", chan, credits);
+
+	/* Don't send back more than the initial amount. */
+	old_credits = atomic_get(&chan->rx.credits);
+
+	if (credits + old_credits > chan->rx.init_credits) {
+		credits = chan->rx.init_credits - old_credits;
+	}
+
+	LOG_DBG("chan %p credits %d old %d init %d",
+		chan, credits, old_credits, chan->rx.init_credits);
+
+	l2cap_chan_send_credits_pdu(chan, credits);
+}
+
 static void l2cap_chan_update_credits(struct bt_l2cap_le_chan *chan,
 				      struct net_buf *buf)
 {
 	uint16_t credits;
 	atomic_val_t old_credits = atomic_get(&chan->rx.credits);
+	uint16_t reassembled_bytes = net_buf_frags_len(chan->_sdu);
 
-	/* Restore enough credits to complete the sdu */
-	credits = ((chan->_sdu_len - net_buf_frags_len(buf)) +
+	/* Restore enough credits to complete the sdu:
+	 * credits = ROUND_UP ((SDU_LEN - REASSEMBLED_LEN) / PDU_SIZE)
+	 */
+	credits = ((chan->_sdu_len - reassembled_bytes) +
 		   (chan->rx.mps - 1)) / chan->rx.mps;
 
-	LOG_DBG("cred %d old %d", credits, (int)old_credits);
+	LOG_DBG("cred %d old %d sdu_len %d reassembled_bytes %d",
+		credits, (int)old_credits, chan->_sdu_len, reassembled_bytes);
 
 	if (credits < old_credits) {
 		return;
@@ -2328,7 +2339,7 @@ static void l2cap_chan_update_credits(struct bt_l2cap_le_chan *chan,
 
 	credits -= old_credits;
 
-	l2cap_chan_send_credits(chan, buf, credits);
+	l2cap_chan_send_credits_pdu(chan, credits);
 }
 
 int bt_l2cap_chan_recv_complete(struct bt_l2cap_chan *chan, struct net_buf *buf)
@@ -2417,13 +2428,14 @@ static void l2cap_chan_le_recv_seg(struct bt_l2cap_le_chan *chan,
 	}
 
 	if (len + buf->len > chan->_sdu_len) {
-		LOG_ERR("SDU length mismatch");
+		LOG_ERR("SDU length mismatch: %d != %d",
+			len + buf->len, chan->_sdu_len);
 		bt_l2cap_chan_disconnect(&chan->chan);
 		return;
 	}
 
 	seg++;
-	/* Store received segments in user_data */
+	/* Store length of received segments in user_data */
 	memcpy(net_buf_user_data(chan->_sdu), &seg, sizeof(seg));
 
 	LOG_DBG("chan %p seg %d len %zu", chan, seg, net_buf_frags_len(buf));
@@ -2437,13 +2449,25 @@ static void l2cap_chan_le_recv_seg(struct bt_l2cap_le_chan *chan,
 		return;
 	}
 
+	/* Give more credits if the remote has run out of them.
+	 *
+	 * This can happen if the peer sends PDUs that are < MPS. We are kind of
+	 * forced to do this since the application doesn't get a callback for
+	 * each segment, and thus can't tell the stack that it has buffer space
+	 * available in order to send more credits _during_ the SDU transfer.
+	 *
+	 * Instead we have 'faith' that the app will:
+	 * - either have allocated an initial SDU buffer with enough room to
+	 *   receive the whole SDU
+	 * OR
+	 * - that we can allocate enough buffers to get the full SDU (using the
+	 *   alloc_buf cb)
+	 *
+	 * If none are true, then the stack will disconnect the channel when
+	 * `net_buf_append_bytes()` returns too small a value.
+	 */
 	if (net_buf_frags_len(chan->_sdu) < chan->_sdu_len) {
-		/* Give more credits if remote has run out of them, this
-		 * should only happen if the remote cannot fully utilize the
-		 * MPS for some reason.
-		 */
-		if (!atomic_get(&chan->rx.credits) &&
-		    seg == chan->rx.init_credits) {
+		if (!atomic_get(&chan->rx.credits)) {
 			l2cap_chan_update_credits(chan, buf);
 		}
 		return;
@@ -2498,16 +2522,37 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 
 	/* Always allocate buffer from the channel if supported. */
 	if (chan->chan.ops->alloc_buf) {
+		uint16_t total_len = BT_L2CAP_SDU_HDR_SIZE + sdu_len;
+		uint16_t req_credits = (total_len + (chan->rx.mps - 1))
+			/ chan->rx.mps;
+
+		if (req_credits  > chan->rx.init_credits) {
+			/* If you get this error message, try increasing
+			 * `init_credits`
+			 */
+			LOG_ERR("Not enough credits to receive whole SDU: %d > %d",
+				req_credits, chan->rx.init_credits);
+			bt_l2cap_chan_disconnect(&chan->chan);
+
+			return;
+		}
+
 		chan->_sdu = chan->chan.ops->alloc_buf(&chan->chan);
 		if (!chan->_sdu) {
 			LOG_ERR("Unable to allocate buffer for SDU");
 			bt_l2cap_chan_disconnect(&chan->chan);
+
 			return;
 		}
 		chan->_sdu_len = sdu_len;
 		l2cap_chan_le_recv_seg(chan, buf);
+
 		return;
 	}
+
+	/* Below is only executed for SDUs that fit into a single PDU, when
+	 * alloc_buf is not supplied.
+	 */
 
 	err = chan->chan.ops->recv(&chan->chan, buf);
 	if (err < 0) {

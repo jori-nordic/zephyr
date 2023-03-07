@@ -18,7 +18,8 @@ CREATE_FLAG(flag_l2cap_connected);
 
 #define NUM_PERIPHERALS 6
 #define L2CAP_CHANS     NUM_PERIPHERALS
-#define INIT_CREDITS    10
+#define L2CAP_MPS       CONFIG_BT_L2CAP_TX_MTU
+#define INIT_CREDITS    ROUND_UP((BT_L2CAP_SDU_BUF_SIZE(SDU_LEN) / L2CAP_MPS), 1)
 #define SDU_NUM         20
 #define SDU_LEN         3000
 #define NUM_SEGMENTS    10

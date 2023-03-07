@@ -147,7 +147,22 @@ struct bt_l2cap_le_endpoint {
 	uint16_t				mtu;
 	/** Endpoint Maximum PDU payload Size */
 	uint16_t				mps;
-	/** Endpoint initial credits */
+	/** Endpoint initial credits
+	 *
+	 * The user shall allocate enough credits to be able to transfer a full
+	 * SDU. 1 credit = 1 PDU of MPS length. Example:
+	 * SDU = 2000 bytes, MPS = 77 -> init_credits >= 26.
+	 *
+	 * The stack _will_ disconnect the channel if we attempt to receive an
+	 * SDU that won't fit with those initial credits.
+	 *
+	 * Note that the calculated value might not be enough if the peer
+	 * decides to send PDUs that are < MPS. In that case the credits will
+	 * run out faster than expected or calculated.
+	 *
+	 * In that case, the host will send extra credits to be able to receive
+	 * a full SDU.
+	 */
 	uint16_t				init_credits;
 	/** Endpoint credits */
 	atomic_t			credits;
