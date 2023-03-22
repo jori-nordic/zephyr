@@ -4081,6 +4081,9 @@ int bt_disable(void)
 	 */
 	atomic_clear_bit(bt_dev.flags, BT_DEV_ENABLE);
 
+	/* Set to initial value */
+	hci_cmd_pool.uninit_count = CONFIG_BT_BUF_CMD_TX_COUNT;
+
 	return 0;
 }
 

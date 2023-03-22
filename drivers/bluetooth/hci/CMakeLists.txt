@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+zephyr_library_include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 zephyr_library_sources_ifdef(CONFIG_BT_B91         hci_b91.c)
 zephyr_library_sources_ifdef(CONFIG_BT_CYW43XXX    cyw43xxx.c)
 zephyr_library_sources_ifdef(CONFIG_BT_ESP32       hci_esp32.c)
@@ -11,3 +13,4 @@ zephyr_library_sources_ifdef(CONFIG_BT_STM32_IPM   ipm_stm32wb.c)
 zephyr_library_sources_ifdef(CONFIG_BT_USERCHAN    userchan.c)
 zephyr_library_sources_ifdef(CONFIG_BT_SILABS_HCI  slz_hci.c)
 zephyr_library_sources_ifdef(CONFIG_BT_PSOC6_BLESS hci_psoc6_bless.c)
+zephyr_library_sources_ifdef(CONFIG_SOC_NRF5340_CPUAPP nrf53_support.c)

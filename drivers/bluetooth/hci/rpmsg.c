@@ -14,6 +14,10 @@
 #include <zephyr/device.h>
 #include <zephyr/ipc/ipc_service.h>
 
+#ifdef CONFIG_SOC_NRF5340_CPUAPP
+#include "nrf53_support.h"
+#endif /* CONFIG_SOC_NRF5340_CPUAPP */
+
 #define LOG_LEVEL CONFIG_BT_HCI_DRIVER_LOG_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(bt_hci_driver);
@@ -294,6 +298,10 @@ static int bt_rpmsg_open(void)
 	const struct device *hci_ipc_instance =
 		DEVICE_DT_GET(DT_CHOSEN(zephyr_bt_hci_rpmsg_ipc));
 
+#ifdef CONFIG_SOC_NRF5340_CPUAPP
+	cpunet_forceon();
+#endif /* CONFIG_SOC_NRF5340_CPUAPP */
+
 	LOG_DBG("");
 
 	err = ipc_service_open_instance(hci_ipc_instance);
@@ -317,9 +325,55 @@ static int bt_rpmsg_open(void)
 	return 0;
 }
 
+static int bt_rpmsg_close(void)
+{
+	int err;
+	struct net_buf *buf = NULL;
+	struct net_buf *rsp = NULL;
+
+	buf = bt_hci_cmd_create(BT_HCI_OP_RESET, 0);
+	if (!buf) {
+		LOG_ERR("Allocating command buffer failed!");
+		return -ENOBUFS;
+	}
+
+	err = bt_hci_cmd_send_sync(BT_HCI_OP_RESET, NULL, &rsp);
+	if (err) {
+		LOG_ERR("Sending reset command failed with: %d", err);
+		return err;
+	}
+
+
+	if (rsp != NULL) {
+		net_buf_unref(rsp);
+	}
+
+	err = ipc_service_deregister_endpoint(&hci_ept);
+	if (err) {
+		LOG_ERR("Deregistering HCI endpoint failed with: %d", err);
+		return err;
+	}
+
+	const struct device *hci_ipc_instance =
+		DEVICE_DT_GET(DT_CHOSEN(zephyr_bt_hci_rpmsg_ipc));
+
+	err = ipc_service_close_instance(hci_ipc_instance);
+	if (err) {
+		LOG_ERR("Closing IPC service failed with: %d", err);
+		return err;
+	}
+
+#ifdef CONFIG_SOC_NRF5340_CPUAPP
+	cpunet_forceoff();
+#endif /* CONFIG_SOC_NRF5340_CPUAPP */
+
+	return 0;
+}
+
 static const struct bt_hci_driver drv = {
 	.name		= "RPMsg",
 	.open		= bt_rpmsg_open,
+	.close		= bt_rpmsg_close,
 	.send		= bt_rpmsg_send,
 	.bus		= BT_HCI_DRIVER_BUS_IPM,
 #if defined(CONFIG_BT_DRIVER_QUIRK_NO_AUTO_DLE)
