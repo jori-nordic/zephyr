@@ -849,8 +849,14 @@ static void l2cap_chan_rx_init(struct bt_l2cap_le_chan *chan)
 	/* MPS shall not be bigger than MTU + BT_L2CAP_SDU_HDR_SIZE as the
 	 * remaining bytes cannot be used.
 	 */
-	chan->rx.mps = MIN(chan->rx.mtu + BT_L2CAP_SDU_HDR_SIZE,
-			   BT_L2CAP_RX_MTU);
+	uint16_t max_mps = MIN(chan->rx.mtu + BT_L2CAP_SDU_HDR_SIZE,
+			       BT_L2CAP_RX_MTU);
+	/* Use existing MPS if specified (by app) */
+	if (chan->rx.mps) {
+		chan->rx.mps = MIN(chan->rx.mps, max_mps);
+	} else {
+		chan->rx.mps = max_mps;
+	}
 
 	/* Truncate MTU if channel have disabled segmentation but still have
 	 * set an MTU which requires it.
