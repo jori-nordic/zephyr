@@ -582,7 +582,7 @@ void test_procedure_0(void)
 	/* Connect to the central's dynamic L2CAP server */
 	open_l2cap();
 
-	uint8_t data[100-2];
+	uint8_t data[L2CAP_SDU_LEN];
 	for (int i=0; i<ARRAY_SIZE(data); i++) {
 		data[i] = (uint8_t)i;
 	}
