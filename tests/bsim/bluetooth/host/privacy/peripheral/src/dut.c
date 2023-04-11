@@ -16,6 +16,7 @@
 
 bool cb_rpa_expired(struct bt_le_ext_adv *adv)
 {
+	printk("### RPA expired\n");
 	backchannel_sync_send();
 
 	/* Return true to rotate the current RPA */

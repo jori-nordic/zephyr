@@ -19,6 +19,7 @@ static void cb_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 {
 	static bool init;
 
+	/* printk("------------------------> DEVICE FOUND\n"); */
 	if (!init) {
 		old_addr = *addr;
 		old_time = k_uptime_get();
@@ -59,15 +60,23 @@ void tester_procedure(void)
 	/* Setup synchronization channel */
 	backchannel_init(DUT_PERIPHERAL_ID);
 
+	k_msleep(1000);
+
 	start_scanning();
 
-	/* Wait for the first address rotation */
-	backchannel_sync_wait();
+	/* backchannel_sync_wait(); */
+
+	/* Wait for the first scan */
+	printk("################################################ sync %d ok\n", 0);
+	while (new_addr == NULL) {
+		k_msleep(10);
+	}
 
 	for (uint16_t i = 0; i < 5; i++) {
 		int64_t diff, time_diff_ms, rpa_timeout_ms;
 
 		backchannel_sync_wait();
+		/* printk("################################################ sync %d ok\n", i+1); */
 
 		/* Compare old and new address */
 		err = bt_addr_le_cmp(&old_addr, new_addr);
@@ -86,7 +95,7 @@ void tester_procedure(void)
 		}
 
 		if (diff > (rpa_timeout_ms / 10)) {
-			FAIL("RPA rotation did not occur within +-10%% of CONFIG_BT_RPA_TIMEOUT");
+			FAIL("RPA rotation did not occur within +-10%% of CONFIG_BT_RPA_TIMEOUT\n");
 		}
 
 		printk("Old ");
