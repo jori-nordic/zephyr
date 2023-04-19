@@ -149,6 +149,10 @@ struct bt_l2cap_le_endpoint {
 	uint16_t				mps;
 	/** Endpoint credits */
 	atomic_t			credits;
+	/** Endpoint SDU buffer count */
+	atomic_t			used_bufs;
+	/** Endpoint initial credits */
+	uint16_t				init_credits;
 };
 
 /** @brief LE L2CAP Channel structure. */

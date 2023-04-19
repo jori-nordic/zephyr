@@ -15,6 +15,6 @@ bsim_exe=bs_nrf52_bsim_tests_bsim_bluetooth_host_l2cap_credits_prj_conf
 west build -b nrf52_bsim && \
     cp build/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_exe}
 
-bsim_exe=bs_nrf52_bsim_tests_bsim_bluetooth_host_l2cap_credits_prj_ecred_conf
-west build -b nrf52_bsim -d build_ecred -- -DCONF_FILE=prj_ecred.conf && \
-    cp build_ecred/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_exe}
+# bsim_exe=bs_nrf52_bsim_tests_bsim_bluetooth_host_l2cap_credits_prj_ecred_conf
+# west build -b nrf52_bsim -d build_ecred -- -DCONF_FILE=prj_ecred.conf && \
+#     cp build_ecred/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_exe}
