@@ -479,7 +479,7 @@ static void test_peripheral_main(void)
 	k_sem_take(&sent_sem, K_FOREVER);
 	disconnect_all_channels();
 	WAIT_FOR_FLAG_UNSET(is_connected);
-	PASS("L2CAP ECRED Peripheral tests Passed");
+	PASS("L2CAP ECRED Peripheral tests Passed\n");
 	bs_trace_silent_exit(0);
 }
 

@@ -2232,11 +2232,13 @@ static inline bt_l2cap_chan_state_t bt_l2cap_chan_get_state(struct bt_l2cap_chan
 #endif
 }
 
-static void l2cap_chan_send_credit(struct bt_l2cap_le_chan *chan, struct net_buf *buf)
+static void l2cap_chan_send_credits(struct bt_l2cap_le_chan *chan, struct net_buf *buf, uint16_t credits)
 {
 	struct bt_l2cap_le_credits *ev;
 
 	__ASSERT_NO_MSG(bt_l2cap_chan_get_state(&chan->chan) == BT_L2CAP_CONNECTED);
+
+	if (credits == 0) return;
 
 	buf = l2cap_create_le_sig_pdu(buf, BT_L2CAP_LE_CREDITS, get_ident(),
 				      sizeof(*ev));
@@ -2250,11 +2252,11 @@ static void l2cap_chan_send_credit(struct bt_l2cap_le_chan *chan, struct net_buf
 	}
 
 	__ASSERT_NO_MSG(atomic_get(&chan->rx.credits) == 0);
-	atomic_set(&chan->rx.credits,  1);
+	atomic_set(&chan->rx.credits, credits);
 
 	ev = net_buf_add(buf, sizeof(*ev));
 	ev->cid = sys_cpu_to_le16(chan->rx.cid);
-	ev->credits = sys_cpu_to_le16(1);
+	ev->credits = sys_cpu_to_le16(credits);
 
 	l2cap_send(chan->chan.conn, BT_L2CAP_CID_LE_SIG, buf);
 
@@ -2282,7 +2284,7 @@ int bt_l2cap_chan_recv_complete(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	LOG_DBG("chan %p buf %p", chan, buf);
 
 	if (bt_l2cap_chan_get_state(&le_chan->chan) == BT_L2CAP_CONNECTED) {
-		l2cap_chan_send_credit(le_chan, buf);
+		l2cap_chan_send_credits(le_chan, buf, 1);
 	}
 
 	return 0;
@@ -2311,6 +2313,7 @@ static void l2cap_chan_le_recv_sdu(struct bt_l2cap_le_chan *chan,
 	LOG_DBG("chan %p len %zu", chan, net_buf_frags_len(buf));
 
 	__ASSERT_NO_MSG(bt_l2cap_chan_get_state(&chan->chan) == BT_L2CAP_CONNECTED);
+	__ASSERT_NO_MSG(atomic_get(&chan->rx.credits) == 0);
 
 	/* Receiving complete SDU, notify channel and reset SDU buf */
 	err = chan->chan.ops->recv(&chan->chan, buf);
@@ -2322,7 +2325,7 @@ static void l2cap_chan_le_recv_sdu(struct bt_l2cap_le_chan *chan,
 		}
 		return;
 	} else if (bt_l2cap_chan_get_state(&chan->chan) == BT_L2CAP_CONNECTED) {
-		l2cap_chan_send_credit(chan, buf);
+		l2cap_chan_send_credits(chan, buf, 1);
 	}
 
 	net_buf_unref(buf);
@@ -2365,8 +2368,10 @@ static void l2cap_chan_le_recv_seg(struct bt_l2cap_le_chan *chan,
 		 * should only happen if the remote cannot fully utilize the
 		 * MPS for some reason.
 		 */
-		__ASSERT_NO_MSG(atomic_get(&chan->rx.credits) == 0);
-		l2cap_chan_send_credit(chan, buf);
+		if(atomic_get(&chan->rx.credits) == 0) {
+			LOG_ERR("remote is not fully utilizing MPS");
+			l2cap_chan_send_credits(chan, buf, 1);
+		}
 
 		return;
 	}
@@ -2427,6 +2432,16 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 			return;
 		}
 		chan->_sdu_len = sdu_len;
+
+		/* Send sdu_len/mps worth of credits */
+		uint16_t credits = DIV_ROUND_UP((sdu_len - buf->len), chan->rx.mps);
+		LOG_ERR("sending %d extra credits (sdu_len %d buf_len %d mps %d)",
+			credits,
+			sdu_len,
+			buf->len,
+			chan->rx.mps);
+		l2cap_chan_send_credits(chan, buf, credits);
+
 		l2cap_chan_le_recv_seg(chan, buf);
 		return;
 	}
@@ -2440,7 +2455,7 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 		return;
 	}
 
-	l2cap_chan_send_credit(chan, buf);
+	l2cap_chan_send_credits(chan, buf, 1);
 }
 
 static void l2cap_chan_recv_queue(struct bt_l2cap_le_chan *chan,
