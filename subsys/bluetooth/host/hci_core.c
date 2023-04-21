@@ -2651,7 +2651,7 @@ static void read_buffer_size_v2_complete(struct net_buf *buf)
 
 	bt_dev.le.iso_mtu = iso_mtu;
 
-	LOG_DBG("ISO buffers: pkts %u mtu %u", rp->iso_max_num, bt_dev.le.iso_mtu);
+	LOG_WRN("ISO buffers: pkts %u mtu %u", rp->iso_max_num, bt_dev.le.iso_mtu);
 
 	k_sem_init(&bt_dev.le.iso_pkts, rp->iso_max_num, rp->iso_max_num);
 	bt_dev.le.iso_limit = rp->iso_max_num;

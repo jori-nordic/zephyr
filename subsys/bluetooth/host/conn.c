@@ -741,6 +741,7 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 	int err;
 
 	LOG_DBG("conn %p buf %p len %u", conn, buf, buf->len);
+	/* LOG_HEXDUMP_WRN(buf->data, buf->len, "send-buf"); */
 
 	/* Send directly if the packet fits the ACL MTU */
 	if (fits_single_ctlr_buf(buf, conn) && !tx_data(buf)->is_cont) {
@@ -748,7 +749,7 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 		return send_frag(conn, buf, NULL, FRAG_SINGLE);
 	}
 
-	LOG_DBG("start fragmenting");
+	LOG_WRN("start fragmenting (mtu %d len %d)", conn_mtu(conn), buf->len);
 	/*
 	 * Send the fragments. For the last one simply use the original
 	 * buffer (which works since we've used net_buf_pull on it).
