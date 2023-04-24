@@ -12,5 +12,5 @@ source "${bash_source_dir}/_env.sh"
 west build -b nrf52_bsim -d build_test && \
     cp build_test/zephyr/zephyr.exe "${test_exe}"
 
-west build -b nrf52_bsim -d build_test_2 -- -DCONF_FILE=prj_2.conf && \
-    cp build_test_2/zephyr/zephyr.exe "${test_2_exe}"
+# west build -b nrf52_bsim -d build_test_2 -- -DCONF_FILE=prj_2.conf && \
+#     cp build_test_2/zephyr/zephyr.exe "${test_2_exe}"

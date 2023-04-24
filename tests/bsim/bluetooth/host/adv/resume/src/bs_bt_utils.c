@@ -110,10 +110,7 @@ void scan_connect_to_first_result(void)
 	int err;
 
 	printk("start scanner\n");
-	err = bt_le_scan_start(BT_LE_SCAN_PARAM(BT_LE_SCAN_TYPE_PASSIVE,
-						BT_LE_SCAN_OPT_FILTER_DUPLICATE,
-						10,
-						10),
+	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE,
 			       scan_connect_to_first_result_device_found);
 	ASSERT(!err, "Err bt_le_scan_start %d", err);
 }
@@ -186,7 +183,7 @@ void advertise_connectable(int id, bool persist)
 
 	param.id = id;
 	param.interval_min = 0x0020;
-	param.interval_max = 0x4000;
+	param.interval_max = 0x0040;
 	param.options |= persist ? 0 : BT_LE_ADV_OPT_ONE_TIME;
 	param.options |= BT_LE_ADV_OPT_CONNECTABLE;
 
