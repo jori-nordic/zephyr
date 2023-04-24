@@ -740,12 +740,12 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 	uint8_t flags;
 	int err;
 
-	LOG_DBG("conn %p buf %p len %u", conn, buf, buf->len);
+	LOG_WRN("conn %p buf %p len %u", conn, buf, buf->len);
 	/* LOG_HEXDUMP_WRN(buf->data, buf->len, "send-buf"); */
 
 	/* Send directly if the packet fits the ACL MTU */
 	if (fits_single_ctlr_buf(buf, conn) && !tx_data(buf)->is_cont) {
-		LOG_DBG("send single");
+		LOG_WRN("send single");
 		return send_frag(conn, buf, NULL, FRAG_SINGLE);
 	}
 
@@ -765,9 +765,10 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 			return -ENOMEM;
 		}
 
+		LOG_WRN("send frag");
 		err = send_frag(conn, buf, frag, flags);
 		if (err) {
-			LOG_DBG("%p failed, mark as existing frag", buf);
+			LOG_WRN("%p failed, mark as existing frag", buf);
 			tx_data(buf)->is_cont = flags != FRAG_START;
 			net_buf_unref(frag);
 			return err;
@@ -776,7 +777,7 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 		flags = FRAG_CONT;
 	}
 
-	LOG_DBG("last frag");
+	LOG_WRN("last frag");
 	tx_data(buf)->is_cont = true;
 	return send_frag(conn, buf, NULL, FRAG_END);
 }
