@@ -2844,6 +2844,8 @@ int bt_gatt_notify_cb(struct bt_conn *conn,
 		data.handle = bt_gatt_attr_value_handle(data.attr);
 	}
 
+	LOG_HEXDUMP_DBG(params->data, params->len, "notify");
+
 	if (conn) {
 		return gatt_notify(conn, data.handle, params);
 	}
