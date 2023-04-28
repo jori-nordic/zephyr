@@ -67,8 +67,6 @@ static void bt_ready(int err)
 
 	printk("Bluetooth initialized\n");
 
-	hog_init();
-
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		settings_load();
 	}

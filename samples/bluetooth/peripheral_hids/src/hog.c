@@ -170,27 +170,33 @@ BT_GATT_SERVICE_DEFINE(hog_svc,
 			       NULL, write_ctrl_point, &ctrl_point),
 );
 
+#define KEY_RIGHT					79
+#define KEY_LEFT					80
+#define KEY_DOWN					81
+#define KEY_UP						82
+
+void press_key(uint8_t keycode, bool press) {
+	struct keyboard_report report = {};
+
+	report.modifier = 0;
+	report.reserved = 0;
+
+	report.keycode[0] = press ? keycode : 0;
+
+	bt_gatt_notify(NULL, &hog_svc.attrs[5],
+		       (uint8_t*)&report, sizeof(report));
+}
+
 void hog_button_loop(void)
 {
-	uint8_t press = 0x00;
-
 	for (;;) {
-		press ^= 0x01;
-
 		if (simulate_input) {
-			struct keyboard_report report = {};
-
-			report.modifier = 0;
-			report.reserved = 0;
-
-			report.keycode[0] = press ? 0x04 : 0;
-			report.keycode[1] = press ? 0x05 : 0;
-			report.keycode[2] = press ? 0x06 : 0;
-
-			bt_gatt_notify(NULL, &hog_svc.attrs[5],
-				       (uint8_t*)&report, sizeof(report));
+			uint8_t key = 78;
+			press_key(key, true);
+			k_msleep(100);
+			press_key(key, false);
 		}
-		k_sleep(K_MSEC(500));
 
+		k_sleep(K_MSEC(1000));
 	}
 }
