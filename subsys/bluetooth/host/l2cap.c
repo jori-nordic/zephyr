@@ -94,7 +94,31 @@ static void free_tx_meta_data(struct l2cap_tx_meta_data *data)
 	k_fifo_put(&free_l2cap_tx_meta_data, data);
 }
 
+#if 1
+static struct l2cap_tx_meta_data* l2cap_tx_meta_data(struct net_buf *buf)
+{
+	void *user_data = net_buf_user_data(buf);
+	struct l2cap_tx_meta_data* meta;
+
+	__ASSERT(user_data, "invalid user_data");
+
+	meta = ((struct l2cap_tx_meta *)user_data)->data;
+
+	LOG_INF("meta %p <= %p <= %p",
+		&l2cap_tx_meta_data_storage[0],
+		meta,
+		&l2cap_tx_meta_data_storage[CONFIG_BT_CONN_TX_MAX]);
+
+	/* Double-check that `meta` belongs to `l2cap_tx_meta_data_storage` */
+	__ASSERT(meta >= &l2cap_tx_meta_data_storage[0] &&
+		 meta <= &l2cap_tx_meta_data_storage[CONFIG_BT_CONN_TX_MAX],
+		 "user_data field has been corrupted");
+
+	return meta;
+}
+#else
 #define l2cap_tx_meta_data(buf) (((struct l2cap_tx_meta *)net_buf_user_data(buf))->data)
+#endif
 
 BUILD_ASSERT(sizeof(void*) == sizeof(struct l2cap_tx_meta *));
 
