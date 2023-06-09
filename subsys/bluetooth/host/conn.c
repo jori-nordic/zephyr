@@ -227,7 +227,7 @@ static void tx_notify(struct bt_conn *conn)
 			return;
 		}
 
-		LOG_DBG("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
+		LOG_ERR("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
 
 		/* Copy over the params */
 		cb = tx->cb;
@@ -436,8 +436,8 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 {
 	struct bt_conn_tx *tx;
 
-	LOG_DBG("conn handle %u buf len %u cb %p user_data %p", conn->handle, buf->len, cb,
-		user_data);
+	LOG_WRN("conn handle %u buf len %u cb %p user_data %p",
+		conn->handle, buf->len, cb, user_data);
 
 	if (buf->user_data_size < CONFIG_BT_CONN_TX_USER_DATA_SIZE) {
 		LOG_ERR("not enough room in user_data %d < %d",
