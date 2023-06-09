@@ -129,6 +129,16 @@ static int net_bt_send(struct net_if *iface, struct net_pkt *pkt)
 		return ret;
 	}
 
+	/* crude way to make chan_send a blocking API */
+	k_sem_take(&sent_sem, K_FOREVER);
+
+	/* not sure if we need to check we have actually sent the buffer before
+	 * unrefing it?
+	 *
+	 * the l2cap API says that the buffer's ownership is transferred to the
+	 * bt stack, so I hope this packet unref isn't also unrefing the
+	 * underlying net_buf.
+	 */
 	net_pkt_unref(pkt);
 
 	return length;
@@ -262,11 +272,20 @@ static struct net_buf *ipsp_alloc_buf(struct bt_l2cap_chan *chan)
 	return net_pkt_get_reserve_rx_data(IPSP_FRAG_LEN, BUF_TIMEOUT);
 }
 
+K_SEM_DEFINE(sent_sem, 1, 1);
+void ipsp_sent(struct bt_l2cap_chan *chan)
+{
+	LOG_DBG("%p", chan);
+
+	k_sem_give(&sent_sem);
+}
+
 static const struct bt_l2cap_chan_ops ipsp_ops = {
 	.alloc_buf	= ipsp_alloc_buf,
 	.recv		= ipsp_recv,
 	.connected	= ipsp_connected,
 	.disconnected	= ipsp_disconnected,
+	.sent           = ipsp_sent,
 };
 
 static struct bt_context bt_context_data = {
