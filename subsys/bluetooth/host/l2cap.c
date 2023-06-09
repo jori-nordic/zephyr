@@ -96,6 +96,8 @@ static void free_tx_meta_data(struct l2cap_tx_meta_data *data)
 
 #define l2cap_tx_meta_data(buf) (((struct l2cap_tx_meta *)net_buf_user_data(buf))->data)
 
+BUILD_ASSERT(sizeof(void*) == sizeof(struct l2cap_tx_meta *));
+
 static sys_slist_t servers;
 
 #endif /* CONFIG_BT_L2CAP_DYNAMIC_CHANNEL */
@@ -1861,8 +1863,13 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 {
 	struct l2cap_tx_meta_data *data = user_data;
 	struct bt_l2cap_chan *chan;
+
+	/* This cb is only used by ATT for the moment. It is not available via a
+	 * public API.
+	 */
 	bt_conn_tx_cb_t cb = data->cb;
 	void *cb_user_data = data->user_data;
+
 	uint16_t cid = data->cid;
 
 	LOG_DBG("conn %p CID 0x%04x err %d", conn, cid, err);
@@ -3099,7 +3106,7 @@ int bt_l2cap_chan_send_cb(struct bt_l2cap_chan *chan, struct net_buf *buf, bt_co
 {
 	struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
 	struct l2cap_tx_meta_data *data;
-	void *old_user_data = l2cap_tx_meta_data(buf);
+	void *old_user_data;
 	int err;
 
 	if (!buf) {
@@ -3131,7 +3138,10 @@ int bt_l2cap_chan_send_cb(struct bt_l2cap_chan *chan, struct net_buf *buf, bt_co
 	data->cid = le_chan->tx.cid;
 	data->cb = cb;
 	data->user_data = user_data;
-	l2cap_tx_meta_data(buf) = data;
+
+	/* This is sanity-checked by a build assert at the top of the file */
+	memcpy(&old_user_data, net_buf_user_data(buf), sizeof(void *));
+	memcpy(net_buf_user_data(buf), &data, sizeof(struct l2cap_tx_meta_data*));
 
 	/* Queue if there are pending segments left from previous packet or
 	 * there are no credits available.
@@ -3154,7 +3164,7 @@ int bt_l2cap_chan_send_cb(struct bt_l2cap_chan *chan, struct net_buf *buf, bt_co
 
 		LOG_ERR("failed to send message %d", err);
 
-		l2cap_tx_meta_data(buf) = old_user_data;
+		memcpy(net_buf_user_data(buf), &old_user_data, sizeof(void *));
 		free_tx_meta_data(data);
 	}
 
