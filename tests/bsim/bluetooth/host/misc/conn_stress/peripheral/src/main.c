@@ -103,16 +103,6 @@ static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 }
 
 /* Vendor Primary Service Declaration */
-#if defined(CONFIG_BT_SMP)
-BT_GATT_SERVICE_DEFINE(
-	vnd_svc, BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
-	BT_GATT_CHARACTERISTIC(&vnd_enc_uuid.uuid,
-			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
-			       BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT, NULL, NULL,
-			       NULL),
-	BT_GATT_CCC(vnd_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_ENCRYPT),
-);
-#else
 BT_GATT_SERVICE_DEFINE(
 	vnd_svc, BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
 	BT_GATT_CHARACTERISTIC(&vnd_enc_uuid.uuid,
@@ -121,7 +111,6 @@ BT_GATT_SERVICE_DEFINE(
 			       NULL),
 	BT_GATT_CCC(vnd_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
-#endif
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
