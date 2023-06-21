@@ -173,7 +173,7 @@ static void send_update_conn_params_req(struct bt_conn *conn)
 	struct conn_info *conn_info_ref;
 
 	conn_info_ref = get_conn_info_ref(conn);
-	CHECKIF(conn_info_ref == NULL) {
+	if (conn_info_ref == NULL) {
 		TERM_WARN("Invalid reference returned");
 		return;
 	}
@@ -631,8 +631,7 @@ static void exchange_mtu(struct bt_conn *conn, void *data)
 	struct conn_info *conn_info_ref;
 
 	conn_info_ref = get_conn_info_ref(conn);
-	CHECKIF(conn_info_ref == NULL) {
-		TERM_WARN("Invalid reference returned");
+	if (conn_info_ref == NULL) {
 		return;
 	}
 
@@ -691,7 +690,7 @@ static void update_ll_max_data_length(struct bt_conn *conn, void *data)
 	struct conn_info *conn_info_ref;
 
 	conn_info_ref = get_conn_info_ref(conn);
-	CHECKIF(conn_info_ref == NULL) {
+	if (conn_info_ref == NULL) {
 		TERM_WARN("Invalid reference returned");
 		return;
 	}
@@ -737,7 +736,7 @@ static void subscribe_to_service(struct bt_conn *conn, void *data)
 	struct conn_info *conn_info_ref;
 
 	conn_info_ref = get_conn_info_ref(conn);
-	CHECKIF(conn_info_ref == NULL) {
+	if (conn_info_ref == NULL) {
 		TERM_WARN("Invalid reference returned");
 		return;
 	}
@@ -775,7 +774,7 @@ static void notify_peers(struct bt_conn *conn, void *data)
 	struct conn_info *conn_info_ref;
 
 	conn_info_ref = get_conn_info_ref(conn);
-	CHECKIF(conn_info_ref == NULL) {
+	if (conn_info_ref == NULL) {
 		TERM_WARN("Invalid reference returned");
 		return;
 	}
@@ -819,35 +818,20 @@ void test_central_main(void)
 	start_scan();
 
 	while (true) {
-		while (atomic_test_bit(status_flags, BT_IS_SCANNING) == true ||
-		       atomic_test_bit(status_flags, BT_IS_CONNECTING) == true) {
-			k_sleep(K_MSEC(10));
-		}
-
-		if (conn_count < CONFIG_BT_MAX_CONN) {
+		/* reconnect peripherals when they drop out */
+		if (conn_count < CONFIG_BT_MAX_CONN &&
+		    !atomic_test_bit(status_flags, BT_IS_SCANNING) == true &&
+		    !atomic_test_bit(status_flags, BT_IS_CONNECTING) == true) {
 			start_scan();
-			continue;
-		}
-
-		if (check_all_flags_set(CONN_INFO_CONN_PARAMS_UPDATED) == false) {
-			k_sleep(K_MSEC(10));
-			continue;
 		}
 
 		bt_conn_foreach(BT_CONN_TYPE_LE, exchange_mtu, NULL);
-
 #if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
 		bt_conn_foreach(BT_CONN_TYPE_LE, update_ll_max_data_length, NULL);
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
-
 		bt_conn_foreach(BT_CONN_TYPE_LE, subscribe_to_service, NULL);
-
-		k_sleep(K_SECONDS(1));
-
-		while (conn_count == CONFIG_BT_MAX_CONN) {
-			bt_conn_foreach(BT_CONN_TYPE_LE, notify_peers, vnd_ind_attr);
-			k_sleep(K_SECONDS(1));
-		}
+		bt_conn_foreach(BT_CONN_TYPE_LE, notify_peers, vnd_ind_attr);
+		k_msleep(10);
 	}
 }
 
