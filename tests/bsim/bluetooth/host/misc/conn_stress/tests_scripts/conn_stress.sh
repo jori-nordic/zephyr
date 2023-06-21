@@ -23,7 +23,7 @@ function Execute(){
 #Give a default value to BOARD if it does not have one yet:
 BOARD="${BOARD:-nrf52_bsim}"
 
-testing_apps_loc="/home/jon/repos/zephyrproject/zephyr/tests/bluetooth/bsim_bt/bsim_test_conn_stress"
+testing_apps_loc="/home/jon/repos/zephyrproject/zephyr/tests/bsim/bluetooth/host/misc/conn_stress"
 central_app_name="central"
 peripheral_app_name="peripheral"
 bsim_central_exe_name="bs_nrf52_bsim_bluetooth_central"
@@ -40,11 +40,11 @@ fi
 # find . -type d -name 'build' -exec rm -rf {} +
 
 cd "${testing_apps_loc}/${central_app_name}"
-west build -b ${BOARD} .
+west build -b ${BOARD} . || exit 1
 cp build/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_central_exe_name}
 
 cd "${testing_apps_loc}/${peripheral_app_name}"
-west build -b ${BOARD} .
+west build -b ${BOARD} . || exit 1
 cp build/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_peripheral_exe_name}
 
 cd ${BSIM_OUT_PATH}/bin
