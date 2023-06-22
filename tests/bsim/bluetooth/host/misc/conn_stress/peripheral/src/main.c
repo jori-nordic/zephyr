@@ -63,6 +63,7 @@ static struct bt_uuid_128 vnd_enc_uuid =
 	BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1));
 
 enum {
+	CONN_INFO_CONNECTED,
 	CONN_INFO_SECURITY_LEVEL_UPDATED,
 	CONN_INFO_CONN_PARAMS_UPDATED,
 	CONN_INFO_LL_DATA_LEN_TX_UPDATED,
@@ -145,15 +146,19 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	connections_rounds++;
-	conn_info.conn_ref = conn;
+	conn_info.conn_ref = bt_conn_ref(conn);
+
+	atomic_set_bit(conn_info.flags, CONN_INFO_CONNECTED);
+
 	TERM_SUCCESS("Connection %p established : %s", conn, addr);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
-	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
 	TERM_ERR("Disconnected (reason 0x%02x)", reason);
 	/* __ASSERT(reason == BT_HCI_ERR_LOCALHOST_TERM_CONN, "Disconnected (reason 0x%02x)", reason); */
+
+	atomic_clear_bit(conn_info.flags, CONN_INFO_CONNECTED);
 
 	if (connections_rounds >= 10) {
 		TERM_INFO("Connection rounds completed, stopping advertising...");
@@ -441,9 +446,12 @@ void disconnect(void) {
 	}
 
 	/* wait for disconnection callback */
-	while (conn_info.conn_ref != NULL) {
+	/* TODO: use wait-for-flag */
+	while (atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 		k_sleep(K_MSEC(10));
 	}
+	bt_conn_unref(conn_info.conn_ref);
+	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
 }
 
 void validate_procedure(uint8_t procedure_id) {
@@ -479,7 +487,7 @@ void test_peripheral_main(void)
 	while (true) {
 		TERM_PRINT("wait conn");
 		/* Wait for connection from central */
-		while (conn_info.conn_ref == NULL) {
+		while (!atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 			k_sleep(K_MSEC(10));
 		}
 

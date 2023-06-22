@@ -157,16 +157,16 @@ static bool check_if_peer_connected(const bt_addr_le_t *addr)
 	return false;
 }
 
-static bool check_all_flags_set(int bit)
-{
-	for (size_t i = 0; i < ARRAY_SIZE(conn_infos); i++) {
-		if (atomic_test_bit(conn_infos[i].flags, bit) == false) {
-			return false;
-		}
-	}
+/* static bool check_all_flags_set(int bit) */
+/* { */
+/* 	for (size_t i = 0; i < ARRAY_SIZE(conn_infos); i++) { */
+/* 		if (atomic_test_bit(conn_infos[i].flags, bit) == false) { */
+/* 			return false; */
+/* 		} */
+/* 	} */
 
-	return true;
-}
+/* 	return true; */
+/* } */
 
 static void send_update_conn_params_req(struct bt_conn *conn)
 {
@@ -459,6 +459,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	}
 	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
 	conn_info_ref->conn_ref = conn_connecting;
+	bt_conn_ref(conn_info_ref->conn_ref);
 
 #if defined(CONFIG_BT_SMP)
 	err = bt_conn_set_security(conn, BT_SECURITY_L2);
@@ -479,7 +480,6 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	TERM_ERR("Disconnected: %s (reason 0x%02x)", addr, reason);
-	bt_conn_unref(conn);
 
 	conn_info_ref = get_conn_info_ref(conn);
 	CHECKIF(conn_info_ref == NULL) {
@@ -488,6 +488,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	}
 	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
 
+	bt_conn_unref(conn);
 	conn_info_ref->conn_ref = NULL;
 	memset(conn_info_ref, 0x00, sizeof(struct conn_info));
 

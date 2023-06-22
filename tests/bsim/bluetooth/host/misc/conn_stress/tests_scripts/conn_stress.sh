@@ -62,9 +62,7 @@ find ../ -type d -name ${simulation_id} -exec rm -rf {} +
 bsim_args="-RealEncryption=1 -v=2 -s=${simulation_id}"
 test_args="-argstest notify_size=220 conn_interval=32"
 
-Execute "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=915 -testid=central ${test_args}
 Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=1 -rs=710 -testid=peripheral ${test_args}
-Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=2 -rs=175 -testid=peripheral ${test_args}
 Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=3 -rs=703 -testid=peripheral ${test_args}
 Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=4 -rs=213 -testid=peripheral ${test_args}
 # Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=5 -rs=710 -testid=peripheral ${test_args}
@@ -76,6 +74,9 @@ Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=4 -rs=213 -testid=periph
 # Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=11 -rs=703 -testid=peripheral ${test_args}
 # Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=12 -rs=213 -testid=peripheral ${test_args}
 Execute ./bs_2G4_phy_v1 -dump -v=2 -s=${simulation_id} -D=5 -sim_length=1000e6 &
+
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=2 -rs=175 -testid=peripheral ${test_args}
+Execute "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=915 -testid=central ${test_args}
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"
