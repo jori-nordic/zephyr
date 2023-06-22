@@ -392,11 +392,11 @@ void bt_conn_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 
 static struct bt_conn_tx *conn_tx_alloc(void)
 {
-	/* The TX context always get freed in the system workqueue,
+	/* The TX context get freed in the bluetooth workqueue,
 	 * so if we're in the same workqueue but there are no immediate
 	 * contexts available, there's no chance we'll get one by waiting.
 	 */
-	if (k_current_get() == &k_sys_work_q.thread) {
+	if (bt_is_wq()) {
 		return k_fifo_get(&free_tx, K_NO_WAIT);
 	}
 
