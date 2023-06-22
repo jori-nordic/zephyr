@@ -83,6 +83,18 @@ enum {
 	ATT_NUM_FLAGS,
 };
 
+struct bt_att_tx_meta_data {
+	struct bt_att_chan *att_chan;
+	uint16_t attr_count;
+	bt_gatt_complete_func_t func;
+	void *user_data;
+	enum bt_att_chan_opt chan_opt;
+};
+
+struct bt_att_tx_meta {
+	struct bt_att_tx_meta_data *data;
+};
+
 /* ATT channel specific data */
 struct bt_att_chan {
 	/* Connection this channel is associated with */
@@ -91,6 +103,7 @@ struct bt_att_chan {
 	ATOMIC_DEFINE(flags, ATT_NUM_FLAGS);
 	struct bt_att_req	*req;
 	struct k_fifo		tx_queue;
+	struct bt_att_tx_meta_data transaction_meta;
 	struct k_work_delayable	timeout_work;
 	sys_snode_t		node;
 };
@@ -159,18 +172,6 @@ static struct bt_att_req cancel;
  */
 static k_tid_t att_handle_rsp_thread;
 
-struct bt_att_tx_meta_data {
-	struct bt_att_chan *att_chan;
-	uint16_t attr_count;
-	bt_gatt_complete_func_t func;
-	void *user_data;
-	enum bt_att_chan_opt chan_opt;
-};
-
-struct bt_att_tx_meta {
-	struct bt_att_tx_meta_data *data;
-};
-
 #define bt_att_tx_meta_data(buf) (((struct bt_att_tx_meta *)net_buf_user_data(buf))->data)
 
 static struct bt_att_tx_meta_data tx_meta_data[CONFIG_BT_CONN_TX_MAX];
@@ -194,7 +195,12 @@ static inline void tx_meta_data_free(struct bt_att_tx_meta_data *data)
 	__ASSERT_NO_MSG(data);
 
 	(void)memset(data, 0, sizeof(*data));
-	k_fifo_put(&free_att_tx_meta_data, data);
+
+	/* Only put it back if it belongs to the global pool */
+	if (data >= &tx_meta_data[0] &&
+	    data <= &tx_meta_data[CONFIG_BT_CONN_TX_MAX]) {
+		k_fifo_put(&free_att_tx_meta_data, data);
+	}
 }
 
 static int bt_att_chan_send(struct bt_att_chan *chan, struct net_buf *buf);
@@ -645,6 +651,7 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 	struct net_buf *buf;
 	struct bt_att_tx_meta_data *data;
 	k_timeout_t timeout;
+	bool is_rsp = false;
 
 	if (len + sizeof(op) > bt_att_mtu(chan)) {
 		LOG_WRN("ATT MTU exceeded, max %u, wanted %zu", bt_att_mtu(chan),
@@ -657,6 +664,7 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 	case ATT_CONFIRMATION:
 		/* Use a timeout only when responding/confirming */
 		timeout = BT_ATT_TIMEOUT;
+		is_rsp = true;
 		break;
 	default:
 		timeout = K_FOREVER;
@@ -668,11 +676,23 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		return NULL;
 	}
 
-	data = tx_meta_data_alloc(timeout);
-	if (!data) {
-		LOG_WRN("Unable to allocate ATT TX meta");
-		net_buf_unref(buf);
-		return NULL;
+	if (is_rsp) {
+		/* There can only ever be one transaction at a time on a
+		 * bearer/channel. Use a dedicated channel meta-data to ensure
+		 * we can always queue an (error) RSP for each REQ. The ATT
+		 * module can then reschedule the RSP if it is not able to send
+		 * it immediately.
+		 */
+		__ASSERT_NO_MSG(chan->transaction_meta.att_chan == NULL);
+		data = &chan->transaction_meta;
+		LOG_INF("alloc transaction meta");
+	} else {
+		data = tx_meta_data_alloc(timeout);
+		if (!data) {
+			LOG_WRN("Unable to allocate ATT TX meta");
+			net_buf_unref(buf);
+			return NULL;
+		}
 	}
 
 	bt_att_tx_meta_data(buf) = data;
@@ -3252,6 +3272,7 @@ static struct bt_att_chan *att_chan_new(struct bt_att *att, atomic_val_t flags)
 	(void)memset(chan, 0, sizeof(*chan));
 	chan->chan.chan.ops = &ops;
 	k_fifo_init(&chan->tx_queue);
+	memset(&chan->transaction_meta, 0, sizeof(chan->transaction_meta));
 	atomic_set(chan->flags, flags);
 	chan->att = att;
 	att_chan_attach(att, chan);
