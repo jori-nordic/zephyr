@@ -445,6 +445,8 @@ const bt_addr_le_t *bt_lookup_id_addr(uint8_t id, const bt_addr_le_t *addr);
 
 int bt_send(struct net_buf *buf);
 
+bool bt_is_wq(void);
+
 /* Don't require everyone to include keys.h */
 struct bt_keys;
 void bt_id_add(struct bt_keys *keys);
