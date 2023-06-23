@@ -96,13 +96,14 @@ struct conn_info {
 	struct bt_conn *conn_ref;
 	uint32_t notify_counter;
 	uint32_t tx_notify_counter;
+	struct bt_gatt_discover_params discover_params;
+	struct bt_gatt_subscribe_params subscribe_params;
+	struct bt_uuid_128 uuid;
 };
 
+static struct conn_info conn_infos[CONFIG_BT_MAX_CONN] = {0};
+
 static uint32_t conn_interval_max, notification_size;
-static struct conn_info conn_infos[CONFIG_BT_MAX_CONN];
-static struct bt_uuid_128 uuid = BT_UUID_INIT_128(0);
-static struct bt_gatt_discover_params discover_params;
-static struct bt_gatt_subscribe_params subscribe_params;
 static uint8_t simulate_vnd;
 static uint8_t vnd_value[CHARACTERISTIC_DATA_MAX_LEN];
 
@@ -260,35 +261,38 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 
 	TERM_PRINT("[ATTRIBUTE] handle %u", attr->handle);
 
-	if (discover_params.type == BT_GATT_DISCOVER_PRIMARY) {
-		TERM_PRINT("Primary Service Found");
-		memcpy(&uuid, PERIPHERAL_CHARACTERISTIC_UUID, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
-		discover_params.start_handle = attr->handle + 1;
-		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+	struct conn_info *conn_info_ref = get_conn_info_ref(conn);
 
-		err = bt_gatt_discover(conn, &discover_params);
+	if (conn_info_ref->discover_params.type == BT_GATT_DISCOVER_PRIMARY) {
+		TERM_PRINT("Primary Service Found");
+		memcpy(&conn_info_ref->uuid, PERIPHERAL_CHARACTERISTIC_UUID, sizeof(conn_info_ref->uuid));
+		conn_info_ref->discover_params.uuid = &conn_info_ref->uuid.uuid;
+		conn_info_ref->discover_params.start_handle = attr->handle + 1;
+		conn_info_ref->discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+		err = bt_gatt_discover(conn, &conn_info_ref->discover_params);
 		if (err) {
 			TERM_ERR("Discover failed (err %d)", err);
 		}
-	} else if (discover_params.type == BT_GATT_DISCOVER_CHARACTERISTIC) {
+	} else if (conn_info_ref->discover_params.type == BT_GATT_DISCOVER_CHARACTERISTIC) {
 		TERM_PRINT("Service Characteristic Found");
-		memcpy(&uuid, BT_UUID_GATT_CCC, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
-		discover_params.start_handle = attr->handle + 2;
-		discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
-		subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
+		memcpy(&conn_info_ref->uuid, BT_UUID_GATT_CCC, sizeof(conn_info_ref->uuid));
+		conn_info_ref->discover_params.uuid = &conn_info_ref->uuid.uuid;
+		conn_info_ref->discover_params.start_handle = attr->handle + 2;
+		conn_info_ref->discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+		conn_info_ref->subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
 
-		err = bt_gatt_discover(conn, &discover_params);
+		err = bt_gatt_discover(conn, &conn_info_ref->discover_params);
 		if (err) {
 			TERM_ERR("Discover failed (err %d)", err);
 		}
 	} else {
-		subscribe_params.notify = notify_func;
-		subscribe_params.value = BT_GATT_CCC_NOTIFY;
-		subscribe_params.ccc_handle = attr->handle;
+		conn_info_ref->subscribe_params.notify = notify_func;
+		conn_info_ref->subscribe_params.value = BT_GATT_CCC_NOTIFY;
+		conn_info_ref->subscribe_params.ccc_handle = attr->handle;
 
-		err = bt_gatt_subscribe(conn, &subscribe_params);
+		TERM_INFO("subscribe");
+		err = bt_gatt_subscribe(conn, &conn_info_ref->subscribe_params);
 		if (err && err != -EALREADY) {
 			TERM_ERR("Subscribe failed (err %d)", err);
 		} else {
@@ -656,7 +660,8 @@ static void exchange_mtu(struct bt_conn *conn, void *data)
 			TERM_PRINT("Exchange pending...");
 		}
 
-		while (atomic_test_bit(conn_info_ref->flags, CONN_INFO_MTU_EXCHANGED) == false) {
+		while (conn_info_ref->conn_ref &&
+		       !atomic_test_bit(conn_info_ref->flags, CONN_INFO_MTU_EXCHANGED)) {
 			k_sleep(K_MSEC(10));
 		}
 
@@ -748,21 +753,21 @@ static void subscribe_to_service(struct bt_conn *conn, void *data)
 
 		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-		memcpy(&uuid, PERIPHERAL_SERVICE_UUID, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
-		discover_params.func = discover_func;
-		discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
-		discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
-		discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+		memcpy(&conn_info_ref->uuid, PERIPHERAL_SERVICE_UUID, sizeof(conn_info_ref->uuid));
+		conn_info_ref->discover_params.uuid = &conn_info_ref->uuid.uuid;
+		conn_info_ref->discover_params.func = discover_func;
+		conn_info_ref->discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+		conn_info_ref->discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+		conn_info_ref->discover_params.type = BT_GATT_DISCOVER_PRIMARY;
 
-		err = bt_gatt_discover(conn, &discover_params);
+		err = bt_gatt_discover(conn, &conn_info_ref->discover_params);
 		if (err) {
 			TERM_ERR("Discover failed(err %d)", err);
 			return;
 		}
 
-		while (atomic_test_bit(conn_info_ref->flags, CONN_INFO_SUBSCRIBED_TO_SERVICE) ==
-		       false) {
+		while (conn_info_ref->conn_ref &&
+		       !atomic_test_bit(conn_info_ref->flags, CONN_INFO_SUBSCRIBED_TO_SERVICE)) {
 			k_sleep(K_MSEC(10));
 		}
 	}
