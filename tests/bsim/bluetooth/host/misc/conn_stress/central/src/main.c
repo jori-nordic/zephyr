@@ -231,13 +231,13 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
 	received_counter = strtoul(data_ptr, NULL, 0);
 
-	if ((conn_info_ref->notify_counter % 30) == 0) {
-		/* TERM_PRINT("[NOTIFICATION] addr %s conn %u data %s length %u cnt %u", addr, */
-		/* 	   (conn_info_ref - conn_infos), data, length, received_counter); */
+	if ((conn_info_ref->notify_counter % 100) == 0) {
+		TERM_PRINT("[NOTIFICATION RX] addr %s conn %u data %s length %u cnt %u", addr,
+			   (conn_info_ref - conn_infos), data, length, received_counter);
 	}
 
 	__ASSERT(conn_info_ref->notify_counter == received_counter,
-		 "expected counter : %u , received counter : %u", conn_info_ref->notify_counter,
+		 "addr %s expected counter : %u , received counter : %u", addr, conn_info_ref->notify_counter,
 		 received_counter);
 	conn_info_ref->notify_counter++;
 
