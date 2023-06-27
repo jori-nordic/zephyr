@@ -30,6 +30,7 @@
 #include "bs_tracing.h"
 #include "bstests.h"
 #include "bs_pc_backchannel.h"
+#include "argparse.h"
 
 #define TERM_PRINT(fmt, ...)   printk("\e[39m[Peripheral] : " fmt "\e[39m\n", ##__VA_ARGS__)
 #define TERM_INFO(fmt, ...)    printk("\e[94m[Peripheral] : " fmt "\e[39m\n", ##__VA_ARGS__)
@@ -477,6 +478,9 @@ void test_peripheral_main(void)
 		return;
 	}
 
+	char name[10];
+	sprintf(name, "per-%d", get_device_nbr());
+	bt_set_name(name);
 	bt_ready();
 
 	bt_gatt_cb_register(&gatt_callbacks);

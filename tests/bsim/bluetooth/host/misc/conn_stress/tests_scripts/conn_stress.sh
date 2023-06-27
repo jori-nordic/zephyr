@@ -6,6 +6,7 @@
 simulation_id="conn_stress"
 process_ids=""; exit_code=0
 
+# TODO: use real execute
 function Execute(){
   if [ ! -f $1 ]; then
     echo -e "ERR! \e[91m`pwd`/`basename $1` cannot be found (did you forget to\
@@ -62,21 +63,21 @@ find ../ -type d -name ${simulation_id} -exec rm -rf {} +
 bsim_args="-RealEncryption=1 -v=2 -s=${simulation_id}"
 test_args="-argstest notify_size=220 conn_interval=32"
 
-Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=1 -rs=710 -testid=peripheral ${test_args}
-Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=3 -rs=703 -testid=peripheral ${test_args}
-Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=4 -rs=213 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=5 -rs=710 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=6 -rs=175 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=7 -rs=703 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=8 -rs=213 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=9 -rs=710 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=10 -rs=175 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=11 -rs=703 -testid=peripheral ${test_args}
-# Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=12 -rs=213 -testid=peripheral ${test_args}
-Execute ./bs_2G4_phy_v1 -dump -v=2 -s=${simulation_id} -D=5 -sim_length=1000e6 &
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=1 -rs=100 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=2 -rs=200 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=3 -rs=300 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=4 -rs=400 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=5 -rs=500 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=6 -rs=600 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=7 -rs=700 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=8 -rs=800 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=9 -rs=900 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=10 -rs=1000 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=11 -rs=1100 -testid=peripheral ${test_args}
+Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=12 -rs=1200 -testid=peripheral ${test_args}
+Execute ./bs_2G4_phy_v1 -dump -v=2 -s=${simulation_id} -D=13 -sim_length=1000e6 &
 
-Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=2 -rs=175 -testid=peripheral ${test_args}
-Execute "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=915 -testid=central ${test_args}
+Execute "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=001 -testid=central ${test_args}
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"

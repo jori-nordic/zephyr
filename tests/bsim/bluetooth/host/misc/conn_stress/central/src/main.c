@@ -328,38 +328,37 @@ static bool eir_found(struct bt_data *data, void *user_data)
 		TERM_PRINT("Name Tag found!");
 		TERM_PRINT("Device name : %.*s", data->data_len, data->data);
 
-		if (!strncmp(data->data, PERIPHERAL_DEVICE_NAME, PERIPHERAL_DEVICE_NAME_LEN)) {
-			int err;
-			char dev[BT_ADDR_LE_STR_LEN];
-			struct bt_le_conn_param *param;
+		int err;
+		char dev[BT_ADDR_LE_STR_LEN];
+		struct bt_le_conn_param *param;
 
-			if (check_if_peer_connected(addr) == true) {
-				TERM_ERR("Peer is already connected or in disconnecting state");
-				break;
-			}
-
-			CHECKIF(atomic_test_and_set_bit(status_flags, BT_IS_CONNECTING) == true) {
-				TERM_ERR("A connecting procedure is ongoing");
-				break;
-			}
-
-			if (stop_scan()) {
-				atomic_clear_bit(status_flags, BT_IS_CONNECTING);
-				break;
-			}
-
-			param = BT_LE_CONN_PARAM_DEFAULT;
-			bt_addr_le_to_str(addr, dev, sizeof(dev));
-			TERM_INFO("Connecting to %s", dev);
-			err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, param,
-						&conn_connecting);
-			if (err) {
-				TERM_ERR("Create conn failed (err %d)", err);
-				atomic_clear_bit(status_flags, BT_IS_CONNECTING);
-			}
-
-			return false;
+		if (check_if_peer_connected(addr) == true) {
+			TERM_ERR("Peer is already connected or in disconnecting state");
+			break;
 		}
+
+		CHECKIF(atomic_test_and_set_bit(status_flags, BT_IS_CONNECTING) == true) {
+			TERM_ERR("A connecting procedure is ongoing");
+			break;
+		}
+
+		if (stop_scan()) {
+			atomic_clear_bit(status_flags, BT_IS_CONNECTING);
+			break;
+		}
+
+		param = BT_LE_CONN_PARAM_DEFAULT;
+		bt_addr_le_to_str(addr, dev, sizeof(dev));
+
+		TERM_INFO("Connecting to %s", dev);
+		err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, param,
+					&conn_connecting);
+		if (err) {
+			TERM_ERR("Create conn failed (err %d)", err);
+			atomic_clear_bit(status_flags, BT_IS_CONNECTING);
+		}
+
+		return false;
 
 		break;
 	}
