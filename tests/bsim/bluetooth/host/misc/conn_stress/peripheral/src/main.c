@@ -146,7 +146,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	connections_rounds++;
-	conn_info.conn_ref = bt_conn_ref(conn);
+	conn_info.conn_ref = conn;
 
 	atomic_set_bit(conn_info.flags, CONN_INFO_CONNECTED);
 
@@ -156,9 +156,10 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	TERM_ERR("Disconnected (reason 0x%02x)", reason);
-	/* __ASSERT(reason == BT_HCI_ERR_LOCALHOST_TERM_CONN, "Disconnected (reason 0x%02x)", reason); */
+	__ASSERT(reason == BT_HCI_ERR_LOCALHOST_TERM_CONN, "Disconnected (reason 0x%02x)", reason);
 
-	atomic_clear_bit(conn_info.flags, CONN_INFO_CONNECTED);
+	atomic_clear_bit(conn_info.flags, CONN_INFO_CONNECTED); /* FIXME: is this necessary? */
+	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
 
 	if (connections_rounds >= 10) {
 		TERM_INFO("Connection rounds completed, stopping advertising...");
@@ -438,6 +439,9 @@ void update_characteristic_value(uint32_t count) {
 		 count);
 }
 void disconnect(void) {
+	/* we should always be the ones doing the disconnecting */
+	__ASSERT_NO_MSG(conn_info.conn_ref);
+
 	int err = bt_conn_disconnect(conn_info.conn_ref,
 				     BT_HCI_ERR_REMOTE_POWER_OFF);
 
@@ -450,8 +454,6 @@ void disconnect(void) {
 	while (atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 		k_sleep(K_MSEC(10));
 	}
-	bt_conn_unref(conn_info.conn_ref);
-	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
 }
 
 void validate_procedure(uint8_t procedure_id) {
