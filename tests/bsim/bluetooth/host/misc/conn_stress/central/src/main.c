@@ -34,8 +34,9 @@
 #define TERM_SUCCESS(fmt, ...) printk("\e[92m[Central] : " fmt "\e[39m\n", ##__VA_ARGS__)
 #define TERM_ERR(fmt, ...)                                                                         \
 	printk("\e[91m[Central] %s:%d : " fmt "\e[39m\n", __func__, __LINE__, ##__VA_ARGS__)
-#define TERM_WARN(fmt, ...)                                                                        \
-	printk("\e[93m[Central] %s:%d : " fmt "\e[39m\n", __func__, __LINE__, ##__VA_ARGS__)
+/* #define TERM_WARN(fmt, ...)                                                                        \ */
+/* 	printk("\e[93m[Central] %s:%d : " fmt "\e[39m\n", __func__, __LINE__, ##__VA_ARGS__) */
+#define TERM_WARN(x) (void)0
 
 #define DEFAULT_CONN_INTERVAL	   20
 #define PERIPHERAL_DEVICE_NAME	   "Zephyr Peripheral"
