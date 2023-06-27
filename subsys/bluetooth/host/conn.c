@@ -1460,6 +1460,7 @@ static int conn_disconnect(struct bt_conn *conn, uint8_t reason)
 
 int bt_conn_disconnect(struct bt_conn *conn, uint8_t reason)
 {
+	__ASSERT_NO_MSG(conn);
 	/* Disconnection is initiated by us, so auto connection shall
 	 * be disabled. Otherwise the passive scan would be enabled
 	 * and we could send LE Create Connection as soon as the remote
@@ -2326,6 +2327,7 @@ int bt_conn_set_security(struct bt_conn *conn, bt_security_t sec)
 
 bt_security_t bt_conn_get_security(const struct bt_conn *conn)
 {
+	__ASSERT_NO_MSG(conn);
 	return conn->sec_level;
 }
 #else
@@ -2353,6 +2355,7 @@ bool bt_conn_exists_le(uint8_t id, const bt_addr_le_t *peer)
 		 * still has valid references. The last reference of the stack
 		 * is released after the disconnected callback.
 		 */
+		k_panic();
 		LOG_WRN("Found valid connection in %s state", state2str(conn->state));
 		bt_conn_unref(conn);
 		return true;
