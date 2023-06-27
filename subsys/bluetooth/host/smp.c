@@ -1710,8 +1710,12 @@ static void smp_timeout(struct k_work *work)
 {
 	struct bt_smp *smp = CONTAINER_OF(work, struct bt_smp, work);
 
-	LOG_ERR("SMP Timeout");
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(smp->chan.chan.conn), addr, sizeof(addr));
 
+	LOG_ERR("SMP Timeout %s", addr);
+
+	/* k_oops(); */
 	smp_pairing_complete(smp, BT_SMP_ERR_UNSPECIFIED);
 
 	/* smp_pairing_complete clears flags so setting timeout flag must come
@@ -1727,6 +1731,10 @@ static void smp_send(struct bt_smp *smp, struct net_buf *buf,
 
 	if (err) {
 		if (err == -ENOBUFS) {
+			/* FIXME: this shouldn't happen. SMP should wait for TX
+			 * contexts instead of just returning immediately.
+			 * OR we could reschedule and poll? on TX contexts.
+			 */
 			LOG_ERR("Ran out of TX buffers or contexts.");
 		}
 
