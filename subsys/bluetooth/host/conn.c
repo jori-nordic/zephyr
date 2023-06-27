@@ -1750,6 +1750,8 @@ static void deferred_work(struct k_work *work)
 	const struct bt_le_conn_param *param;
 
 	LOG_DBG("conn %p", conn);
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (conn->state == BT_CONN_DISCONNECTED) {
 #if defined(CONFIG_BT_ISO_UNICAST)
@@ -1784,13 +1786,26 @@ static void deferred_work(struct k_work *work)
 		}
 #endif
 
+		/* these two callbacks may change the state of the connection.
+		 * e.g. to connecting-adv. in that case we should not destroy it.
+		 */
 		bt_l2cap_disconnected(conn);
 		notify_disconnected(conn);
+
+		LOG_INF("state %s", state2str(conn->state));
 
 		/* Release the reference we took for the very first
 		 * state transition.
 		 */
 		bt_conn_unref(conn);
+		/* __ASSERT_NO_MSG(atomic_get(&conn->ref) == 0); */
+
+		if (atomic_get(&conn->ref)) {
+			LOG_ERR("%d refs remaining", atomic_get(&conn->ref), addr);
+		} else {
+			LOG_WRN("no more refs %s", addr);
+		}
+
 		return;
 	}
 
