@@ -456,13 +456,10 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	TERM_INFO("Active connections count : %u", conn_count);
 
 	conn_info_ref = get_new_conn_info_ref();
-	CHECKIF(conn_info_ref == NULL) {
-		TERM_WARN("Invalid reference returned");
-		return;
-	}
+	__ASSERT_NO_MSG(conn_info_ref == NULL);
+
 	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
 	conn_info_ref->conn_ref = conn_connecting;
-	bt_conn_ref(conn_info_ref->conn_ref);
 
 #if defined(CONFIG_BT_SMP)
 	err = bt_conn_set_security(conn, BT_SECURITY_L2);
@@ -485,17 +482,14 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	TERM_ERR("Disconnected: %s (reason 0x%02x)", addr, reason);
 
 	conn_info_ref = get_conn_info_ref(conn);
-	CHECKIF(conn_info_ref == NULL) {
-		TERM_WARN("Invalid reference returned");
-		return;
-	}
-	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
+	__ASSERT_NO_MSG(conn_info_ref == NULL);
 
 	bt_conn_unref(conn);
 	conn_info_ref->conn_ref = NULL;
 	memset(conn_info_ref, 0x00, sizeof(struct conn_info));
 
 	conn_count--;
+	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
 }
 
 static bool le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)

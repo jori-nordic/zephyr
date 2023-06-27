@@ -517,6 +517,7 @@ void test_peripheral_main(void)
 			update_characteristic_value(tx_notify_counter++);
 			err = bt_gatt_notify(NULL, vnd_ind_attr, vnd_value, notification_size);
 			if (err) {
+				update_characteristic_value(tx_notify_counter--);
 				TERM_ERR("Couldn't send GATT notification");
 			}
 
