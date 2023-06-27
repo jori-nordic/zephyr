@@ -765,6 +765,7 @@ static void send_err_rsp(struct bt_att_chan *chan, uint8_t req, uint16_t handle,
 
 	buf = bt_att_chan_create_pdu(chan, BT_ATT_OP_ERROR_RSP, sizeof(*rsp));
 	if (!buf) {
+		LOG_ERR("unable to allocate buf for error response, disconnecting");
 		return;
 	}
 
@@ -3095,6 +3096,9 @@ static void bt_att_disconnected(struct bt_l2cap_chan *chan)
 	att_reset(att);
 
 	bt_gatt_disconnected(le_chan->chan.conn);
+
+	/* TODO: disconnect L2CAP bearer if fixed chan */
+	/* TODO: application callback for EATT */
 }
 
 #if defined(CONFIG_BT_SMP)
