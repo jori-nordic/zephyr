@@ -3457,6 +3457,10 @@ static void gatt_sub_remove(struct bt_conn *conn, struct gatt_sub *sub,
 		/* Remove subscription from the list*/
 		sys_slist_remove(&sub->list, prev, &params->node);
 		/* Notify removal */
+		/* If this assert fires, the `params` struct has been tampered
+		 * with by the application.
+		 */
+		__ASSERT_NO_MSG(params->notify);
 		params->notify(conn, params, NULL, 0);
 	}
 
@@ -5263,6 +5267,23 @@ static int gatt_ccc_discover(struct bt_conn *conn,
 }
 #endif /* CONFIG_BT_GATT_AUTO_DISCOVER_CCC */
 
+static bool sub_params_eq(struct bt_gatt_subscribe_params *p1,
+			  struct bt_gatt_subscribe_params *p2)
+{
+	uint32_t user_flags =
+		BT_GATT_SUBSCRIBE_FLAG_VOLATILE |
+		BT_GATT_SUBSCRIBE_FLAG_NO_RESUB;
+
+	return (p1->notify == p2->notify &&
+		p1->subscribe == p2->subscribe &&
+		p1->write == p2->write &&
+		p1->value_handle == p2->value_handle &&
+		p1->ccc_handle == p2->ccc_handle &&
+		p1->value == p2->value &&
+		p1->min_security == p2->min_security &&
+		((p1->value & user_flags) == (p2->value & user_flags)));
+}
+
 int bt_gatt_subscribe(struct bt_conn *conn,
 		      struct bt_gatt_subscribe_params *params)
 {
@@ -5296,6 +5317,18 @@ int bt_gatt_subscribe(struct bt_conn *conn,
 		if (tmp == params) {
 			gatt_sub_remove(conn, sub, NULL, NULL);
 			return -EALREADY;
+		}
+
+		/* if (IS_ENABLED(CONFIG_BT_GATT_LOG_LEVEL_DBG) && */
+		if (true &&
+		    sub_params_eq(tmp, params)) {
+			/* If you get this, this means you have called subscribe() more than once,
+			 * with different `params` pointers. The data pointed to by these pointers
+			 * however is the same (same options, same callbacks, etc).
+			 * Warning just in case it wasn't intentional.
+			 */
+			LOG_DBG("An existing subscription has the exact same parameters: %p", tmp);
+			raise(SIGTRAP);
 		}
 
 		/* Check if another subscription exists */
