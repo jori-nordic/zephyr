@@ -1866,6 +1866,13 @@ struct bt_gatt_subscribe_params {
  *
  *  The Response comes in callback @p params->subscribe. The callback is run from
  *  the context specified by 'config BT_RECV_CONTEXT'.
+ *  @p params must remain valid for the length of the subscription.
+ *  -> the stack _will_ keep a reference and will try to call the callbacks.
+ *
+ *  TODO: double-check
+ *  The subscription ends after @p params->subscribe is called, following a call to @ref
+ *  bt_gatt_unsubscribe.
+ *
  *  The Notification callback @p params->notify is also called from the BT RX
  *  thread.
  *
