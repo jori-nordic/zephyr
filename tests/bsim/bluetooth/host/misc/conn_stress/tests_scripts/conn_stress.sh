@@ -43,6 +43,8 @@ fi
 # terminate running simulations (if any)
 ${BSIM_COMPONENTS_PATH}/common/stop_bsim.sh
 
+rm -rf ${BSIM_OUT_PATH}/results/${simulation_id}/*
+
 cd "${testing_apps_loc}/${central_app_name}"
 west build -b ${BOARD} . || exit 1
 cp build/zephyr/zephyr.exe ${BSIM_OUT_PATH}/bin/${bsim_central_exe_name}
@@ -77,7 +79,7 @@ Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=11 -rs=1100 -testid=peri
 Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=12 -rs=1200 -testid=peripheral ${test_args}
 Execute ./bs_2G4_phy_v1 -dump -v=2 -s=${simulation_id} -D=13 -sim_length=1000e6 &
 
-Execute "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=001 -testid=central ${test_args}
+gdb --args "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=001 -testid=central ${test_args}
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"
@@ -86,15 +88,19 @@ done
 find . -type f -name ${bsim_central_exe_name} -delete
 find . -type f -name ${bsim_peripheral_exe_name} -delete
 
-${BSIM_OUT_PATH}/components/ext_2G4_phy_v1/dump_post_process/csv2pcap -o \
-${BSIM_OUT_PATH}/results/${simulation_id}/Trace_Tx.pcap \
-${BSIM_OUT_PATH}/results/${simulation_id}/d_2G4*.Tx.csv
+for j in {0..12}; do
+    i=$(printf '%02i' $j)
 
-${BSIM_OUT_PATH}/components/ext_2G4_phy_v1/dump_post_process/csv2pcap -o \
-${BSIM_OUT_PATH}/results/${simulation_id}/Trace_Rx.pcap \
-${BSIM_OUT_PATH}/results/${simulation_id}/d_2G4*.Rx.csv
+    ${BSIM_OUT_PATH}/components/ext_2G4_phy_v1/dump_post_process/csv2pcap -o \
+    ${BSIM_OUT_PATH}/results/${simulation_id}/Trace_$i.pcap \
+    ${BSIM_OUT_PATH}/results/${simulation_id}/d_2G4_$i.{Rx,Tx}.csv
 
-echo "${BSIM_OUT_PATH}/results/${simulation_id}/Trace_Tx.pcap"
-echo "${BSIM_OUT_PATH}/results/${simulation_id}/Trace_Rx.pcap"
+    # ${BSIM_OUT_PATH}/components/ext_2G4_phy_v1/dump_post_process/csv2pcap -o \
+    # ${BSIM_OUT_PATH}/results/${simulation_id}/Trace_Rx_$i.pcap \
+    # ${BSIM_OUT_PATH}/results/${simulation_id}/d_2G4_$i.Rx.csv
+
+    echo "${BSIM_OUT_PATH}/results/${simulation_id}/Trace_$i.pcap"
+    # echo "${BSIM_OUT_PATH}/results/${simulation_id}/Trace_Rx_$i.pcap"
+done
 
 exit $exit_code
