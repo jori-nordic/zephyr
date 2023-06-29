@@ -320,8 +320,8 @@ static void update_ll_max_data_length(struct bt_conn *conn, void *data)
 }
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 
-static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-			   const void *data, uint16_t length)
+static uint8_t rx_notification(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+			       const void *data, uint16_t length)
 {
 	const char *data_ptr = (const char *)data + NOTIFICATION_DATA_PREFIX_LEN;
 	uint32_t received_counter;
@@ -391,7 +391,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 			TERM_ERR("Discover failed (err %d)", err);
 		}
 	} else {
-		subscribe_params.notify = notify_func;
+		subscribe_params.notify = rx_notification;
 		subscribe_params.value = BT_GATT_CCC_NOTIFY;
 		subscribe_params.ccc_handle = attr->handle;
 
