@@ -834,6 +834,11 @@ static void notify_peers(struct bt_conn *conn, void *data)
 	if (err) {
 		TERM_ERR("Couldn't send GATT notification");
 		return;
+	} else {
+		char addr[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+		TERM_INFO("central notified: %s %d", addr, conn_info_ref->tx_notify_counter);
 	}
 
 	conn_info_ref->tx_notify_counter++;
@@ -871,6 +876,12 @@ void test_central_main(void)
 		    !atomic_test_bit(status_flags, BT_IS_SCANNING) == true &&
 		    !atomic_test_bit(status_flags, BT_IS_CONNECTING) == true) {
 			start_scan();
+		} else {
+			if (atomic_test_bit(status_flags, BT_IS_CONNECTING)) {
+				char addr[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(bt_conn_get_dst(conn_connecting), addr, sizeof(addr));
+				TERM_INFO("already connecting to: %s", addr);
+			}
 		}
 
 		bt_conn_foreach(BT_CONN_TYPE_LE, exchange_mtu, NULL);

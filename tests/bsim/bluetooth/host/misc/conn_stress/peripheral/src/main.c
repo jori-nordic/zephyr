@@ -523,8 +523,8 @@ void test_peripheral_main(void)
 			if (err) {
 				update_characteristic_value(tx_notify_counter--);
 				TERM_ERR("Couldn't send GATT notification");
-			} else if (0 == tx_notify_counter % 20) {
-				TERM_INFO("notified %d", tx_notify_counter);
+			} else {
+				TERM_INFO("peripheral notified %d", tx_notify_counter);
 			}
 
 			if (((k_uptime_get() - uptime_ref) / 1000) >= 70) {
