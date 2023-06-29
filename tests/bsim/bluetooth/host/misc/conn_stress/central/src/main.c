@@ -97,10 +97,22 @@ struct conn_info {
 	struct bt_conn *conn_ref;
 	uint32_t notify_counter;
 	uint32_t tx_notify_counter;
+	struct bt_uuid_128 uuid;
 	struct bt_gatt_discover_params discover_params;
 	struct bt_gatt_subscribe_params subscribe_params;
-	struct bt_uuid_128 uuid;
+	bt_addr_le_t addr;
 };
+
+void clear_info(struct conn_info *info)
+{
+	/* clear everything except the address + sub params (lifetime > connection) */
+	memset(&info->flags, 0, sizeof(info->flags));
+	memset(&info->conn_ref, 0, sizeof(info->conn_ref));
+	memset(&info->notify_counter, 0, sizeof(info->notify_counter));
+	memset(&info->tx_notify_counter, 0, sizeof(info->tx_notify_counter));
+	memset(&info->uuid, 0, sizeof(info->uuid));
+	memset(&info->discover_params, 0, sizeof(info->discover_params));
+}
 
 static struct conn_info conn_infos[CONFIG_BT_MAX_CONN] = {0};
 
@@ -123,15 +135,25 @@ BT_GATT_SERVICE_DEFINE(
 	BT_GATT_CCC(vnd_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
-static struct conn_info *get_new_conn_info_ref(void)
+static struct conn_info *get_new_conn_info_ref(const bt_addr_le_t *addr)
 {
+	/* try to find per-addr first */
 	for (size_t i = 0; i < ARRAY_SIZE(conn_infos); i++) {
-		if (conn_infos[i].conn_ref == NULL) {
+		if (bt_addr_le_eq(&conn_infos[i].addr, addr)) {
 			return &conn_infos[i];
 		}
 	}
 
-	return NULL;
+	/* try to allocate if addr not found */
+	for (size_t i = 0; i < ARRAY_SIZE(conn_infos); i++) {
+		if (conn_infos[i].conn_ref == NULL) {
+			bt_addr_le_copy(&conn_infos[i].addr, addr);
+
+			return &conn_infos[i];
+		}
+	}
+
+	__ASSERT(0, "ran out of contexts");
 }
 
 static struct conn_info *get_conn_info_ref(struct bt_conn *conn_ref)
@@ -176,6 +198,7 @@ static void send_update_conn_params_req(struct bt_conn *conn)
 
 	conn_info_ref = get_conn_info_ref(conn);
 	if (conn_info_ref == NULL) {
+		k_oops();
 		TERM_WARN("Invalid reference returned");
 		return;
 	}
@@ -226,6 +249,7 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
 	conn_info_ref = get_conn_info_ref(conn);
 	CHECKIF(conn_info_ref == NULL) {
+		k_oops();
 		TERM_WARN("Invalid reference returned");
 		return BT_GATT_ITER_CONTINUE;
 	}
@@ -456,8 +480,8 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	conn_count++;
 	TERM_INFO("Active connections count : %u", conn_count);
 
-	conn_info_ref = get_new_conn_info_ref();
-	__ASSERT_NO_MSG(conn_info_ref == NULL);
+	conn_info_ref = get_new_conn_info_ref(bt_conn_get_dst(conn));
+	__ASSERT_NO_MSG(conn_info_ref->conn_ref == NULL);
 
 	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
 	conn_info_ref->conn_ref = conn_connecting;
@@ -482,12 +506,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	TERM_ERR("Disconnected: %s (reason 0x%02x)", addr, reason);
 
-	conn_info_ref = get_conn_info_ref(conn);
-	__ASSERT_NO_MSG(conn_info_ref == NULL);
-
-	bt_conn_unref(conn);
-	conn_info_ref->conn_ref = NULL;
-	memset(conn_info_ref, 0x00, sizeof(struct conn_info));
+	clear_info(conn_info_ref);
 
 	conn_count--;
 	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));
@@ -529,6 +548,7 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
 
 	atomic_set_bit(conn_info_ref->flags, CONN_INFO_CONN_PARAMS_UPDATED);
 
+	__ASSERT_NO_MSG(conn == conn_connecting);
 	if (conn == conn_connecting) {
 		conn_connecting = NULL;
 		atomic_clear_bit(status_flags, BT_IS_CONNECTING);
@@ -581,6 +601,22 @@ static void le_data_len_updated(struct bt_conn *conn, struct bt_conn_le_data_len
 }
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 
+static void identity_resolved(struct bt_conn *conn, const bt_addr_le_t *rpa,
+			      const bt_addr_le_t *identity)
+{
+	char addr_identity[BT_ADDR_LE_STR_LEN];
+	char addr_rpa[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(identity, addr_identity, sizeof(addr_identity));
+	bt_addr_le_to_str(rpa, addr_rpa, sizeof(addr_rpa));
+
+	TERM_ERR("Identity resolved %s -> %s", addr_rpa, addr_identity);
+
+	/* overwrite RPA */
+	struct conn_info *conn_info_ref = get_conn_info_ref(conn);
+	bt_addr_le_copy(&conn_info_ref->addr, identity);
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
@@ -592,6 +628,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 #if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
 	.le_data_len_updated = le_data_len_updated,
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
+	.identity_resolved = identity_resolved,
 };
 
 void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
