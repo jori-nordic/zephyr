@@ -497,6 +497,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 #endif /* CONFIG_BT_SMP */
 }
 
+extern int bt_conn_refcnt(struct bt_conn *conn);
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	struct conn_info *conn_info_ref;
@@ -506,7 +507,17 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	TERM_ERR("Disconnected: %s (reason 0x%02x)", addr, reason);
 
+	conn_info_ref = get_conn_info_ref(conn);
+	__ASSERT_NO_MSG(conn_info_ref->conn_ref != NULL);
+	__ASSERT_NO_MSG(reason == BT_HCI_ERR_REMOTE_POWER_OFF);
+
+	bt_conn_unref(conn);
 	clear_info(conn_info_ref);
+
+	if (bt_conn_refcnt(conn) > 1) {
+		TERM_ERR("more refs: %p %d", conn, bt_conn_refcnt(conn));
+		/* raise(SIGTRAP); */
+	}
 
 	conn_count--;
 	TERM_PRINT("Connection reference store index %u", (conn_info_ref - conn_infos));

@@ -1320,10 +1320,19 @@ void bt_conn_unref(struct bt_conn *conn)
 
 	__ASSERT(old > 0, "Conn reference counter is 0");
 
+	if (atomic_get(&conn->ref) == 0) {
+		LOG_ERR("destroy conn %p", conn);
+	}
+
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) && conn->type == BT_CONN_TYPE_LE &&
 	    conn->role == BT_CONN_ROLE_PERIPHERAL && atomic_get(&conn->ref) == 0) {
 		bt_le_adv_resume();
 	}
+}
+
+int bt_conn_refcnt(struct bt_conn *conn)
+{
+	return atomic_get(&conn->ref);
 }
 
 uint8_t bt_conn_index(const struct bt_conn *conn)
@@ -1802,6 +1811,7 @@ static void deferred_work(struct k_work *work)
 
 		if (atomic_get(&conn->ref)) {
 			LOG_ERR("%d refs remaining", atomic_get(&conn->ref), addr);
+			LOG_INF("state %s", state2str(conn->state));
 		} else {
 			LOG_WRN("no more refs %s", addr);
 		}
