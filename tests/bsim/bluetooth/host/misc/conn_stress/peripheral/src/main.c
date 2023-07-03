@@ -25,6 +25,9 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/types.h>
 
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(peripheral, LOG_LEVEL_INF);
+
 #include "bstests.h"
 #include "bs_types.h"
 #include "bs_tracing.h"
@@ -32,17 +35,8 @@
 #include "bs_pc_backchannel.h"
 #include "argparse.h"
 
-#define TERM_PRINT(fmt, ...)   printk("\e[39m[Peripheral] : " fmt "\e[39m\n", ##__VA_ARGS__)
-#define TERM_INFO(fmt, ...)    printk("\e[94m[Peripheral] : " fmt "\e[39m\n", ##__VA_ARGS__)
-#define TERM_SUCCESS(fmt, ...) printk("\e[92m[Peripheral] : " fmt "\e[39m\n", ##__VA_ARGS__)
-#define TERM_ERR(fmt, ...)                                                                         \
-	printk("\e[91m[Peripheral] %s:%d : " fmt "\e[39m\n", __func__, __LINE__, ##__VA_ARGS__)
-/* #define TERM_WARN(fmt, ...)                                                                        \ */
-/* 	printk("\e[93m[Peripheral] %s:%d : " fmt "\e[39m\n", __func__, __LINE__, ##__VA_ARGS__) */
-/* #define TERM_WARN(fmt, ...)                                                                        \ */
-/* 	printk("\e[93m[Central] %s:%d : " fmt "\e[39m\n", __func__, __LINE__, ##__VA_ARGS__) */
-#define TERM_WARN(x) (void)0
-
+#define TEST_ROUNDS 10
+#define MIN_NOTIFICATIONS 50
 
 #define NOTIFICATION_DATA_PREFIX     "Counter:"
 #define NOTIFICATION_DATA_PREFIX_LEN (sizeof(NOTIFICATION_DATA_PREFIX) - 1)
@@ -71,10 +65,11 @@ enum {
 	CONN_INFO_CONNECTED,
 	CONN_INFO_SECURITY_LEVEL_UPDATED,
 	CONN_INFO_CONN_PARAMS_UPDATED,
-	CONN_INFO_LL_DATA_LEN_TX_UPDATED,
-	CONN_INFO_LL_DATA_LEN_RX_UPDATED,
+	CONN_INFO_SENT_LL_DATA_LEN_UPDATE,
+	CONN_INFO_GOT_LL_DATA_LEN_UPDATE,
 	CONN_INFO_MTU_EXCHANGED,
-	CONN_INFO_SUBSCRIBED_TO_SERVICE,
+	CONN_INFO_DISCOVERING,
+	CONN_INFO_SUBSCRIBED,
 	/* Total number of flags - must be at the end of the enum */
 	CONN_INFO_NUM_FLAGS,
 };
@@ -83,18 +78,22 @@ struct active_conn_info {
 	ATOMIC_DEFINE(flags, CONN_INFO_NUM_FLAGS);
 	struct bt_conn *conn_ref;
 	uint32_t notify_counter;
+	uint32_t tx_notify_counter;
+#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
+	struct bt_conn_le_data_len_param le_data_len_param;
+#endif
 };
 
-static uint32_t connections_rounds;
-static uint32_t notification_size;
-static uint8_t simulate_vnd;
-static int64_t uptime_ref;
-static uint32_t tx_notify_counter;
 static struct active_conn_info conn_info;
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-static struct bt_conn_le_data_len_param le_data_len_param;
-#endif
-static uint8_t vnd_value[CHARACTERISTIC_DATA_MAX_LEN];
+
+static uint32_t rounds;
+
+/* This is outside the conn context since it can remain valid across
+ * connections
+ */
+static uint8_t central_subscription;
+static uint8_t tx_data[CHARACTERISTIC_DATA_MAX_LEN];
+static uint32_t notification_size; /* TODO: does this _need_ to be set in args? */
 
 static struct bt_uuid_128 uuid = BT_UUID_INIT_128(0);
 static struct bt_gatt_discover_params discover_params;
@@ -102,10 +101,7 @@ static struct bt_gatt_subscribe_params subscribe_params;
 
 static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-	simulate_vnd = (value == BT_GATT_CCC_NOTIFY) ? 1 : 0;
-	if (simulate_vnd) {
-		tx_notify_counter = 0;
-	}
+	central_subscription = (value == BT_GATT_CCC_NOTIFY) ? 1 : 0;
 }
 
 /* Vendor Primary Service Declaration */
@@ -118,13 +114,9 @@ BT_GATT_SERVICE_DEFINE(
 	BT_GATT_CCC(vnd_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
-static const struct bt_data ad[] = {
-	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-};
-
 void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 {
-	TERM_INFO("Updated MTU: TX: %d RX: %d bytes", tx, rx);
+	LOG_INF("Updated MTU: TX: %d RX: %d bytes", tx, rx);
 
 	if (tx == CONFIG_BT_L2CAP_TX_MTU && rx == CONFIG_BT_L2CAP_TX_MTU) {
 		char addr[BT_ADDR_LE_STR_LEN];
@@ -132,7 +124,7 @@ void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 		atomic_set_bit(conn_info.flags, CONN_INFO_MTU_EXCHANGED);
-		TERM_SUCCESS("Updating MTU succeeded %s", addr);
+		LOG_INF("Updating MTU succeeded %s", addr);
 	}
 }
 
@@ -144,30 +136,31 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	if (err) {
 		memset(&conn_info, 0x00, sizeof(struct active_conn_info));
-		TERM_ERR("Connection failed (err 0x%02x)", err);
+		LOG_ERR("Connection failed (err 0x%02x)", err);
 		return;
 	}
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	connections_rounds++;
+	rounds++;
 	conn_info.conn_ref = conn;
 
 	atomic_set_bit(conn_info.flags, CONN_INFO_CONNECTED);
 
-	TERM_SUCCESS("Connection %p established : %s", conn, addr);
+	LOG_INF("Connection %p established : %s", conn, addr);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
-	TERM_ERR("Disconnected (reason 0x%02x)", reason);
+	LOG_ERR("Disconnected (reason 0x%02x)", reason);
 	__ASSERT(reason == BT_HCI_ERR_LOCALHOST_TERM_CONN, "Disconnected (reason 0x%02x)", reason);
 
 	atomic_clear_bit(conn_info.flags, CONN_INFO_CONNECTED); /* FIXME: is this necessary? */
 	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
 
-	if (connections_rounds >= 10) {
-		TERM_INFO("Connection rounds completed, stopping advertising...");
+	if (rounds >= TEST_ROUNDS) {
+		/* TODO: set PASS here, set FAIL by default */
+		LOG_INF("Number of conn/disconn cycles reached, stopping advertiser...");
 		bt_le_adv_stop();
 	}
 }
@@ -178,7 +171,7 @@ static bool le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	TERM_PRINT("LE conn param req: %s int (0x%04x (~%u ms), 0x%04x (~%u ms)) lat %d to %d",
+	LOG_DBG("LE conn param req: %s int (0x%04x (~%u ms), 0x%04x (~%u ms)) lat %d to %d",
 		   addr, param->interval_min, (uint32_t)(param->interval_min * 1.25),
 		   param->interval_max, (uint32_t)(param->interval_max * 1.25), param->latency,
 		   param->timeout);
@@ -193,7 +186,7 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	TERM_INFO("LE conn param updated: %s int 0x%04x (~%u ms) lat %d to %d", addr, interval,
+	LOG_INF("LE conn param updated: %s int 0x%04x (~%u ms) lat %d to %d", addr, interval,
 		  (uint32_t)(interval * 1.25), latency, timeout);
 
 	atomic_set_bit(conn_info.flags, CONN_INFO_CONN_PARAMS_UPDATED);
@@ -207,11 +200,11 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (err) {
-		TERM_ERR("Security for %p failed: %s level %u err %d", conn, addr, level, err);
+		LOG_ERR("Security for %p failed: %s level %u err %d", conn, addr, level, err);
 		return;
 	}
 
-	TERM_INFO("Security for %p changed: %s level %u", conn, addr, level);
+	LOG_INF("Security for %p changed: %s level %u", conn, addr, level);
 	atomic_set_bit(conn_info.flags, CONN_INFO_SECURITY_LEVEL_UPDATED);
 }
 #endif /* CONFIG_BT_SMP */
@@ -223,16 +216,13 @@ static void le_data_len_updated(struct bt_conn *conn, struct bt_conn_le_data_len
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	TERM_PRINT("Data length updated: %s max tx %u (%u us) max rx %u (%u us)", addr,
+	LOG_DBG("Data length updated: %s max tx %u (%u us) max rx %u (%u us)", addr,
 		   info->tx_max_len, info->tx_max_time, info->rx_max_len, info->rx_max_time);
 
-	if (info->rx_max_len == BT_GAP_DATA_LEN_MAX) {
-		TERM_INFO("RX Data length flag updated for %s", addr);
-		atomic_set_bit(conn_info.flags, CONN_INFO_LL_DATA_LEN_RX_UPDATED);
-	}
 	if (info->tx_max_len == BT_GAP_DATA_LEN_MAX) {
-		TERM_INFO("TX Data length flag updated for %s", addr);
-		atomic_set_bit(conn_info.flags, CONN_INFO_LL_DATA_LEN_TX_UPDATED);
+		LOG_INF("TX Data length flag updated for %s", addr);
+		atomic_clear_bit(conn_info.flags, CONN_INFO_SENT_LL_DATA_LEN_UPDATE);
+		atomic_set_bit(conn_info.flags, CONN_INFO_GOT_LL_DATA_LEN_UPDATE);
 	}
 }
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
@@ -249,21 +239,6 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.le_data_len_updated = le_data_len_updated,
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 };
-
-static void bt_ready(void)
-{
-	int err;
-
-	TERM_PRINT("Bluetooth initialized");
-
-	err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
-	if (err) {
-		TERM_ERR("Advertising failed to start (err %d)", err);
-		return;
-	}
-
-	TERM_SUCCESS("Advertising successfully started");
-}
 
 #if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
 static uint16_t tx_time_calc(uint8_t phy, uint16_t max_len)
@@ -285,40 +260,38 @@ static uint16_t tx_time_calc(uint8_t phy, uint16_t max_len)
 		return 0;
 	}
 }
+#endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 
 static void update_ll_max_data_length(struct bt_conn *conn, void *data)
 {
-	if (atomic_test_bit(conn_info.flags, CONN_INFO_LL_DATA_LEN_TX_UPDATED) == false) {
+#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
+	if (!atomic_test_and_set_bit(conn_info.flags, CONN_INFO_SENT_LL_DATA_LEN_UPDATE) &&
+	    !atomic_test_and_set_bit(conn_info.flags, CONN_INFO_GOT_LL_DATA_LEN_UPDATE)) {
 		int err;
 		char addr[BT_ADDR_LE_STR_LEN];
 
-		le_data_len_param = *BT_LE_DATA_LEN_PARAM_DEFAULT;
+		conn_info.le_data_len_param = *BT_LE_DATA_LEN_PARAM_DEFAULT;
 
 		/* Update LL transmission payload size in bytes*/
-		le_data_len_param.tx_max_len = BT_GAP_DATA_LEN_MAX;
+		conn_info.le_data_len_param.tx_max_len = BT_GAP_DATA_LEN_MAX;
 		/* Update LL transmission payload time in us*/
-		le_data_len_param.tx_max_time =
-			tx_time_calc(BT_GAP_LE_PHY_2M, le_data_len_param.tx_max_len);
-		TERM_PRINT("Calculated tx time: %d", le_data_len_param.tx_max_time);
+		conn_info.le_data_len_param.tx_max_time =
+			tx_time_calc(BT_GAP_LE_PHY_2M, conn_info.le_data_len_param.tx_max_len);
+		LOG_DBG("Calculated tx time: %d", conn_info.le_data_len_param.tx_max_time);
 
 		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-		TERM_PRINT("Updating LL data length for %s...", addr);
-		err = bt_conn_le_data_len_update(conn, &le_data_len_param);
+		LOG_DBG("Updating LL data length for %s...", addr);
+		err = bt_conn_le_data_len_update(conn, &conn_info.le_data_len_param);
 		if (err) {
-			TERM_ERR("Updating LL data length failed %s", addr);
+			LOG_ERR("Updating LL data length failed %s", addr);
 			return;
 		}
 
-		while (atomic_test_bit(conn_info.flags, CONN_INFO_LL_DATA_LEN_TX_UPDATED) ==
-		       false) {
-			k_sleep(K_MSEC(10));
-		}
-
-		TERM_SUCCESS("Updating LL data length succeeded %s", addr);
+		LOG_INF("Updating LL data length..");
 	}
-}
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
+}
 
 static uint8_t rx_notification(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
 			       const void *data, uint16_t length)
@@ -328,19 +301,20 @@ static uint8_t rx_notification(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 	char addr[BT_ADDR_LE_STR_LEN];
 
 	if (!data) {
-		TERM_INFO("[UNSUBSCRIBED]");
+		LOG_INF("[UNSUBSCRIBED]");
 		params->value_handle = 0U;
 		return BT_GATT_ITER_STOP;
 	}
+
+	/* TODO: enable */
+	/* __ASSERT_NO_MSG(atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED)); */
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	received_counter = strtoul(data_ptr, NULL, 0);
 
-	if ((conn_info.notify_counter % 30) == 0) {
-		TERM_PRINT("[NOTIFICATION] addr %s data %s length %u cnt %u", addr, data, length,
-			   received_counter);
-	}
+	LOG_DBG("[NOTIFICATION] addr %s data %s length %u cnt %u",
+		addr, data, length, received_counter);
 
 	__ASSERT(conn_info.notify_counter == received_counter,
 		 "expected counter : %u , received counter : %u", conn_info.notify_counter,
@@ -357,63 +331,86 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 	char uuid_str[BT_UUID_STR_LEN];
 
 	if (!attr) {
-		TERM_INFO("Discover complete");
+		LOG_INF("Discover complete");
 		(void)memset(params, 0, sizeof(*params));
 		return BT_GATT_ITER_STOP;
 	}
 
 	bt_uuid_to_str(params->uuid, uuid_str, sizeof(uuid_str));
-	TERM_PRINT("UUID found : %s", uuid_str);
+	LOG_DBG("UUID found : %s", uuid_str);
 
-	TERM_PRINT("[ATTRIBUTE] handle %u", attr->handle);
+	LOG_DBG("[ATTRIBUTE] handle %u", attr->handle);
 
 	if (discover_params.type == BT_GATT_DISCOVER_PRIMARY) {
-		TERM_PRINT("Primary Service Found");
+		LOG_DBG("Primary Service Found");
 		memcpy(&uuid, CENTRAL_CHARACTERISTIC_UUID, sizeof(uuid));
 		discover_params.uuid = &uuid.uuid;
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 
 		err = bt_gatt_discover(conn, &discover_params);
-		if (err) {
-			TERM_ERR("Discover failed (err %d)", err);
+		if (err == -ENOMEM) {
+			goto nomem;
 		}
+
+		__ASSERT(!err, "Discover failed (err %d)", err);
+
 	} else if (discover_params.type == BT_GATT_DISCOVER_CHARACTERISTIC) {
-		TERM_PRINT("Service Characteristic Found");
+		LOG_DBG("Service Characteristic Found");
 		memcpy(&uuid, BT_UUID_GATT_CCC, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
-		discover_params.start_handle = attr->handle + 2;
-		discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+		params->uuid = &uuid.uuid;
+		params->start_handle = attr->handle + 2;
+		params->type = BT_GATT_DISCOVER_DESCRIPTOR;
 		subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
 
-		err = bt_gatt_discover(conn, &discover_params);
-		if (err) {
-			TERM_ERR("Discover failed (err %d)", err);
+		err = bt_gatt_discover(conn, params);
+		if (err == -ENOMEM) {
+			goto nomem;
 		}
-	} else {
+
+		__ASSERT(!err, "Discover failed (err %d)", err);
+
+	} else if (atomic_test_and_clear_bit(conn_info.flags, CONN_INFO_DISCOVERING)) {
+
 		subscribe_params.notify = rx_notification;
 		subscribe_params.value = BT_GATT_CCC_NOTIFY;
 		subscribe_params.ccc_handle = attr->handle;
 
+		LOG_ERR("subscribe");
 		err = bt_gatt_subscribe(conn, &subscribe_params);
-		if (err && err != -EALREADY) {
-			TERM_ERR("Subscribe failed (err %d)", err);
-		} else {
-			char addr[BT_ADDR_LE_STR_LEN];
-
-			bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-			atomic_set_bit(conn_info.flags, CONN_INFO_SUBSCRIBED_TO_SERVICE);
-			TERM_INFO("[SUBSCRIBED] addr %s", addr);
+		if (err == -ENOMEM) {
+			goto nomem;
 		}
+
+		if (err != -EALREADY) {
+			__ASSERT(!err, "Subscribe failed (err %d)", err);
+		}
+
+		__ASSERT_NO_MSG(!atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED));
+		atomic_set_bit(conn_info.flags, CONN_INFO_SUBSCRIBED);
+
+		char addr[BT_ADDR_LE_STR_LEN];
+
+		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+		LOG_INF("[SUBSCRIBED] addr %s", addr);
 	}
+
+	return BT_GATT_ITER_STOP;
+
+nomem:
+	/* if we're out of buffers or metadata contexts, restart discovery
+	 * later.
+	 */
+	LOG_ERR("out of memory, retry sub later");
+	atomic_clear_bit(conn_info.flags, CONN_INFO_DISCOVERING);
 
 	return BT_GATT_ITER_STOP;
 }
 
 static void subscribe_to_service(struct bt_conn *conn)
 {
-	if (atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED_TO_SERVICE) == false) {
+	if (!atomic_test_and_set_bit(conn_info.flags, CONN_INFO_DISCOVERING) &&
+	    !atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED)) {
 		int err;
 		char addr[BT_ADDR_LE_STR_LEN];
 
@@ -427,23 +424,28 @@ static void subscribe_to_service(struct bt_conn *conn)
 		discover_params.type = BT_GATT_DISCOVER_PRIMARY;
 
 		err = bt_gatt_discover(conn, &discover_params);
-		if (err) {
-			TERM_ERR("Discover failed(err %d)", err);
+		if (err == -ENOMEM) {
+			LOG_DBG("out of memory, retry sub later");
+			atomic_clear_bit(conn_info.flags, CONN_INFO_DISCOVERING);
 			return;
 		}
 
-		while (atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED_TO_SERVICE) == false) {
-			k_sleep(K_MSEC(10));
-		}
+		__ASSERT(!err, "Subscribe failed (err %d)", err);
 	}
 }
 
-void update_characteristic_value(uint32_t count) {
-	memset(vnd_value, 0x00, sizeof(vnd_value));
-	snprintk(vnd_value, notification_size, "%s%u", NOTIFICATION_DATA_PREFIX,
-		 count);
+void set_tx_payload(uint32_t count) {
+	memset(tx_data, 0x00, sizeof(tx_data));
+	snprintk(tx_data, notification_size,
+		 "%s%u", NOTIFICATION_DATA_PREFIX, count);
 }
 void disconnect(void) {
+	/* check that we managed to send some notifications: this means that the
+	 * discovery/subscription procedure of the central succceeded
+	 */
+	__ASSERT(conn_info.notify_counter >= MIN_NOTIFICATIONS-1,
+		 "Only sent %d notifications", conn_info.notify_counter);
+
 	/* we should always be the ones doing the disconnecting */
 	__ASSERT_NO_MSG(conn_info.conn_ref);
 
@@ -451,7 +453,7 @@ void disconnect(void) {
 				     BT_HCI_ERR_REMOTE_POWER_OFF);
 
 	if (err) {
-		TERM_ERR("Terminating conn failed (err %d)", err);
+		LOG_ERR("Terminating conn failed (err %d)", err);
 	}
 
 	/* wait for disconnection callback */
@@ -463,7 +465,7 @@ void disconnect(void) {
 
 void validate_procedure(uint8_t procedure_id) {
 	if (atomic_test_bit(conn_info.flags, procedure_id) == false) {
-		TERM_ERR("Procedure %u did not complete at least once.", procedure_id);
+		LOG_ERR("Procedure %u did not complete at least once.", procedure_id);
 		k_oops();
 	}
 }
@@ -474,73 +476,85 @@ void test_peripheral_main(void)
 	char str[BT_UUID_STR_LEN];
 	int err;
 
-	connections_rounds = 0;
+	/* Procedure:
+	 * - advertise
+	 * - DLE
+	 * - subscribe
+	 * - wait until central subscribed
+	 * - TX notifications (keep track of sent)
+	 * - verify RX notifications
+	 */
+
+	rounds = 0;
 
 	err = bt_enable(NULL);
 	if (err) {
-		TERM_ERR("Bluetooth init failed (err %d)", err);
+		LOG_ERR("Bluetooth init failed (err %d)", err);
 		return;
 	}
+	LOG_DBG("Bluetooth initialized");
 
 	char name[10];
 	sprintf(name, "per-%d", get_device_nbr());
 	bt_set_name(name);
-	bt_ready();
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, NULL, 0, NULL, 0);
+	if (err) {
+		LOG_ERR("Advertising failed to start (err %d)", err);
+		__ASSERT_NO_MSG(err);
+	}
+	LOG_INF("Started advertising");
 
 	bt_gatt_cb_register(&gatt_callbacks);
 
 	vnd_ind_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count, &vnd_enc_uuid.uuid);
 
 	bt_uuid_to_str(&vnd_enc_uuid.uuid, str, sizeof(str));
-	TERM_PRINT("Indicate VND attr %p (UUID %s)", vnd_ind_attr, str);
+	LOG_DBG("Indicate VND attr %p (UUID %s)", vnd_ind_attr, str);
 
 	while (true) {
-		TERM_PRINT("wait conn");
-		/* Wait for connection from central */
+		LOG_DBG("Waiting for connection from central..");
 		while (!atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 			k_sleep(K_MSEC(10));
 		}
 
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-		bt_conn_foreach(BT_CONN_TYPE_LE, update_ll_max_data_length, NULL);
-#endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
+		if (IS_ENABLED(CONFIG_BT_USER_DATA_LEN_UPDATE)) {
+			LOG_DBG("Updating LL max data length..");
+			bt_conn_foreach(BT_CONN_TYPE_LE, update_ll_max_data_length, NULL);
+		}
 
+		LOG_DBG("Subscribing to central..");
 		subscribe_to_service(conn_info.conn_ref);
 
-		TERM_PRINT("wait sub");
-		while (!simulate_vnd) {
+		LOG_DBG("Waiting until central subscribes..");
+		while (!central_subscription) {
 			k_sleep(K_MSEC(10));
 		}
 
-		/* Vendor indication simulation */
-		while (simulate_vnd) {
-			if (tx_notify_counter == 0) {
+		LOG_DBG("Begin sending notifications to central..");
+		while (central_subscription) {
+			int64_t uptime_ref;
+
+			if (conn_info.tx_notify_counter == 0) {
+				/* Start countdown to disconnect
+				 * TODO: add random here */
 				uptime_ref = k_uptime_get();
 			}
 
-			update_characteristic_value(tx_notify_counter++);
-			err = bt_gatt_notify(NULL, vnd_ind_attr, vnd_value, notification_size);
+			set_tx_payload(conn_info.tx_notify_counter++);
+			err = bt_gatt_notify(NULL, vnd_ind_attr, tx_data, notification_size);
 			if (err) {
-				update_characteristic_value(tx_notify_counter--);
-				TERM_ERR("Couldn't send GATT notification");
+				set_tx_payload(conn_info.tx_notify_counter--);
+				LOG_DBG("Couldn't send GATT notification");
+				k_msleep(10);
 			} else {
-				TERM_INFO("peripheral notified %d", tx_notify_counter);
+				LOG_DBG("TX %d", conn_info.tx_notify_counter);
 			}
 
 			if (((k_uptime_get() - uptime_ref) / 1000) >= 70) {
-				TERM_PRINT("disconnect");
+				LOG_INF("Disconnecting..");
 				disconnect();
-				tx_notify_counter = 0;
 			}
-
-			/* TERM_PRINT("validate"); */
-			/* validate that all the procedures have run at least once */
-			/* validate_procedure(CONN_INFO_SECURITY_LEVEL_UPDATED); */
-			/* validate_procedure(CONN_INFO_CONN_PARAMS_UPDATED); */
-			/* validate_procedure(CONN_INFO_LL_DATA_LEN_TX_UPDATED); */
-			/* validate_procedure(CONN_INFO_LL_DATA_LEN_RX_UPDATED); */
-			/* validate_procedure(CONN_INFO_MTU_EXCHANGED); */
-			/* validate_procedure(CONN_INFO_SUBSCRIBED_TO_SERVICE); */
 		}
 	}
 }
@@ -549,7 +563,7 @@ void test_init(void)
 {
 	extern enum bst_result_t bst_result;
 
-	TERM_INFO("Initializing Test");
+	LOG_INF("Initializing Test");
 	bst_result = Passed;
 }
 
