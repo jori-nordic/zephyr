@@ -79,7 +79,7 @@ Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=11 -rs=1100 -testid=peri
 Execute "./${bsim_peripheral_exe_name}" ${bsim_args} -d=12 -rs=1200 -testid=peripheral ${test_args}
 Execute ./bs_2G4_phy_v1 -dump -v=2 -s=${simulation_id} -D=13 -sim_length=1000e6 &
 
-gdb --args "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=001 -testid=central ${test_args}
+Execute "./${bsim_central_exe_name}" ${bsim_args} -d=0 -rs=001 -testid=central ${test_args}
 
 for process_id in $process_ids; do
   wait $process_id || let "exit_code=$?"
