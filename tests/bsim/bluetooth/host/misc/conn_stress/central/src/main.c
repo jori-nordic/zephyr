@@ -447,7 +447,6 @@ static void stop_scan(void)
 
 static void connected(struct bt_conn *conn, uint8_t conn_err)
 {
-	int err;
 	struct conn_info *conn_info_ref;
 	char addr[BT_ADDR_LE_STR_LEN];
 
@@ -466,7 +465,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	conn_info_ref->conn_ref = conn_connecting;
 
 #if defined(CONFIG_BT_SMP)
-	err = bt_conn_set_security(conn, BT_SECURITY_L2);
+	int err = bt_conn_set_security(conn, BT_SECURITY_L2);
 
 	if (!err) {
 		LOG_INF("Security level is set to : %u", BT_SECURITY_L2);
@@ -474,6 +473,12 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		LOG_ERR("Failed to set security (%d).", err);
 	}
 #endif /* CONFIG_BT_SMP */
+
+	__ASSERT_NO_MSG(conn == conn_connecting);
+	if (conn == conn_connecting) {
+		conn_connecting = NULL;
+		atomic_clear_bit(status_flags, BT_IS_CONNECTING);
+	}
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -529,11 +534,6 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
 
 	atomic_set_bit(conn_info_ref->flags, CONN_INFO_CONN_PARAMS_UPDATED);
 
-	__ASSERT_NO_MSG(conn == conn_connecting);
-	if (conn == conn_connecting) {
-		conn_connecting = NULL;
-		atomic_clear_bit(status_flags, BT_IS_CONNECTING);
-	}
 }
 
 #if defined(CONFIG_BT_SMP)
