@@ -70,6 +70,7 @@ enum {
 
 enum {
 	CONN_INFO_CONN_PARAMS_UPDATED,
+	CONN_INFO_SENT_MTU_EXCHANGE,
 	CONN_INFO_MTU_EXCHANGED,
 	CONN_INFO_DISCOVERING,
 	CONN_INFO_DISCOVER_PAUSED,
@@ -615,7 +616,8 @@ static void exchange_mtu(struct bt_conn *conn, void *data)
 
 	conn_ref_index = (conn_info_ref - conn_infos);
 
-	if (atomic_test_bit(conn_info_ref->flags, CONN_INFO_MTU_EXCHANGED) == false) {
+	if (!atomic_test_bit(conn_info_ref->flags, CONN_INFO_MTU_EXCHANGED) &&
+	    !atomic_test_and_set_bit(conn_info_ref->flags, CONN_INFO_SENT_MTU_EXCHANGE)) {
 		int err;
 		char addr[BT_ADDR_LE_STR_LEN];
 
@@ -629,25 +631,10 @@ static void exchange_mtu(struct bt_conn *conn, void *data)
 		err = bt_gatt_exchange_mtu(conn, &mtu_exchange_params);
 		if (err) {
 			LOG_ERR("MTU exchange failed (err %d)", err);
+			atomic_clear_bit(conn_info_ref->flags, CONN_INFO_SENT_MTU_EXCHANGE);
 		} else {
-			LOG_DBG("Exchange pending...");
+			LOG_INF("MTU Exchange pending...");
 		}
-
-		while (conn_info_ref->conn_ref &&
-		       !atomic_test_bit(conn_info_ref->flags, CONN_INFO_MTU_EXCHANGED)) {
-			k_sleep(K_MSEC(10));
-		}
-
-		LOG_INF("Updating MTU succeeded %s", addr);
-	}
-}
-
-	}
-}
-
-		}
-
-
 	}
 }
 
@@ -712,24 +699,32 @@ static void notify_peers(struct bt_conn *conn, void *data)
 	int err;
 	struct bt_gatt_attr *vnd_ind_attr = (struct bt_gatt_attr *)data;
 	struct conn_info *conn_info_ref;
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	conn_info_ref = get_connected_conn_info_ref(conn);
 	if (conn_info_ref == NULL) {
-		LOG_INF("not connected");
+		LOG_INF("not connected: %s", addr);
+		return;
+	}
+
+	if (!atomic_test_bit(conn_info_ref->flags, CONN_INFO_MTU_EXCHANGED)) {
+		LOG_DBG("can't notify: MTU not yet exchanged");
+		/* sleep a bit to allow the exchange to take place */
+		k_msleep(100);
 		return;
 	}
 
 	memset(vnd_value, 0x00, sizeof(vnd_value));
 	snprintk(vnd_value, notification_size, "%s%u", NOTIFICATION_DATA_PREFIX,
 		 conn_info_ref->tx_notify_counter);
+	LOG_INF("notify: %s", addr);
 	err = bt_gatt_notify(conn, vnd_ind_attr, vnd_value, notification_size);
 	if (err) {
 		LOG_ERR("Couldn't send GATT notification");
 		return;
 	} else {
-		char addr[BT_ADDR_LE_STR_LEN];
-		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
 		LOG_DBG("central notified: %s %d", addr, conn_info_ref->tx_notify_counter);
 	}
 

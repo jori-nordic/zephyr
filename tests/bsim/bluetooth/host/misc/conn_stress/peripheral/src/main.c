@@ -464,6 +464,10 @@ void test_peripheral_main(void)
 			k_sleep(K_MSEC(10));
 		}
 
+		while (!atomic_test_bit(conn_info.flags, CONN_INFO_MTU_EXCHANGED)) {
+			k_sleep(K_MSEC(10));
+		}
+
 		LOG_DBG("Begin sending notifications to central..");
 		while (central_subscription &&
 		       atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
