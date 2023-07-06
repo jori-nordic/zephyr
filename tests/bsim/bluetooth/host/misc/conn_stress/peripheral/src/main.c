@@ -64,7 +64,6 @@ static struct bt_uuid_128 vnd_enc_uuid =
 enum {
 	CONN_INFO_CONNECTED,
 	CONN_INFO_SECURITY_LEVEL_UPDATED,
-	CONN_INFO_CONN_PARAMS_UPDATED,
 	CONN_INFO_MTU_EXCHANGED,
 	CONN_INFO_DISCOVERING,
 	CONN_INFO_SUBSCRIBED,
@@ -182,24 +181,11 @@ static bool le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	LOG_DBG("LE conn param req: %s int (0x%04x (~%u ms), 0x%04x (~%u ms)) lat %d to %d",
-		   addr, param->interval_min, (uint32_t)(param->interval_min * 1.25),
-		   param->interval_max, (uint32_t)(param->interval_max * 1.25), param->latency,
-		   param->timeout);
+		addr, param->interval_min, (uint32_t)(param->interval_min * 1.25),
+		param->interval_max, (uint32_t)(param->interval_max * 1.25), param->latency,
+		param->timeout);
 
 	return true;
-}
-
-static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t latency,
-			     uint16_t timeout)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	LOG_INF("LE conn param updated: %s int 0x%04x (~%u ms) lat %d to %d", addr, interval,
-		  (uint32_t)(interval * 1.25), latency, timeout);
-
-	atomic_set_bit(conn_info.flags, CONN_INFO_CONN_PARAMS_UPDATED);
 }
 
 #if defined(CONFIG_BT_SMP)
@@ -223,7 +209,6 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
 	.le_param_req = le_param_req,
-	.le_param_updated = le_param_updated,
 #if defined(CONFIG_BT_SMP)
 	.security_changed = security_changed,
 #endif /* CONFIG_BT_SMP */
@@ -248,9 +233,7 @@ static uint8_t rx_notification(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	received_counter = strtoul(data_ptr, NULL, 0);
-
-	LOG_DBG("[NOTIFICATION] addr %s data %s length %u cnt %u",
-		addr, data, length, received_counter);
+	LOG_INF("RX %d", received_counter);
 
 	__ASSERT(atomic_get(&conn_info.notify_counter) == received_counter,
 		 "expected counter : %u , received counter : %u",
@@ -346,8 +329,8 @@ nomem:
 
 static void subscribe_to_service(struct bt_conn *conn)
 {
-	if (!atomic_test_and_set_bit(conn_info.flags, CONN_INFO_DISCOVERING) &&
-	    !atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED)) {
+	while (!atomic_test_and_set_bit(conn_info.flags, CONN_INFO_DISCOVERING) &&
+	       !atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED)) {
 		int err;
 		char addr[BT_ADDR_LE_STR_LEN];
 
@@ -364,25 +347,23 @@ static void subscribe_to_service(struct bt_conn *conn)
 		if (err == -ENOMEM) {
 			LOG_DBG("out of memory, retry sub later");
 			atomic_clear_bit(conn_info.flags, CONN_INFO_DISCOVERING);
-			return;
 		}
 
 		__ASSERT(!err, "Subscribe failed (err %d)", err);
+
+		while (atomic_test_bit(conn_info.flags, CONN_INFO_DISCOVERING) &&
+		       !atomic_test_bit(conn_info.flags, CONN_INFO_SUBSCRIBED)) {
+			k_sleep(K_MSEC(10));
+		}
 	}
 }
 
 void set_tx_payload(uint32_t count) {
 	memset(tx_data, 0x00, sizeof(tx_data));
-	snprintk(tx_data, notification_size,
-		 "%s%u", NOTIFICATION_DATA_PREFIX, count);
+	snprintk(tx_data, notification_size, "%s%u", NOTIFICATION_DATA_PREFIX, count);
 }
-void disconnect(void) {
-	/* check that we managed to send some notifications: this means that the
-	 * discovery/subscription procedure of the central succceeded
-	 */
-	__ASSERT(atomic_get(&conn_info.notify_counter) >= MIN_NOTIFICATIONS-1,
-		 "Only sent %d notifications", atomic_get(&conn_info.notify_counter));
 
+void disconnect(void) {
 	/* we should always be the ones doing the disconnecting */
 	__ASSERT_NO_MSG(conn_info.conn_ref);
 
@@ -394,35 +375,15 @@ void disconnect(void) {
 	}
 
 	/* wait for disconnection callback */
-	/* TODO: use wait-for-flag */
 	while (atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 		k_sleep(K_MSEC(10));
 	}
 }
 
-void validate_procedure(uint8_t procedure_id) {
-	if (atomic_test_bit(conn_info.flags, procedure_id) == false) {
-		LOG_ERR("Procedure %u did not complete at least once.", procedure_id);
-		k_oops();
-	}
-}
-
 void test_peripheral_main(void)
 {
-	struct bt_gatt_attr *vnd_ind_attr;
-	char str[BT_UUID_STR_LEN];
+	struct bt_gatt_attr *vnd_attr;
 	int err;
-
-	/* Procedure:
-	 * - advertise
-	 * - DLE
-	 * - subscribe
-	 * - wait until central subscribed
-	 * - TX notifications (keep track of sent)
-	 * - verify RX notifications
-	 */
-
-	rounds = 0;
 
 	err = bt_enable(NULL);
 	if (err) {
@@ -444,10 +405,7 @@ void test_peripheral_main(void)
 
 	bt_gatt_cb_register(&gatt_callbacks);
 
-	vnd_ind_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count, &vnd_enc_uuid.uuid);
-
-	bt_uuid_to_str(&vnd_enc_uuid.uuid, str, sizeof(str));
-	LOG_DBG("Indicate VND attr %p (UUID %s)", vnd_ind_attr, str);
+	vnd_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count, &vnd_enc_uuid.uuid);
 
 	while (true) {
 		LOG_DBG("Waiting for connection from central..");
@@ -456,7 +414,6 @@ void test_peripheral_main(void)
 		}
 
 		LOG_DBG("Subscribing to central..");
-		/* TODO: should this be resumable? */
 		subscribe_to_service(conn_info.conn_ref);
 
 		LOG_DBG("Waiting until central subscribes..");
@@ -468,12 +425,12 @@ void test_peripheral_main(void)
 			k_sleep(K_MSEC(10));
 		}
 
-		LOG_DBG("Begin sending notifications to central..");
+		LOG_INF("Begin sending notifications to central..");
 		while (central_subscription &&
 		       atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 
 			set_tx_payload(atomic_get(&conn_info.tx_notify_counter));
-			err = bt_gatt_notify(NULL, vnd_ind_attr, tx_data, notification_size);
+			err = bt_gatt_notify(NULL, vnd_attr, tx_data, notification_size);
 			if (err) {
 				if (atomic_get(&conn_info.tx_notify_counter) > 0) {
 					atomic_dec(&conn_info.tx_notify_counter);
@@ -485,8 +442,8 @@ void test_peripheral_main(void)
 				LOG_INF("TX %d", atomic_get(&conn_info.tx_notify_counter));
 			}
 
-			if (atomic_get(&conn_info.tx_notify_counter) > 200 &&
-			    atomic_get(&conn_info.notify_counter) > 200) {
+			if (atomic_get(&conn_info.tx_notify_counter) > MIN_NOTIFICATIONS &&
+			    atomic_get(&conn_info.notify_counter) > MIN_NOTIFICATIONS) {
 				LOG_INF("Disconnecting..");
 				disconnect();
 			}
