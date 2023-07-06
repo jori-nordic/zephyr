@@ -288,7 +288,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 	bt_uuid_to_str(params->uuid, uuid_str, sizeof(uuid_str));
 	LOG_DBG("UUID found : %s", uuid_str);
 
-	LOG_DBG("[ATTRIBUTE] handle %u", attr->handle);
+	LOG_INF("[ATTRIBUTE] handle %u", attr->handle);
 
 	struct conn_info *conn_info_ref = get_connected_conn_info_ref(conn);
 	__ASSERT_NO_MSG(conn_info_ref);
@@ -460,7 +460,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	conn_info_ref->conn_ref = conn_connecting;
 
-#if defined(CONFIG_BT_SMP)
+#if 0
 	int err = bt_conn_set_security(conn, BT_SECURITY_L2);
 
 	if (!err) {
@@ -488,7 +488,12 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	conn_info_ref = get_conn_info_ref(conn);
 	__ASSERT_NO_MSG(conn_info_ref->conn_ref != NULL);
-	__ASSERT_NO_MSG(reason == BT_HCI_ERR_REMOTE_POWER_OFF);
+
+	bool valid_reason =
+		reason == BT_HCI_ERR_REMOTE_POWER_OFF ||
+		reason == BT_HCI_ERR_LOCALHOST_TERM_CONN;
+
+	__ASSERT(valid_reason, "Disconnected (reason 0x%02x)", reason);
 
 	bt_conn_unref(conn);
 	clear_info(conn_info_ref);
@@ -542,6 +547,9 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 	__ASSERT(!err, "Security for %s failed", addr);
 	LOG_INF("Security for %s changed: level %u", addr, level);
 
+	if (err) {
+		LOG_ERR("Security failed, disconnecting");
+		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_POWER_OFF);
 	}
 }
 #endif /* CONFIG_BT_SMP */

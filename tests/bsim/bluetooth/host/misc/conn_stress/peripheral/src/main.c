@@ -455,8 +455,8 @@ void test_peripheral_main(void)
 			k_sleep(K_MSEC(10));
 		}
 
-
 		LOG_DBG("Subscribing to central..");
+		/* TODO: should this be resumable? */
 		subscribe_to_service(conn_info.conn_ref);
 
 		LOG_DBG("Waiting until central subscribes..");
