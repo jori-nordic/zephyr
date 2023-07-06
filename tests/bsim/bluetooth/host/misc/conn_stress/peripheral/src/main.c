@@ -77,8 +77,8 @@ enum {
 struct active_conn_info {
 	ATOMIC_DEFINE(flags, CONN_INFO_NUM_FLAGS);
 	struct bt_conn *conn_ref;
-	uint32_t notify_counter;
-	uint32_t tx_notify_counter;
+	atomic_t notify_counter;
+	atomic_t tx_notify_counter;
 #if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
 	struct bt_conn_le_data_len_param le_data_len_param;
 #endif
@@ -145,6 +145,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	rounds++;
 	conn_info.conn_ref = conn;
 
+	atomic_set(&conn_info.tx_notify_counter, 0);
+	atomic_set(&conn_info.notify_counter, 0);
 	atomic_set_bit(conn_info.flags, CONN_INFO_CONNECTED);
 
 	LOG_INF("Connection %p established : %s", conn, addr);
@@ -321,10 +323,11 @@ static uint8_t rx_notification(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 	LOG_DBG("[NOTIFICATION] addr %s data %s length %u cnt %u",
 		addr, data, length, received_counter);
 
-	__ASSERT(conn_info.notify_counter == received_counter,
-		 "expected counter : %u , received counter : %u", conn_info.notify_counter,
-		 received_counter);
-	conn_info.notify_counter++;
+	__ASSERT(atomic_get(&conn_info.notify_counter) == received_counter,
+		 "expected counter : %u , received counter : %u",
+		 atomic_get(&conn_info.notify_counter), received_counter);
+
+	atomic_inc(&conn_info.notify_counter);
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -448,8 +451,8 @@ void disconnect(void) {
 	/* check that we managed to send some notifications: this means that the
 	 * discovery/subscription procedure of the central succceeded
 	 */
-	__ASSERT(conn_info.notify_counter >= MIN_NOTIFICATIONS-1,
-		 "Only sent %d notifications", conn_info.notify_counter);
+	__ASSERT(atomic_get(&conn_info.notify_counter) >= MIN_NOTIFICATIONS-1,
+		 "Only sent %d notifications", atomic_get(&conn_info.notify_counter));
 
 	/* we should always be the ones doing the disconnecting */
 	__ASSERT_NO_MSG(conn_info.conn_ref);
@@ -537,26 +540,24 @@ void test_peripheral_main(void)
 		}
 
 		LOG_DBG("Begin sending notifications to central..");
-		while (central_subscription) {
-			int64_t uptime_ref;
+		while (central_subscription &&
+		       atomic_test_bit(conn_info.flags, CONN_INFO_CONNECTED)) {
 
-			if (conn_info.tx_notify_counter == 0) {
-				/* Start countdown to disconnect
-				 * TODO: add random here */
-				uptime_ref = k_uptime_get();
-			}
-
-			set_tx_payload(conn_info.tx_notify_counter++);
+			set_tx_payload(atomic_get(&conn_info.tx_notify_counter));
 			err = bt_gatt_notify(NULL, vnd_ind_attr, tx_data, notification_size);
 			if (err) {
-				set_tx_payload(conn_info.tx_notify_counter--);
+				if (atomic_get(&conn_info.tx_notify_counter) > 0) {
+					atomic_dec(&conn_info.tx_notify_counter);
+				}
 				LOG_DBG("Couldn't send GATT notification");
 				k_msleep(10);
 			} else {
-				LOG_DBG("TX %d", conn_info.tx_notify_counter);
+				atomic_inc(&conn_info.tx_notify_counter);
+				LOG_INF("TX %d", atomic_get(&conn_info.tx_notify_counter));
 			}
 
-			if (((k_uptime_get() - uptime_ref) / 1000) >= 70) {
+			if (atomic_get(&conn_info.tx_notify_counter) > 200 &&
+			    atomic_get(&conn_info.notify_counter) > 200) {
 				LOG_INF("Disconnecting..");
 				disconnect();
 			}
