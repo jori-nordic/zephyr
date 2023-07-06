@@ -162,6 +162,11 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		/* TODO: set PASS here, set FAIL by default */
 		LOG_INF("Number of conn/disconn cycles reached, stopping advertiser...");
 		bt_le_adv_stop();
+
+		/* TODO: check no of RX and TX notifications (per conn) */
+		LOG_INF("Test passed");
+		extern enum bst_result_t bst_result;
+		bst_result = Passed;
 	}
 }
 
@@ -564,7 +569,7 @@ void test_init(void)
 	extern enum bst_result_t bst_result;
 
 	LOG_INF("Initializing Test");
-	bst_result = Passed;
+	bst_result = Failed;
 }
 
 static void test_args(int argc, char **argv)
