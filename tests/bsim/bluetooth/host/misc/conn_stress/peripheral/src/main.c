@@ -154,18 +154,23 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
-	LOG_ERR("Disconnected (reason 0x%02x)", reason);
-	__ASSERT(reason == BT_HCI_ERR_LOCALHOST_TERM_CONN, "Disconnected (reason 0x%02x)", reason);
+	LOG_DBG("Disconnected (reason 0x%02x)", reason);
 
-	atomic_clear_bit(conn_info.flags, CONN_INFO_CONNECTED); /* FIXME: is this necessary? */
+	/* With a lot of devices, it is possible that the central doesn't see
+	 * the disconnect packet.
+	 */
+	bool valid_reason =
+		reason == BT_HCI_ERR_LOCALHOST_TERM_CONN ||
+		reason == BT_HCI_ERR_CONN_TIMEOUT;
+
+	__ASSERT(valid_reason, "Disconnected (reason 0x%02x)", reason);
+
 	memset(&conn_info, 0x00, sizeof(struct active_conn_info));
 
 	if (rounds >= TEST_ROUNDS) {
-		/* TODO: set PASS here, set FAIL by default */
 		LOG_INF("Number of conn/disconn cycles reached, stopping advertiser...");
 		bt_le_adv_stop();
 
-		/* TODO: check no of RX and TX notifications (per conn) */
 		LOG_INF("Test passed");
 		extern enum bst_result_t bst_result;
 		bst_result = Passed;
