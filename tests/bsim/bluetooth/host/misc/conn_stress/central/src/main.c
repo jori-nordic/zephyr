@@ -742,6 +742,7 @@ static void update_ll_max_data_length(struct bt_conn *conn, void *data)
 static void subscribe_to_service(struct bt_conn *conn, void *data)
 {
 	struct conn_info *conn_info_ref;
+	int *p_err = (int*)data;
 
 	conn_info_ref = get_connected_conn_info_ref(conn);
 	if (conn_info_ref == NULL) {
@@ -767,6 +768,13 @@ static void subscribe_to_service(struct bt_conn *conn, void *data)
 
 		LOG_INF("subscribe to %s", addr);
 		err = bt_gatt_discover(conn, &conn_info_ref->discover_params);
+		if (*p_err == 0) {
+			/* don't overwrite `err` if it was previously set. it is
+			 * cleared by the caller.
+			 */
+			*p_err = err;
+		}
+
 		if (err == -ENOMEM || err == -ENOTCONN) {
 			return;
 		}
@@ -848,8 +856,17 @@ void test_central_main(void)
 #if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
 		bt_conn_foreach(BT_CONN_TYPE_LE, update_ll_max_data_length, NULL);
 #endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
-		bt_conn_foreach(BT_CONN_TYPE_LE, subscribe_to_service, NULL);
-		bt_conn_foreach(BT_CONN_TYPE_LE, notify_peers, vnd_ind_attr);
+		err = 0;
+		bt_conn_foreach(BT_CONN_TYPE_LE, subscribe_to_service, &err);
+		if (!err) {
+			bt_conn_foreach(BT_CONN_TYPE_LE, notify_peers, vnd_ind_attr);
+		} else {
+			/* Allow the sub procedure to complete. Else the
+			 * notifications use up all the buffers and it can never
+			 * complete in time.
+			 */
+			LOG_ERR("subscription failed: %d, not notifying", err);
+		}
 		k_msleep(10);
 	}
 }
