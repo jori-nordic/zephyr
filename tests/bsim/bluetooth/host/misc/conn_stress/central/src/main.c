@@ -24,7 +24,7 @@
 #include <zephyr/types.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(peripheral, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(central, LOG_LEVEL_INF);
 
 #include "bstests.h"
 #include "bs_types.h"
