@@ -74,6 +74,7 @@ enum {
 	CONN_INFO_LL_DATA_LEN_RX_UPDATED,
 	CONN_INFO_MTU_EXCHANGED,
 	CONN_INFO_DISCOVERING,
+	CONN_INFO_DISCOVER_PAUSED,
 	CONN_INFO_SUBSCRIBED,
 	/* Total number of flags - must be at the end of the enum */
 	CONN_INFO_NUM_FLAGS,
@@ -296,6 +297,8 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 	struct conn_info *conn_info_ref = get_connected_conn_info_ref(conn);
 	__ASSERT_NO_MSG(conn_info_ref);
 
+	atomic_clear_bit(conn_info_ref->flags, CONN_INFO_DISCOVER_PAUSED);
+
 	if (conn_info_ref->discover_params.type == BT_GATT_DISCOVER_PRIMARY) {
 		LOG_DBG("Primary Service Found");
 		memcpy(&conn_info_ref->uuid, PERIPHERAL_CHARACTERISTIC_UUID, sizeof(conn_info_ref->uuid));
@@ -352,11 +355,11 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 	return BT_GATT_ITER_STOP;
 
 retry:
-	/* if we're out of buffers or metadata contexts, restart discovery
+	/* if we're out of buffers or metadata contexts, continue discovery
 	 * later.
 	 */
-	LOG_DBG("out of memory/not connected, retry sub later");
-	atomic_clear_bit(conn_info_ref->flags, CONN_INFO_DISCOVERING);
+	LOG_INF("out of memory/not connected, continuing sub later");
+	atomic_set_bit(conn_info_ref->flags, CONN_INFO_DISCOVER_PAUSED);
 
 	return BT_GATT_ITER_STOP;
 }
@@ -750,23 +753,35 @@ static void subscribe_to_service(struct bt_conn *conn, void *data)
 		return;
 	}
 
-	if (!atomic_test_and_set_bit(conn_info_ref->flags, CONN_INFO_DISCOVERING) &&
-	    !atomic_test_bit(conn_info_ref->flags, CONN_INFO_SUBSCRIBED)) {
+	/* start subscription procedure if:
+	 * - we haven't started it yet for this conn
+	 * - it was suspended due to a lack of resources
+	 */
+	if (!atomic_test_bit(conn_info_ref->flags, CONN_INFO_SUBSCRIBED) &&
+	    (!atomic_test_bit(conn_info_ref->flags, CONN_INFO_DISCOVERING) ||
+	     atomic_test_bit(conn_info_ref->flags, CONN_INFO_DISCOVER_PAUSED))) {
 		int err;
 		char addr[BT_ADDR_LE_STR_LEN];
 
 		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-		memcpy(&conn_info_ref->uuid, PERIPHERAL_SERVICE_UUID, sizeof(conn_info_ref->uuid));
-		memset(&conn_info_ref->discover_params, 0, sizeof(conn_info_ref->discover_params));
+		/* If discovery hasn't started yet, load params. If it was already started, then not
+		 * touching the params will resume discovery at the attribute it was stopped at.
+		 */
+		if (!atomic_test_and_set_bit(conn_info_ref->flags, CONN_INFO_DISCOVERING)) {
+			memcpy(&conn_info_ref->uuid, PERIPHERAL_SERVICE_UUID, sizeof(conn_info_ref->uuid));
+			memset(&conn_info_ref->discover_params, 0, sizeof(conn_info_ref->discover_params));
 
-		conn_info_ref->discover_params.uuid = &conn_info_ref->uuid.uuid;
-		conn_info_ref->discover_params.func = discover_func;
-		conn_info_ref->discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
-		conn_info_ref->discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
-		conn_info_ref->discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+			conn_info_ref->discover_params.uuid = &conn_info_ref->uuid.uuid;
+			conn_info_ref->discover_params.func = discover_func;
+			conn_info_ref->discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+			conn_info_ref->discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+			conn_info_ref->discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+			LOG_INF("start discovery of %s", addr);
+		} else {
+			LOG_INF("resume discovery of %s", addr);
+		}
 
-		LOG_INF("subscribe to %s", addr);
 		err = bt_gatt_discover(conn, &conn_info_ref->discover_params);
 		if (*p_err == 0) {
 			/* don't overwrite `err` if it was previously set. it is
@@ -848,7 +863,7 @@ void test_central_main(void)
 			if (atomic_test_bit(status_flags, BT_IS_CONNECTING)) {
 				char addr[BT_ADDR_LE_STR_LEN];
 				bt_addr_le_to_str(bt_conn_get_dst(conn_connecting), addr, sizeof(addr));
-				LOG_DBG("already connecting to: %s", addr);
+				LOG_INF("already connecting to: %s", addr);
 			}
 		}
 
