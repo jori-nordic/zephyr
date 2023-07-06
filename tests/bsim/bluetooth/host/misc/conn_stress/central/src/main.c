@@ -70,8 +70,6 @@ enum {
 
 enum {
 	CONN_INFO_CONN_PARAMS_UPDATED,
-	CONN_INFO_LL_DATA_LEN_TX_UPDATED,
-	CONN_INFO_LL_DATA_LEN_RX_UPDATED,
 	CONN_INFO_MTU_EXCHANGED,
 	CONN_INFO_DISCOVERING,
 	CONN_INFO_DISCOVER_PAUSED,
@@ -83,9 +81,6 @@ enum {
 ATOMIC_DEFINE(status_flags, BT_IS_NUM_FLAGS);
 static uint8_t volatile conn_count;
 static struct bt_conn *conn_connecting;
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-static struct bt_conn_le_data_len_param le_data_len_param;
-#endif
 static struct bt_gatt_exchange_params mtu_exchange_params;
 
 struct conn_info {
@@ -545,34 +540,10 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 
 	__ASSERT(!err, "Security for %s failed", addr);
 	LOG_INF("Security for %s changed: level %u", addr, level);
+
+	}
 }
 #endif /* CONFIG_BT_SMP */
-
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-static void le_data_len_updated(struct bt_conn *conn, struct bt_conn_le_data_len_info *info)
-{
-	int conn_ref_index;
-	struct conn_info *conn_info_ref;
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	LOG_DBG("Data length updated: %s max tx %u (%u us) max rx %u (%u us)", addr,
-		info->tx_max_len, info->tx_max_time, info->rx_max_len, info->rx_max_time);
-
-	conn_info_ref = get_conn_info_ref(conn);
-	__ASSERT_NO_MSG(conn_info_ref);
-
-	if (info->rx_max_len == BT_GAP_DATA_LEN_MAX) {
-		LOG_INF("RX Data length updated %s: conn %u", addr);
-		atomic_set_bit(conn_info_ref->flags, CONN_INFO_LL_DATA_LEN_RX_UPDATED);
-	}
-	if (info->tx_max_len == BT_GAP_DATA_LEN_MAX) {
-		LOG_INF("TX Data length updated %s: conn %u", addr);
-		atomic_set_bit(conn_info_ref->flags, CONN_INFO_LL_DATA_LEN_TX_UPDATED);
-	}
-}
-#endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 
 static void identity_resolved(struct bt_conn *conn, const bt_addr_le_t *rpa,
 			      const bt_addr_le_t *identity)
@@ -598,9 +569,6 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 #if defined(CONFIG_BT_SMP)
 	.security_changed = security_changed,
 #endif /* CONFIG_BT_SMP */
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-	.le_data_len_updated = le_data_len_updated,
-#endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 	.identity_resolved = identity_resolved,
 };
 
@@ -674,73 +642,14 @@ static void exchange_mtu(struct bt_conn *conn, void *data)
 	}
 }
 
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-static uint16_t tx_time_calc(uint8_t phy, uint16_t max_len)
-{
-	/* Access address + header + payload + MIC + CRC */
-	uint16_t total_len = 4 + 2 + max_len + 4 + 3;
-
-	switch (phy) {
-	case BT_GAP_LE_PHY_1M:
-		/* 1 byte preamble, 8 us per byte */
-		return 8 * (1 + total_len);
-	case BT_GAP_LE_PHY_2M:
-		/* 2 byte preamble, 4 us per byte */
-		return 4 * (2 + total_len);
-	case BT_GAP_LE_PHY_CODED:
-		/* S8: Preamble + CI + TERM1 + 64 us per byte + TERM2 */
-		return 80 + 16 + 24 + 64 * (total_len) + 24;
-	default:
-		return 0;
 	}
 }
 
-static void update_ll_max_data_length(struct bt_conn *conn, void *data)
-{
-	int conn_ref_index;
-	struct conn_info *conn_info_ref;
-
-	conn_info_ref = get_connected_conn_info_ref(conn);
-	if (conn_info_ref == NULL) {
-		LOG_INF("not connected");
-		return;
-	}
-
-	conn_ref_index = (conn_info_ref - conn_infos);
-
-	if (atomic_test_bit(conn_info_ref->flags, CONN_INFO_LL_DATA_LEN_TX_UPDATED) == false) {
-		int err;
-		char addr[BT_ADDR_LE_STR_LEN];
-
-		le_data_len_param = *BT_LE_DATA_LEN_PARAM_DEFAULT;
-
-		/* Update LL transmission payload size in bytes*/
-		le_data_len_param.tx_max_len = BT_GAP_DATA_LEN_MAX;
-		/* Update LL transmission payload time in us*/
-		le_data_len_param.tx_max_time =
-			tx_time_calc(BT_GAP_LE_PHY_2M, le_data_len_param.tx_max_len);
-		LOG_DBG("Calculated tx time: %d", le_data_len_param.tx_max_time);
-
-		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-		LOG_DBG("Updating LL data length for addr %s conn %u", addr, conn_ref_index);
-		err = bt_conn_le_data_len_update(conn, &le_data_len_param);
-		if (err) {
-			LOG_ERR("Updating LL data length failed addr %s conn %u", addr,
-				 conn_ref_index);
-			return;
 		}
 
-		while (atomic_test_bit(conn_info_ref->flags, CONN_INFO_LL_DATA_LEN_TX_UPDATED) ==
-		       false) {
-			k_sleep(K_MSEC(10));
-		}
 
-		LOG_INF("Updating LL data length succeeded addr %s conn %u", addr,
-			     conn_ref_index);
 	}
 }
-#endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
 
 static void subscribe_to_service(struct bt_conn *conn, void *data)
 {
@@ -868,9 +777,7 @@ void test_central_main(void)
 		}
 
 		bt_conn_foreach(BT_CONN_TYPE_LE, exchange_mtu, NULL);
-#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
-		bt_conn_foreach(BT_CONN_TYPE_LE, update_ll_max_data_length, NULL);
-#endif /* CONFIG_BT_USER_DATA_LEN_UPDATE */
+
 		err = 0;
 		bt_conn_foreach(BT_CONN_TYPE_LE, subscribe_to_service, &err);
 		if (!err) {
