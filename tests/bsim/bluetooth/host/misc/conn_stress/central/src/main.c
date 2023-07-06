@@ -263,6 +263,8 @@ static uint8_t notify_func(struct bt_conn *conn, struct bt_gatt_subscribe_params
 	LOG_DBG("[NOTIFICATION] addr %s data %s length %u cnt %u",
 		addr, data, length, received_counter);
 
+	LOG_HEXDUMP_DBG(data, length, "RX");
+
 	__ASSERT(conn_info_ref->notify_counter == received_counter,
 		 "addr %s expected counter : %u , received counter : %u", addr, conn_info_ref->notify_counter,
 		 received_counter);
@@ -763,10 +765,9 @@ static void subscribe_to_service(struct bt_conn *conn, void *data)
 		conn_info_ref->discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
 		conn_info_ref->discover_params.type = BT_GATT_DISCOVER_PRIMARY;
 
+		LOG_INF("subscribe to %s", addr);
 		err = bt_gatt_discover(conn, &conn_info_ref->discover_params);
 		if (err == -ENOMEM || err == -ENOTCONN) {
-			LOG_DBG("out of memory, retry sub later");
-			atomic_clear_bit(conn_info_ref->flags, CONN_INFO_DISCOVERING);
 			return;
 		}
 
