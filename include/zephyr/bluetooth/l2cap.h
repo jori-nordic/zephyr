@@ -344,6 +344,17 @@ struct bt_l2cap_chan_ops {
 	 */
 	int (*recv)(struct bt_l2cap_chan *chan, struct net_buf *buf);
 
+	/** @brief We already have `recv` at home.
+	 *
+	 * Stack-internal. Users will be unrefed.
+	 *
+	 *  @param chan The channel receiving data.
+	 *  @param buf Buffer containing incoming data. The ref is yours, remember to unref.
+	 *
+	 *  @return 0 in case of success or negative value in case of error.
+	 */
+	int (*recv_int)(struct bt_l2cap_chan *chan, struct net_buf *buf);
+
 	/** @brief Channel sent callback
 	 *
 	 *  If this callback is provided it will be called whenever a SDU has

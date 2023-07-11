@@ -2707,6 +2707,15 @@ static void l2cap_chan_recv(struct bt_l2cap_chan *chan, struct net_buf *buf,
 
 	__ASSERT_NO_MSG(buf->ref == 1);
 
+	/* If the user is the stack, move the ownership. We can then re-use the
+	 * buffer, working around deadlocks caused by using a global pool.
+	 */
+	if (chan->ops->recv_int) {
+		chan->ops->recv_int(chan, buf);
+
+		return;
+	}
+
 	chan->ops->recv(chan, buf);
 	net_buf_unref(buf);
 
