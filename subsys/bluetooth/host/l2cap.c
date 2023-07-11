@@ -2703,7 +2703,10 @@ static void l2cap_chan_recv(struct bt_l2cap_chan *chan, struct net_buf *buf,
 	}
 #endif /* CONFIG_BT_L2CAP_DYNAMIC_CHANNEL */
 
-	LOG_DBG("chan %p len %u", chan, buf->len);
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(chan->conn), addr, sizeof(addr));
+
+	LOG_DBG("chan %p addr %s len %u", chan, addr, buf->len);
 
 	__ASSERT_NO_MSG(buf->ref == 1);
 
