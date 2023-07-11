@@ -402,7 +402,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	conn_info_ref->conn_ref = conn_connecting;
 
-#if 0
+#if 1
 	int err = bt_conn_set_security(conn, BT_SECURITY_L2);
 
 	if (!err) {
