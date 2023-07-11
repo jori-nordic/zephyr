@@ -1735,6 +1735,10 @@ static void smp_timeout(struct k_work *work)
 static void smp_send(struct bt_smp *smp, struct net_buf *buf,
 		     bt_conn_tx_cb_t cb, void *user_data)
 {
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(smp->chan.chan.conn), addr, sizeof(addr));
+
+	LOG_INF("%s %s", __func__, addr);
 	int err = bt_l2cap_send_cb(smp->chan.chan.conn, BT_L2CAP_CID_SMP, buf, cb, NULL);
 
 	if (err) {
