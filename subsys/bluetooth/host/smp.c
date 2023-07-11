@@ -1744,7 +1744,7 @@ static void smp_timeout(struct k_work *work)
 
 	LOG_ERR("SMP Timeout %s", addr);
 
-	/* k_oops(); */
+	k_oops();
 	smp_pairing_complete(smp, BT_SMP_ERR_UNSPECIFIED);
 
 	/* smp_pairing_complete clears flags so setting timeout flag must come
@@ -1769,6 +1769,7 @@ static void smp_send(struct bt_smp *smp, struct net_buf *buf,
 			 * OR we could reschedule and poll? on TX contexts.
 			 */
 			LOG_ERR("Ran out of TX buffers or contexts.");
+			k_oops();
 		}
 
 		net_buf_unref(buf);
