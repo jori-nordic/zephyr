@@ -209,6 +209,9 @@ struct bt_smp {
 
 	/* Used Bluetooth authentication callbacks. */
 	atomic_ptr_t			auth_cb;
+
+	/* Incoming buffer that will be re-used */
+	struct net_buf			*rx_buf;
 };
 
 static unsigned int fixed_passkey = BT_PASSKEY_INVALID;
@@ -493,19 +496,37 @@ static struct net_buf *smp_create_pdu(struct bt_smp *smp, uint8_t op, size_t len
 	if (atomic_test_bit(smp->flags, SMP_FLAG_TIMEOUT)) {
 		timeout = K_NO_WAIT;
 	} else {
-		timeout = SMP_TIMEOUT;
+		/* use smaller timeout if hci RX buf exists */
+		if (smp->rx_buf) {
+			timeout = K_SECONDS(5);
+			LOG_INF("timeout: 5");
+		} else {
+			timeout = SMP_TIMEOUT;
+			LOG_INF("timeout: 30");
+		}
 	}
 
-	/* Use smaller timeout if returning an error since that could be
-	 * caused by lack of buffers.
-	 */
 	buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);
 	if (!buf) {
-		/* If it was not possible to allocate a buffer within the
-		 * timeout marked it as timed out.
-		 */
-		atomic_set_bit(smp->flags, SMP_FLAG_TIMEOUT);
-		return NULL;
+		if (smp->rx_buf) {
+			/* re-use RX buffer for TX */
+			/* TODO: DBG */
+			LOG_INF("Failed to allocate from global pool, re-using RX buf");
+
+			/* take a lock on the buffer */
+			buf = net_buf_ref(smp->rx_buf);
+			net_buf_reset(buf);
+
+			size_t reserve = sizeof(struct bt_l2cap_hdr);
+			reserve += sizeof(struct bt_hci_acl_hdr) + BT_BUF_RESERVE;
+			net_buf_reserve(buf, reserve);
+		} else {
+			/* If it was not possible to allocate a buffer within the
+			 * timeout, mark the session as timed out.
+			 */
+			atomic_set_bit(smp->flags, SMP_FLAG_TIMEOUT);
+			return NULL;
+		}
 	}
 
 	hdr = net_buf_add(buf, sizeof(*hdr));
@@ -4498,6 +4519,35 @@ static int bt_smp_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	return 0;
 }
 
+static int smp_recv_v2(struct bt_l2cap_chan *chan, struct net_buf *buf)
+{
+	struct bt_smp *smp = CONTAINER_OF(chan, struct bt_smp, chan);
+	int err;
+
+	/* Ensure we keep a lock on the buffer for re-using it until we finished
+	 * handling the opcode. Some handlers try to enqueue & send multiple
+	 * buffers, locking a buffer will allow us to re-use it multiple times
+	 * before it is released back into the HCI RX pool.
+	 */
+	smp->rx_buf = net_buf_ref(buf);
+
+	err = bt_smp_recv(chan, buf);
+
+	LOG_WRN("unref %p", buf);
+	net_buf_unref(buf);	/* global smp lock on buffer */
+	net_buf_unref(buf);	/* original unref */
+	/* either:
+	 * - `buf` wasn't re-used: it gets destroyed here
+	 * - `buf` is re-used, is now sitting in tx_q
+	 *   -> will get destroyed by hci driver after tx to LL
+	 */
+	__ASSERT_NO_MSG(buf->ref <= 1);
+
+	smp->rx_buf = NULL;
+
+	return err;
+}
+
 static void bt_smp_pkey_ready(const uint8_t *pkey)
 {
 	int i;
@@ -5884,7 +5934,7 @@ static int bt_smp_accept(struct bt_conn *conn, struct bt_l2cap_chan **chan)
 		.connected = bt_smp_connected,
 		.disconnected = bt_smp_disconnected,
 		.encrypt_change = bt_smp_encrypt_change,
-		.recv = bt_smp_recv,
+		.recv_int = smp_recv_v2,
 	};
 
 	LOG_DBG("conn %p handle %u", conn, conn->handle);
