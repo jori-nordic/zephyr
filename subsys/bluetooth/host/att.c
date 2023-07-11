@@ -103,6 +103,7 @@ struct bt_att_chan {
 	ATOMIC_DEFINE(flags, ATT_NUM_FLAGS);
 	struct bt_att_req	*req;
 	struct k_fifo		tx_queue;
+	struct net_buf		*transaction_buf;
 	struct bt_att_tx_meta_data transaction_meta;
 	struct k_work_delayable	timeout_work;
 	sys_snode_t		node;
@@ -513,6 +514,8 @@ static void chan_rsp_sent(struct bt_conn *conn, void *user_data, int err)
 		atomic_clear_bit(chan->flags, ATT_PENDING_RSP);
 	}
 
+	chan->transaction_buf = NULL;
+
 	tx_meta_data_free(data);
 }
 
@@ -670,12 +673,6 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		timeout = K_FOREVER;
 	}
 
-	buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);
-	if (!buf) {
-		LOG_ERR("Unable to allocate buffer for op 0x%02x", op);
-		return NULL;
-	}
-
 	if (is_rsp) {
 		/* There can only ever be one transaction at a time on a
 		 * bearer/channel. Use a dedicated channel meta-data to ensure
@@ -685,8 +682,26 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		 */
 		__ASSERT_NO_MSG(chan->transaction_meta.att_chan == NULL);
 		data = &chan->transaction_meta;
-		LOG_INF("alloc transaction meta");
+
+		/* Re-use REQ buf to avoid dropping the REQ and timing out. */
+		__ASSERT_NO_MSG(chan->transaction_buf);
+		buf = chan->transaction_buf;
+
+		net_buf_reset(buf);
+		size_t reserve = sizeof(struct bt_l2cap_hdr);
+		reserve += sizeof(struct bt_hci_acl_hdr) + BT_BUF_RESERVE;
+
+		net_buf_reserve(buf, reserve);
+
+		LOG_DBG("re-using REQ buf %p for RSP", buf);
 	} else {
+		LOG_DBG("alloc buf & meta from global pools");
+		buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);
+		if (!buf) {
+			LOG_ERR("Unable to allocate buffer for op 0x%02x", op);
+			return NULL;
+		}
+
 		data = tx_meta_data_alloc(timeout);
 		if (!data) {
 			LOG_WRN("Unable to allocate ATT TX meta");
@@ -765,6 +780,7 @@ static void send_err_rsp(struct bt_att_chan *chan, uint8_t req, uint16_t handle,
 
 	buf = bt_att_chan_create_pdu(chan, BT_ATT_OP_ERROR_RSP, sizeof(*rsp));
 	if (!buf) {
+		LOG_ERR("unable to allocate buf for error response, disconnecting");
 		return;
 	}
 
@@ -2879,6 +2895,17 @@ static int bt_att_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 			LOG_WRN("Ignoring unexpected indication");
 			return 0;
 		}
+	}
+
+	if (handler->type == ATT_REQUEST && !att_chan->transaction_buf) {
+		/* Re-use the REQ buffer (that comes from HCI).
+		 *
+		 * This allows ATT to always be able to send a RSP (or err RSP)
+		 * to the peer, regardless of the TX buffer usage by other stack
+		 * users (e.g. GATT notifications, L2CAP using global pool, SMP,
+		 * etc..), avoiding an ATT timeout due to resource usage.
+		 */
+		att_chan->transaction_buf = net_buf_ref(buf);
 	}
 
 	if (buf->len < handler->expect_len) {
