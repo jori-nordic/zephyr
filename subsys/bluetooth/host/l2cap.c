@@ -2705,8 +2705,12 @@ static void l2cap_chan_recv(struct bt_l2cap_chan *chan, struct net_buf *buf,
 
 	LOG_DBG("chan %p len %u", chan, buf->len);
 
+	__ASSERT_NO_MSG(buf->ref == 1);
+
 	chan->ops->recv(chan, buf);
 	net_buf_unref(buf);
+
+	__ASSERT_NO_MSG(buf->ref == 0);
 }
 
 void bt_l2cap_recv(struct bt_conn *conn, struct net_buf *buf, bool complete)
@@ -2739,6 +2743,7 @@ void bt_l2cap_recv(struct bt_conn *conn, struct net_buf *buf, bool complete)
 		return;
 	}
 
+	__ASSERT_NO_MSG(buf->ref == 1);
 	l2cap_chan_recv(chan, buf, complete);
 }
 

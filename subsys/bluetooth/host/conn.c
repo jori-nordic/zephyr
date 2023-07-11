@@ -366,6 +366,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 	conn->rx = NULL;
 
 	LOG_DBG("Successfully parsed %u byte L2CAP packet", buf->len);
+	__ASSERT_NO_MSG(buf->ref == 1);
 	bt_l2cap_recv(conn, buf, true);
 }
 
