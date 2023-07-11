@@ -103,6 +103,7 @@ struct bt_att_chan {
 	ATOMIC_DEFINE(flags, ATT_NUM_FLAGS);
 	struct bt_att_req	*req;
 	struct k_fifo		tx_queue;
+	struct net_buf		*transaction_buf;
 	struct bt_att_tx_meta_data transaction_meta;
 	struct k_work_delayable	timeout_work;
 	sys_snode_t		node;
@@ -670,12 +671,6 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		timeout = K_FOREVER;
 	}
 
-	buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);
-	if (!buf) {
-		LOG_ERR("Unable to allocate buffer for op 0x%02x", op);
-		return NULL;
-	}
-
 	if (is_rsp) {
 		/* There can only ever be one transaction at a time on a
 		 * bearer/channel. Use a dedicated channel meta-data to ensure
@@ -685,8 +680,28 @@ struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t op,
 		 */
 		__ASSERT_NO_MSG(chan->transaction_meta.att_chan == NULL);
 		data = &chan->transaction_meta;
-		LOG_INF("alloc transaction meta");
+		LOG_INF("use transaction meta & buf");
+
+		/* `REQ`'s buf is now free real estate. */
+		__ASSERT_NO_MSG(chan->transaction_buf);
+
+		buf = chan->transaction_buf;
+		/* chan->transaction_buf = NULL; */
+
+		net_buf_reset(buf);
+		size_t reserve = sizeof(struct bt_l2cap_hdr);
+		reserve += sizeof(struct bt_hci_acl_hdr) + BT_BUF_RESERVE;
+
+		/* raise(SIGTRAP); */
+		net_buf_reserve(buf, reserve);
 	} else {
+		LOG_DBG("alloc buf & meta from global pools");
+		buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);
+		if (!buf) {
+			LOG_ERR("Unable to allocate buffer for op 0x%02x", op);
+			return NULL;
+		}
+
 		data = tx_meta_data_alloc(timeout);
 		if (!data) {
 			LOG_WRN("Unable to allocate ATT TX meta");
@@ -2882,6 +2897,13 @@ static int bt_att_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		}
 	}
 
+	if (handler->type == ATT_REQUEST) {
+		/* We already have a ref to it, don't need to take another one.
+		 * That ref will be freed when we call `bt_conn_send`.
+		 */
+		att_chan->transaction_buf = buf;
+	}
+
 	if (buf->len < handler->expect_len) {
 		LOG_ERR("Invalid len %u for code 0x%02x", buf->len, hdr->code);
 		err = BT_ATT_ERR_INVALID_PDU;
@@ -2895,6 +2917,27 @@ static int bt_att_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	}
 
 	return 0;
+}
+
+static int att_recv_v2(struct bt_l2cap_chan *chan, struct net_buf *buf)
+{
+	struct bt_att_chan *att_chan = ATT_CHAN(chan);
+	int err;
+
+	err = bt_att_recv(chan, buf);
+
+	/* keep ownership if buf is ref'd somewhere
+	 * TODO: take an explicit ref instead?
+	 */
+	if (att_chan->transaction_buf) {
+		att_chan->transaction_buf = NULL;
+	} else {
+		/* make sure it is destroyed */
+		__ASSERT_NO_MSG(buf->ref == 1);
+		net_buf_unref(buf);
+	}
+
+	return err;
 }
 
 static struct bt_att *att_get(struct bt_conn *conn)
@@ -3247,7 +3290,7 @@ static struct bt_att_chan *att_chan_new(struct bt_att *att, atomic_val_t flags)
 	static struct bt_l2cap_chan_ops ops = {
 		.connected = bt_att_connected,
 		.disconnected = bt_att_disconnected,
-		.recv = bt_att_recv,
+		.recv_int = att_recv_v2,
 		.sent = bt_att_sent,
 		.status = bt_att_status,
 	#if defined(CONFIG_BT_SMP)
