@@ -364,7 +364,7 @@ static void send_sdu(int iteration, int chan_idx, int bytes)
 	}
 
 	channels[chan_idx].buf = buf;
-	net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
+	net_buf_reserve(buf, BT_L2CAP_SDU_CHAN_SEND_RESERVE);
 	net_buf_add_mem(buf, channels[chan_idx].payload, bytes);
 
 	LOG_DBG("bt_l2cap_chan_sending ch: %i bytes: %i iteration: %i", chan_idx, bytes, iteration);
