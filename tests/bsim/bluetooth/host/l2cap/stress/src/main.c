@@ -20,17 +20,9 @@ CREATE_FLAG(flag_l2cap_connected);
 #define L2CAP_CHANS     NUM_PERIPHERALS
 #define SDU_NUM         20
 #define SDU_LEN         3000
-#define NUM_SEGMENTS    10
 #define RESCHEDULE_DELAY K_MSEC(100)
 
 static void sdu_destroy(struct net_buf *buf)
-{
-	LOG_DBG("%p", buf);
-
-	net_buf_destroy(buf);
-}
-
-static void segment_destroy(struct net_buf *buf)
 {
 	LOG_DBG("%p", buf);
 
@@ -49,11 +41,6 @@ NET_BUF_POOL_DEFINE(sdu_tx_pool,
 		    CONFIG_BT_MAX_CONN, BT_L2CAP_SDU_BUF_SIZE(SDU_LEN),
 		    CONFIG_BT_CONN_TX_USER_DATA_SIZE, sdu_destroy);
 
-NET_BUF_POOL_DEFINE(segment_pool,
-		    /* MTU + 4 l2cap hdr + 4 ACL hdr */
-		    NUM_SEGMENTS, BT_L2CAP_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU),
-		    CONFIG_BT_CONN_TX_USER_DATA_SIZE, segment_destroy);
-
 /* Only one SDU per link will be received at a time */
 NET_BUF_POOL_DEFINE(sdu_rx_pool,
 		    CONFIG_BT_MAX_CONN, BT_L2CAP_SDU_BUF_SIZE(SDU_LEN),
@@ -62,7 +49,6 @@ NET_BUF_POOL_DEFINE(sdu_rx_pool,
 static uint8_t tx_data[SDU_LEN];
 static uint16_t rx_cnt;
 static uint8_t disconnect_counter;
-static uint32_t max_seg_allocated;
 
 struct test_ctx {
 	struct k_work_delayable work_item;
@@ -111,19 +97,6 @@ int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 
 	LOG_DBG("sent %d len %d", ret, len);
 	return ret;
-}
-
-struct net_buf *alloc_seg_cb(struct bt_l2cap_chan *chan)
-{
-	struct net_buf *buf = net_buf_alloc(&segment_pool, K_NO_WAIT);
-
-	if ((NUM_SEGMENTS - segment_pool.avail_count) > max_seg_allocated) {
-		max_seg_allocated++;
-	}
-
-	ASSERT(buf, "Ran out of segment buffers");
-
-	return buf;
 }
 
 struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
@@ -192,7 +165,6 @@ static struct bt_l2cap_chan_ops ops = {
 	.connected = l2cap_chan_connected_cb,
 	.disconnected = l2cap_chan_disconnected_cb,
 	.alloc_buf = alloc_buf_cb,
-	.alloc_seg = alloc_seg_cb,
 	.recv = recv_cb,
 	.sent = sent_cb,
 };
@@ -478,8 +450,6 @@ static void test_central_main(void)
 		k_msleep(100);
 	}
 	LOG_DBG("All peripherals disconnected.");
-
-	LOG_DBG("Max segment pool usage: %u bufs", max_seg_allocated);
 
 	PASS("L2CAP STRESS Central passed\n");
 }
