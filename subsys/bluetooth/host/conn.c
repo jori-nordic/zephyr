@@ -127,6 +127,53 @@ static int bt_hci_connect_br_cancel(struct bt_conn *conn);
 
 static struct bt_conn sco_conns[CONFIG_BT_MAX_SCO_CONN];
 #endif /* CONFIG_BT_BREDR */
+
+void frag_destroy(struct net_buf *buf);
+
+/* Storage for fragments (views) into the upper layers' PDUs. */
+/* TODO: remove user-data requirements */
+#define FRAGS_COUNT CONFIG_BT_MAX_CONN
+NET_BUF_POOL_FIXED_DEFINE(fragments, FRAGS_COUNT, 0,
+			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, frag_destroy);
+
+struct frag_md {
+	struct bt_buf_view_meta view_meta;
+};
+struct frag_md frag_md_pool[FRAGS_COUNT];
+
+struct frag_md *get_frag_md(struct net_buf *fragment) {
+	return &frag_md_pool[net_buf_id(fragment)];
+}
+
+void bt_tx_irq_raise(void);
+void frag_destroy(struct net_buf *frag)
+{
+	/* allow next view to be allocated (and unlock the parent buf) */
+	bt_buf_destroy_view(frag, &get_frag_md(frag)->view_meta);
+}
+
+static struct net_buf *get_acl_frag(struct net_buf *outside, size_t winsize)
+{
+	struct net_buf *window;
+
+	__ASSERT_NO_MSG(!bt_buf_has_view(outside));
+
+	/* Keeping a ref is the caller's responsibility */
+	window = net_buf_alloc_len(&fragments, 0, K_NO_WAIT);
+	if (!window) {
+		return window;
+	}
+
+	window = bt_buf_make_view(window, outside,
+				  winsize, BT_BUF_ACL_SIZE(0),
+				  &get_frag_md(window)->view_meta);
+
+	LOG_INF("get-acl-frag: outside %p window %p size %d", outside, window, winsize);
+
+	return window;
+}
+
+
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_ISO)
@@ -623,11 +670,20 @@ fail:
 	return err;
 }
 
-static int send_frag(struct bt_conn *conn,
-		     struct net_buf *buf, struct net_buf *frag,
-		     uint8_t flags)
+static bool fits_single_ctlr_buf(struct net_buf *buf, struct bt_conn *conn)
 {
+	return buf->len <= conn_mtu(conn);
+}
+
+static int send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
+{
+	struct net_buf *frag;
 	struct bt_conn_tx *tx = NULL;
+
+	if (bt_buf_has_view(buf)) {
+		LOG_ERR("already have view");
+		return -EWOULDBLOCK;
+	}
 
 	/* Check if the controller can accept ACL packets */
 	if (k_sem_take(bt_conn_get_pkts(conn), K_NO_WAIT)) {
@@ -635,12 +691,24 @@ static int send_frag(struct bt_conn *conn,
 		return -ENOBUFS;
 	}
 
-	/* Add the data to the buffer */
-	if (frag) {
-		uint16_t frag_len = MIN(conn_mtu(conn), net_buf_tailroom(frag));
+	if (!fits_single_ctlr_buf(buf, conn)) {
+		uint16_t frag_len = MIN(conn_mtu(conn), buf->len);
 
-		net_buf_add_mem(frag, buf->data, frag_len);
-		net_buf_pull(buf, frag_len);
+		LOG_DBG("send frag: buf %p len %d", buf, frag_len);
+
+		/* will also do a pull */
+		frag = get_acl_frag(buf, frag_len);
+		/* Fragments never have a TX completion callback */
+		tx_data(frag)->cb = NULL;
+		tx_data(frag)->is_cont = false;
+
+		int err = do_send_frag(conn, frag, flags, tx);
+		if (err == -EIO) {
+			net_buf_unref(frag);
+		}
+
+		return err;
+
 	} else {
 		if (tx_data(buf)->cb) {
 			tx = conn_tx_alloc();
@@ -663,58 +731,29 @@ static int send_frag(struct bt_conn *conn,
 		 */
 		buf = net_buf_get(&conn->tx_queue, K_NO_WAIT);
 		frag = buf;
+
+		return do_send_frag(conn, frag, flags, tx);
 	}
-
-	return do_send_frag(conn, frag, flags, tx);
-}
-
-static struct net_buf *create_frag(struct bt_conn *conn, struct net_buf *buf)
-{
-	struct net_buf *frag;
-
-	switch (conn->type) {
-#if defined(CONFIG_BT_ISO)
-	case BT_CONN_TYPE_ISO:
-		frag = bt_iso_create_frag(0);
-		break;
-#endif
-	default:
-#if defined(CONFIG_BT_CONN)
-		frag = bt_conn_create_frag(0);
-#else
-		return NULL;
-#endif /* CONFIG_BT_CONN */
-
-	}
-
-	if (conn->state != BT_CONN_CONNECTED) {
-		net_buf_unref(frag);
-		return NULL;
-	}
-
-	/* Fragments never have a TX completion callback */
-	tx_data(frag)->cb = NULL;
-	tx_data(frag)->is_cont = false;
-	tx_data(frag)->iso_has_ts = tx_data(buf)->iso_has_ts;
-
-	return frag;
 }
 
 static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 {
-	struct net_buf *frag;
 	uint8_t flags;
 	int err;
 
 	LOG_DBG("conn %p buf %p len %u", conn, buf, buf->len);
 
+	if (bt_buf_has_view(buf)) {
+		LOG_DBG("locked by existing view");
+		return -EWOULDBLOCK;
+	}
+
 	/* Send directly if the packet fits the ACL MTU */
 	if (buf->len <= conn_mtu(conn) && !tx_data(buf)->is_cont) {
 		LOG_DBG("send single");
-		return send_frag(conn, buf, NULL, FRAG_SINGLE);
+		return send_frag(conn, buf, FRAG_SINGLE);
 	}
 
-	LOG_DBG("start fragmenting");
 	/*
 	 * Send the fragments. For the last one simply use the original
 	 * buffer (which works since we've used net_buf_pull on it).
@@ -725,25 +764,21 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf)
 	}
 
 	while (buf->len > conn_mtu(conn)) {
-		frag = create_frag(conn, buf);
-		if (!frag) {
-			return -ENOMEM;
-		}
-
-		err = send_frag(conn, buf, frag, flags);
+		tx_data(buf)->is_cont = flags != FRAG_START;
+		err = send_frag(conn, buf, flags);
 		if (err) {
 			LOG_DBG("%p failed, mark as existing frag", buf);
-			tx_data(buf)->is_cont = flags != FRAG_START;
-			net_buf_unref(frag);
 			return err;
 		}
 
 		flags = FRAG_CONT;
 	}
 
-	LOG_DBG("last frag");
-	tx_data(buf)->is_cont = true;
-	return send_frag(conn, buf, NULL, FRAG_END);
+	bool single = flags == FRAG_START;
+	LOG_DBG("send %s", single ? "single" : "last");
+
+	/* Frag is either a direct-send or the last in the series. */
+	return send_frag(conn, buf, single ? FRAG_SINGLE : FRAG_END);
 }
 
 static struct k_poll_signal conn_change =
