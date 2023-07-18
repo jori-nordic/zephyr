@@ -136,7 +136,18 @@ int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	rx_cnt++;
 
 	/* Verify SDU data matches TX'd data. */
-	ASSERT(memcmp(buf->data, tx_data, buf->len) == 0, "RX data doesn't match TX");
+	int pos = memcmp(buf->data, tx_data, buf->len);
+	if (pos != 0) {
+		LOG_ERR("RX data doesn't match TX: pos %d", pos);
+		LOG_HEXDUMP_ERR(buf->data, buf->len, "RX data");
+		LOG_HEXDUMP_INF(tx_data, buf->len, "TX data");
+
+		for (int p=0; p < buf->len; p++) {
+			__ASSERT(buf->data[p] == tx_data[p], "Failed rx[%d]=%x != expect[%d]=%x", p, buf->data[p], p, tx_data[p]);
+		}
+
+		k_oops();
+	}
 
 	return 0;
 }
