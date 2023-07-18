@@ -12,6 +12,9 @@ simulation_id="gatt"
 verbosity_level=2
 EXECUTE_TIMEOUT=120
 
+west build -b nrf52_bsim && \
+    cp build/zephyr/zephyr.elf ${BSIM_OUT_PATH}/bin/bs_${BOARD}_tests_bsim_bluetooth_host_gatt_general_prj_conf || exit 1
+
 cd ${BSIM_OUT_PATH}/bin
 
 Execute ./bs_${BOARD}_tests_bsim_bluetooth_host_gatt_general_prj_conf \

@@ -82,6 +82,80 @@ struct bt_l2cap {
 static const struct bt_l2cap_ecred_cb *ecred_cb;
 static struct bt_l2cap bt_l2cap_pool[CONFIG_BT_MAX_CONN];
 
+void seg_destroy(struct net_buf *buf);
+#define SEGMENTS_COUNT CONFIG_BT_MAX_CONN
+/* see equivalent struct in conn.c */
+NET_BUF_POOL_FIXED_DEFINE(seg_pool, SEGMENTS_COUNT, 0,
+			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, seg_destroy);
+
+struct seg_md {
+	struct bt_l2cap_le_chan *lechan;
+	struct bt_buf_view_meta view_meta;
+};
+
+struct seg_md seg_md_pool[SEGMENTS_COUNT];
+
+struct seg_md *get_seg_md(struct net_buf *seg)
+{
+	return &seg_md_pool[net_buf_id(seg)];
+}
+
+#if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
+static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch);
+#endif
+
+void seg_destroy(struct net_buf *seg)
+{
+	/* Only relevant if there is segmentation going on. This is not possible
+	 * for LE ACL fixed channels, only for credit-based ones.
+	 */
+#if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
+	struct bt_l2cap_le_chan *lechan = get_seg_md(seg)->lechan;
+	get_seg_md(seg)->lechan = NULL;
+
+	LOG_INF("destroy %p (parent %p)", seg, lechan->tx_buf);
+
+	/* allow next view to be allocated (and unlock the parent buf) */
+	bt_buf_destroy_view(seg, &get_seg_md(seg)->view_meta);
+
+	/* try to allocate and send next view PDU */
+	l2cap_chan_tx_resume(lechan);
+#endif
+}
+
+#if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
+static struct net_buf *get_seg(struct net_buf *sdu,
+			       size_t seg_size,
+			       struct bt_l2cap_le_chan *lechan)
+{
+	struct net_buf *view;
+
+	__ASSERT_NO_MSG(!bt_buf_has_view(sdu));
+
+	/* optimization: don't allocate if we know `make_view` will return `sdu` */
+	if (seg_size >= sdu->len) {
+		LOG_INF("view >= bufsize, returning it");
+
+		return sdu;
+	}
+
+	/* Keeping a ref is the caller's responsibility */
+	view = net_buf_alloc(&seg_pool, K_NO_WAIT);
+	if (!view) {
+		return NULL;
+	}
+
+	get_seg_md(view)->lechan = lechan;
+	view = bt_buf_make_view(view, sdu,
+				seg_size, BT_L2CAP_CHAN_SEND_RESERVE,
+				&get_seg_md(view)->view_meta);
+
+	LOG_INF("alloc-w-view: sdu %p view %p size %d", sdu, view, seg_size);
+
+	return view;
+}
+#endif	/* CONFIG_BT_L2CAP_DYNAMIC_CHANNEL */
+
 void bt_l2cap_register_ecred_cb(const struct bt_l2cap_ecred_cb *cb)
 {
 	ecred_cb = cb;
@@ -889,6 +963,7 @@ static void l2cap_chan_tx_process(struct k_work *work)
 
 	ch = CONTAINER_OF(work, struct bt_l2cap_le_chan, tx_work);
 
+	LOG_INF("%s: %p", __func__, ch);
 	/* Resume tx in case there are buffers in the queue */
 	if ((buf = l2cap_chan_le_get_tx_buf(ch))) {
 		int err;
@@ -899,14 +974,17 @@ static void l2cap_chan_tx_process(struct k_work *work)
 		if (buf) {
 			ch->tx_buf = buf;
 
+			/* also EWOULDBLOCK */
 			if (err == -EAGAIN) {
 				/* Out of credits. Work will be
 				 * restarted upon receving credits.
 				 */
+				LOG_INF("out of credits/windows");
 				return;
 			}
 
 			if (err == -ENOBUFS) {
+				k_oops();
 				/* Out of segment buffers. Delay work
 				 * until buffers may be available.
 				 *
@@ -914,18 +992,20 @@ static void l2cap_chan_tx_process(struct k_work *work)
 				 * second, in case this logic is broken.
 				 */
 				/* EBIGHACK */
-				struct net_buf_pool *bt_conn_get_acl_tx_pool(void);
+				LOG_INF("poll on view bufs for %p", ch);
 				k_poll_event_init(
 					&ch->tx_work_event, K_POLL_TYPE_FIFO_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &bt_conn_get_acl_tx_pool()->free);
+					K_POLL_MODE_NOTIFY_ONLY, &seg_pool.free);
 				k_work_poll_submit(&ch->tx_work, &ch->tx_work_event, 1,
 						   K_SECONDS(1));
 				return;
 			}
 
 			__ASSERT_NO_MSG(!err);
-			/* Frag was sent successfully. Schedule next
-			 * frag for immediate sending.
+			/* Frag was sent successfully. Schedule next frag for immediate sending.
+			 * FIXME: this maybe doesn't leave time for the HCI driver to process the
+			 * window buffer. So the next l2cap_chan_le_send_frag() is guaranteed to
+			 * return -EWOULDBLOCK
 			 */
 			k_work_poll_submit(&ch->tx_work, &ch->tx_work_event, 0, K_NO_WAIT);
 		} else {
@@ -1790,29 +1870,6 @@ static void le_disconn_rsp(struct bt_l2cap *l2cap, uint8_t ident,
 	bt_l2cap_chan_del(&chan->chan);
 }
 
-static inline struct net_buf *l2cap_alloc_seg(struct net_buf *buf, struct bt_l2cap_le_chan *ch)
-{
-	struct net_buf_pool *pool = net_buf_pool_get(buf->pool_id);
-	struct net_buf *seg;
-
-	/* Use the dedicated segment callback if registered */
-	if (ch->chan.ops->alloc_seg) {
-		seg = ch->chan.ops->alloc_seg(&ch->chan);
-		__ASSERT_NO_MSG(seg);
-	} else {
-		/* Try to use original pool if possible */
-		seg = net_buf_alloc(pool, K_NO_WAIT);
-	}
-
-	if (seg) {
-		net_buf_reserve(seg, BT_L2CAP_CHAN_SEND_RESERVE);
-		return seg;
-	}
-
-	/* Fallback to using global connection tx pool */
-	return bt_l2cap_create_pdu_timeout(NULL, 0, K_NO_WAIT);
-}
-
 static void l2cap_chan_tx_resume(struct bt_l2cap_le_chan *ch)
 {
 	if (!atomic_get(&ch->tx.credits) ||
@@ -1864,8 +1921,6 @@ static void l2cap_chan_seg_sent(struct bt_conn *conn, void *user_data, int err)
 		/* Received segment sent callback for disconnected channel */
 		return;
 	}
-
-	l2cap_chan_tx_resume(BT_L2CAP_LE_CHAN(chan));
 }
 
 static bool test_and_dec(atomic_t *target)
@@ -1904,6 +1959,11 @@ static int l2cap_chan_le_send_frag(struct bt_l2cap_le_chan *ch,
 	bt_conn_tx_cb_t cb;
 	int err;
 
+	if (bt_buf_has_view(*buf)) {
+		LOG_DBG("Already have TX inflight");
+		return -EWOULDBLOCK;
+	}
+
 	if (!test_and_dec(&ch->tx.credits)) {
 		LOG_DBG("No credits to transmit packet");
 		return -EWOULDBLOCK;
@@ -1912,50 +1972,37 @@ static int l2cap_chan_le_send_frag(struct bt_l2cap_le_chan *ch,
 	/* Not implemented yet. */
 	__ASSERT_NO_MSG(!(*buf)->frags);
 
-	/* If the buffer is about to be emptied, steal it instead of
-	 * allocating a separate buffer the segment.
-	 */
-	if ((*buf)->len <= ch->tx.mps) {
-		LOG_DBG("Stealing buffer %p", *buf);
-		/* Ensured by a check in bt_l2cap_chan_send. */
-		__ASSERT_NO_MSG(net_buf_headroom(*buf) >= BT_L2CAP_CHAN_SEND_RESERVE);
+	seg_len = ch->tx.mps;
+	seg = get_seg(*buf, seg_len, ch);
 
-		seg = *buf;
+	if (!seg) {
+		/* Future work: Give the channel a tx state
+		 * machine, so that we remember that we took a
+		 * credit and don't need to give it back here.
+		 */
+		LOG_WRN("Out of segment buffers.");
+		atomic_inc(&ch->tx.credits);
+		return -ENOBUFS;
+	}
+
+	if (*buf == seg) {
 		*buf = NULL;
-	} else {
-		/* Future work: Use the original buffer over and over by
-		 * issuing a NET_BUF_EXTERNAL_DATA buffer. */
-		seg = l2cap_alloc_seg(*buf, ch);
-		if (!seg) {
-			/* Future work: Give the channel a tx state
-			 * machine, so that we remember that we took a
-			 * credit and don't need to give it back here.
-			 */
-			LOG_ERR("Out of segment buffers.");
-			atomic_inc(&ch->tx.credits);
-			return -ENOBUFS;
-		}
-
-		seg_len = MIN(MIN((*buf)->len, ch->tx.mps), net_buf_tailroom(seg));
-		net_buf_add_mem(seg, (*buf)->data, seg_len);
-
-		__ASSERT_NO_MSG(seg->len == seg_len);
 	}
 
 	/* Set a callback if there is no data left in the buffer */
-	if (!(*buf)) {
+	if (*buf == NULL) {
+		LOG_INF("last PDU");
 		cb = l2cap_chan_sdu_sent;
 	} else {
+		LOG_INF("send PDU left %u", (*buf)->len);
 		cb = l2cap_chan_seg_sent;
 	}
 	err = bt_l2cap_send_cb(ch->chan.conn, ch->tx.cid, seg, cb, (void*)(uintptr_t)ch->tx.cid);
 
-	if (!err) {
-		if (*buf) {
-			/* Remove the sent data from the remaining SDU buffer. */
-			(void) net_buf_pull((*buf), seg_len);
-		}
-	} else {
+	/* The only possible error is enotconn, in that case the data will be discarded anyways */
+	__ASSERT_NO_MSG(!err || err == -ENOTCONN);
+
+	if (err) {
 		LOG_INF("Unable to send seg %d", err);
 		atomic_inc(&ch->tx.credits);
 

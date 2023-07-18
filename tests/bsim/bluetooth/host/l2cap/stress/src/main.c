@@ -28,11 +28,6 @@ NET_BUF_POOL_DEFINE(sdu_tx_pool,
 		    CONFIG_BT_MAX_CONN, BT_L2CAP_SDU_BUF_SIZE(SDU_LEN),
 		    CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
 
-NET_BUF_POOL_DEFINE(segment_pool,
-		    /* MTU + 4 l2cap hdr + 4 ACL hdr */
-		    NUM_SEGMENTS, BT_L2CAP_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU),
-		    CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
-
 /* Only one SDU per link will be received at a time */
 NET_BUF_POOL_DEFINE(sdu_rx_pool,
 		    CONFIG_BT_MAX_CONN, BT_L2CAP_SDU_BUF_SIZE(SDU_LEN),
@@ -92,19 +87,6 @@ int l2cap_chan_send(struct bt_l2cap_chan *chan, uint8_t *data, size_t len)
 	return ret;
 }
 
-struct net_buf *alloc_seg_cb(struct bt_l2cap_chan *chan)
-{
-	struct net_buf *buf = net_buf_alloc(&segment_pool, K_NO_WAIT);
-
-	if ((NUM_SEGMENTS - segment_pool.avail_count) > max_seg_allocated) {
-		max_seg_allocated++;
-	}
-
-	ASSERT(buf, "Ran out of segment buffers");
-
-	return buf;
-}
-
 struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
 {
 	return net_buf_alloc(&sdu_rx_pool, K_NO_WAIT);
@@ -142,7 +124,18 @@ int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	rx_cnt++;
 
 	/* Verify SDU data matches TX'd data. */
-	ASSERT(memcmp(buf->data, tx_data, buf->len) == 0, "RX data doesn't match TX");
+	int pos = memcmp(buf->data, tx_data, buf->len);
+	if (pos != 0) {
+		LOG_ERR("RX data doesn't match TX: pos %d", pos);
+		LOG_HEXDUMP_ERR(buf->data, buf->len, "RX data");
+		LOG_HEXDUMP_INF(tx_data, buf->len, "TX data");
+
+		for (int p=0; p < buf->len; p++) {
+			__ASSERT(buf->data[p] == tx_data[p], "Failed rx[%d]=%x != expect[%d]=%x", p, buf->data[p], p, tx_data[p]);
+		}
+
+		k_oops();
+	}
 
 	return 0;
 }
@@ -171,7 +164,6 @@ static struct bt_l2cap_chan_ops ops = {
 	.connected = l2cap_chan_connected_cb,
 	.disconnected = l2cap_chan_disconnected_cb,
 	.alloc_buf = alloc_buf_cb,
-	.alloc_seg = alloc_seg_cb,
 	.recv = recv_cb,
 	.sent = sent_cb,
 };
