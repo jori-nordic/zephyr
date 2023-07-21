@@ -75,7 +75,7 @@ static struct bt_iso_big *lookup_big_by_handle(uint8_t big_handle);
 #endif /* CONFIG_BT_ISO_BROADCAST */
 
 #if defined(CONFIG_BT_ISO_UNICAST) || defined(CONFIG_BT_ISO_BROADCASTER)
-static void bt_iso_send_cb(struct bt_conn *iso, void *user_data, int err)
+void bt_iso_sent_cb(struct bt_conn *iso, void *user_data, int err)
 {
 	struct bt_iso_chan *chan = iso->iso.chan;
 	struct bt_iso_chan_ops *ops;
@@ -225,6 +225,7 @@ static void bt_iso_chan_add(struct bt_conn *iso, struct bt_iso_chan *chan)
 	/* Attach ISO channel to the connection */
 	chan->iso = iso;
 	iso->iso.chan = chan;
+	k_fifo_init(&iso->iso.txq);
 
 	LOG_DBG("iso %p chan %p", iso, chan);
 }
@@ -720,6 +721,75 @@ static uint16_t iso_chan_max_data_len(const struct bt_iso_chan *chan,
 	return max_data_len;
 }
 
+bool bt_iso_has_data(struct bt_conn *conn)
+{
+	return !k_fifo_is_empty(&conn->iso.txq);
+}
+
+struct net_buf *iso_data_pull(struct bt_conn *conn, size_t amount, bool first_frag)
+{
+	/* Leave the PDU buffer in the queue until we have sent all its
+	 * fragments.
+	 */
+	struct net_buf *frag = k_fifo_peek_head(&conn->iso.txq);
+	if (!frag) {
+		LOG_DBG("signaled ready but no frag available");
+		return NULL;
+	}
+
+	if (bt_buf_has_view(frag)) {
+		/* This should not happen. conn.c should wait until the view is
+		 * destroyed before requesting more data.
+		 */
+		LOG_DBG("already have view");
+		return NULL;
+	}
+
+	/* add iso header length to amount if this is the first PDU */
+	if (first_frag) {
+		/* We don't pop, as it will be read later by conn, when
+		 * prepending the HCI header.
+		 */
+		bool ts = frag->data[0] == 1;
+		amount += ts ? BT_HCI_ISO_TS_DATA_HDR_SIZE : BT_HCI_ISO_DATA_HDR_SIZE;
+	}
+
+	bool last_frag = amount >= frag->len;
+
+	if (last_frag) {
+		LOG_DBG("last frag, pop buf");
+		struct net_buf *b = k_fifo_get(&conn->iso.txq, K_NO_WAIT);
+		__ASSERT_NO_MSG(b == frag);
+	}
+
+	return frag;
+}
+
+int conn_iso_send(struct bt_conn *conn, struct net_buf *buf, bool has_ts)
+{
+	/* FIXME: still necessary? */
+	if (buf->user_data_size < CONFIG_BT_CONN_TX_USER_DATA_SIZE) {
+		LOG_ERR("not enough room in user_data %d < %d pool %u pool %u",
+			buf->user_data_size,
+			CONFIG_BT_CONN_TX_USER_DATA_SIZE,
+			buf->pool_id);
+		return -EINVAL;
+	}
+
+	/* push the TS flag on the buffer itself.
+	 * It will be popped before sending by conn
+	 */
+	net_buf_push_u8(buf, has_ts ? 1 : 0);
+
+	net_buf_put(&conn->iso.txq, buf);
+	LOG_INF("%p put on list", buf);
+
+	/* only one ISO channel per conn-object */
+	bt_conn_data_ready(conn);
+
+	return 0;
+}
+
 int bt_iso_chan_send(struct bt_iso_chan *chan, struct net_buf *buf,
 		     uint16_t seq_num, uint32_t ts)
 {
@@ -780,10 +850,8 @@ int bt_iso_chan_send(struct bt_iso_chan *chan, struct net_buf *buf,
 								     BT_ISO_DATA_VALID));
 	}
 
-	return bt_conn_send_iso_cb(iso_conn,
-				   buf,
-				   bt_iso_send_cb,
-				   ts != BT_ISO_TIMESTAMP_NONE);
+	LOG_INF("send-iso");
+	return conn_iso_send(iso_conn, buf, ts != BT_ISO_TIMESTAMP_NONE);
 }
 
 #if defined(CONFIG_BT_ISO_CENTRAL) || defined(CONFIG_BT_ISO_BROADCASTER)
