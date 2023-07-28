@@ -17,6 +17,7 @@
 #define BROADCAST_STREMT_CNT    CONFIG_BT_BAP_BROADCAST_SRC_STREAM_COUNT
 #define BROADCAST_ENQUEUE_COUNT 2U
 #define TOTAL_BUF_NEEDED        (BROADCAST_ENQUEUE_COUNT * BROADCAST_STREMT_CNT)
+#define TOTAL_BROADCASTS	20
 
 BUILD_ASSERT(CONFIG_BT_ISO_TX_BUF_COUNT >= TOTAL_BUF_NEEDED,
 	     "CONFIG_BT_ISO_TX_BUF_COUNT should be at least "
@@ -30,6 +31,8 @@ static struct bt_cap_stream broadcast_source_streams[BROADCAST_STREMT_CNT];
 static struct bt_cap_stream *broadcast_streams[ARRAY_SIZE(broadcast_source_streams)];
 static struct bt_bap_lc3_preset broadcast_preset_16_2_1 = BT_BAP_LC3_BROADCAST_PRESET_16_2_1(
 	BT_AUDIO_LOCATION_FRONT_LEFT, BT_AUDIO_CONTEXT_TYPE_MEDIA);
+
+volatile int sent_count_plus_one = 0;
 
 static K_SEM_DEFINE(sem_broadcast_started, 0U, ARRAY_SIZE(broadcast_streams));
 static K_SEM_DEFINE(sem_broadcast_stopped, 0U, ARRAY_SIZE(broadcast_streams));
@@ -55,6 +58,8 @@ static void broadcast_sent_cb(struct bt_bap_stream *stream)
 	static uint32_t seq_num;
 	struct net_buf *buf;
 	int ret;
+
+	sent_count_plus_one++;
 
 	if (broadcast_preset_16_2_1.qos.sdu > CONFIG_BT_ISO_TX_MTU) {
 		FAIL("Invalid SDU %u for the MTU: %d", broadcast_preset_16_2_1.qos.sdu,
@@ -540,8 +545,10 @@ static void test_main_cap_initiator_broadcast(void)
 		}
 	}
 
-	/* Keeping running for a little while */
-	k_sleep(K_SECONDS(5));
+	/* Expect a number of broadcasts */
+	while (sent_count_plus_one < TOTAL_BROADCASTS) {
+		k_msleep(100);
+	}
 
 	test_broadcast_audio_update_inval(broadcast_source);
 	test_broadcast_audio_update(broadcast_source);
