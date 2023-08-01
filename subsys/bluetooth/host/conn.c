@@ -48,9 +48,6 @@ LOG_MODULE_REGISTER(bt_conn);
 
 K_FIFO_DEFINE(free_tx);
 
-void tx_processor(struct k_work *item);
-K_WORK_DELAYABLE_DEFINE(tx_work, tx_processor);
-
 static void tx_free(struct bt_conn_tx *tx);
 
 static void conn_tx_destroy(struct bt_conn *conn, struct bt_conn_tx *tx)
@@ -137,7 +134,6 @@ struct frag_md *get_frag_md(struct net_buf *fragment) {
 	return &frag_md_pool[net_buf_id(fragment)];
 }
 
-void bt_tx_irq_raise(void);
 void frag_destroy(struct net_buf *frag)
 {
 	/* allow next view to be allocated (and unlock the parent buf) */
@@ -697,70 +693,6 @@ void bt_conn_cleanup_all(void)
 	bt_conn_foreach(BT_CONN_TYPE_ALL, conn_destroy, NULL);
 }
 
-static int conn_prepare_events(struct bt_conn *conn,
-			       struct k_poll_event *events)
-{
-	if (!atomic_get(&conn->ref)) {
-		return -ENOTCONN;
-	}
-
-	if (conn->state == BT_CONN_DISCONNECTED &&
-	    atomic_test_and_clear_bit(conn->flags, BT_CONN_CLEANUP)) {
-		conn_cleanup(conn);
-		return -ENOTCONN;
-	}
-
-	if (conn->state != BT_CONN_CONNECTED) {
-		return -ENOTCONN;
-	}
-
-	LOG_DBG("Adding conn %p to poll list", conn);
-
-	/* ISO Synchronized Receiver only builds do not transmit and hence
-	 * may not have any tx buffers allocated in a Controller.
-	 */
-	struct k_sem *conn_pkts = bt_conn_get_pkts(conn);
-
-	if (!conn_pkts) {
-		return -ENOTCONN;
-	}
-
-	bool buffers_available = k_sem_count_get(conn_pkts) > 0;
-	bool packets_waiting = !k_fifo_is_empty(&conn->tx_queue);
-
-	if (packets_waiting && !buffers_available) {
-		/* Only resume sending when the controller has buffer space
-		 * available for this connection.
-		 */
-		LOG_DBG("wait on ctlr buffers");
-		k_poll_event_init(&events[0],
-				  K_POLL_TYPE_SEM_AVAILABLE,
-				  K_POLL_MODE_NOTIFY_ONLY,
-				  conn_pkts);
-	} else if (atomic_test_bit(conn->flags, BT_CONN_TX_WOULDBLOCK_FREE_TX) &&
-		   k_fifo_is_empty(&free_tx)) {
-		LOG_DBG("wait on tx contexts");
-		k_poll_event_init(&events[0],
-				  K_POLL_TYPE_FIFO_DATA_AVAILABLE,
-				  K_POLL_MODE_NOTIFY_ONLY,
-				  &free_tx);
-		events[0].tag = BT_EVENT_CONN_FREE_TX;
-	} else {
-		/* This must be the last thing to be waited on, since
-		 * only this event triggers processing.
-		 */
-		/* Wait until there is more data to send. */
-		LOG_DBG("wait on host fifo");
-		k_poll_event_init(&events[0],
-				  K_POLL_TYPE_FIFO_DATA_AVAILABLE,
-				  K_POLL_MODE_NOTIFY_ONLY,
-				  &conn->tx_queue);
-		events[0].tag = BT_EVENT_CONN_TX_QUEUE;
-	}
-
-	return 0;
-}
-
 /* Returns the optimal number of queued ACL buffers for the connection.
  *
  * It partitions the controller's ACL buffers to each connection according to
@@ -818,12 +750,6 @@ bool bt_data_should_stop(struct bt_conn *conn)
 	LOG_DBG("conn should stop");
 
 	return true;
-}
-
-void bt_tx_irq_raise(void)
-{
-	LOG_INF("kick TX");
-	k_work_reschedule(&tx_work, K_NO_WAIT);
 }
 
 void bt_conn_data_ready(struct bt_conn *conn)
@@ -896,7 +822,7 @@ static void get_cbs(struct bt_conn *conn, struct net_buf *buf,
 	}
 }
 
-void tx_processor(struct k_work *item)
+void bt_conn_tx_processor(void)
 {
 	/* acquire resources (LL buf) */
 	bool buffers_available = k_sem_count_get(&bt_dev.le.acl_pkts) > 0;
@@ -905,7 +831,6 @@ void tx_processor(struct k_work *item)
 		return;
 	}
 
-	LOG_INF("TX process start");
 	struct bt_conn *conn = get_conn_ready();
 	struct net_buf *buf;
 	bt_conn_tx_cb_t cb = NULL;
@@ -915,6 +840,8 @@ void tx_processor(struct k_work *item)
 		LOG_DBG("no connection wants to send data");
 		return;
 	}
+
+	LOG_INF("handle data");
 
 	/* This handles disconnects: calls upper layers' callbacks, etc. */
 	if (conn->state == BT_CONN_DISCONNECTED &&
@@ -985,31 +912,7 @@ void tx_processor(struct k_work *item)
 	/* Always kick the TX work. It will self-suspend if it doesn't get
 	 * resources or there is nothing left to send.
 	 */
-	k_work_reschedule(&tx_work, K_NO_WAIT);
-}
-
-int bt_conn_prepare_events(struct k_poll_event events[])
-{
-	int ev_count = 0;
-
-	LOG_DBG("");
-
-	k_poll_signal_init(&conn_change);
-
-	k_poll_event_init(&events[ev_count++], K_POLL_TYPE_SIGNAL,
-			  K_POLL_MODE_NOTIFY_ONLY, &conn_change);
-
-#if defined(CONFIG_BT_ISO)
-	for (int i = 0; i < ARRAY_SIZE(iso_conns); i++) {
-		struct bt_conn *conn = &iso_conns[i];
-
-		if (!conn_prepare_events(conn, &events[ev_count])) {
-			ev_count++;
-		}
-	}
-#endif
-
-	return ev_count;
+	bt_tx_irq_raise();
 }
 
 static void process_unack_tx(struct bt_conn *conn)
