@@ -2018,24 +2018,6 @@ static void l2cap_chan_sdu_sent(struct bt_conn *conn, void *user_data, int err)
 	l2cap_chan_tx_resume(BT_L2CAP_LE_CHAN(chan));
 }
 
-static void l2cap_chan_seg_sent(struct bt_conn *conn, void *user_data, int err)
-{
-	uint16_t cid = (uintptr_t) user_data;
-	struct bt_l2cap_chan *chan;
-
-	LOG_DBG("conn %p CID 0x%04x err %d", conn, cid, err);
-
-	if (err) {
-		return;
-	}
-
-	chan = bt_l2cap_le_lookup_tx_cid(conn, cid);
-	if (!chan) {
-		/* Received segment sent callback for disconnected channel */
-		return;
-	}
-}
-
 static bool test_and_dec(atomic_t *target)
 {
 	atomic_t old_value, new_value;
@@ -2108,7 +2090,7 @@ static int l2cap_chan_le_send_frag(struct bt_l2cap_le_chan *ch,
 		cb = l2cap_chan_sdu_sent;
 	} else {
 		LOG_INF("send PDU left %u", (*buf)->len);
-		cb = l2cap_chan_seg_sent;
+		cb = NULL;
 	}
 	err = bt_l2cap_send_cb(ch->chan.conn, ch->tx.cid, seg, cb, (void*)(uintptr_t)ch->tx.cid);
 
