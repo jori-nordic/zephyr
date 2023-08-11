@@ -525,6 +525,24 @@ static void hci_num_completed_packets(struct net_buf *buf)
 #endif /* CONFIG_BT_CONN_TX */
 
 #if defined(CONFIG_BT_CONN)
+bool bt_cannot_block(void)
+{
+	bool is_rx = k_current_get() == bt_dev.bt_recv_tid;
+	bool is_syswq = k_current_get() == &k_sys_work_q.thread;
+
+	return is_rx || is_syswq;
+}
+
+static void set_bt_rx_thread(void)
+{
+	/* hci_acl(), can only be called from a single context/thread. This is
+	 * mostly for deadlock detection.
+	 */
+	if (!bt_dev.bt_recv_tid) {
+		bt_dev.bt_recv_tid = k_current_get();
+	}
+	__ASSERT_NO_MSG(bt_dev.bt_recv_tid == k_current_get());
+}
 static void hci_acl(struct net_buf *buf)
 {
 	struct bt_hci_acl_hdr *hdr;
@@ -533,6 +551,8 @@ static void hci_acl(struct net_buf *buf)
 	uint8_t flags;
 
 	LOG_DBG("buf %p", buf);
+
+	set_bt_rx_thread();
 
 	BT_ASSERT(buf->len >= sizeof(*hdr));
 
@@ -3930,7 +3950,7 @@ int bt_enable(bt_ready_cb_t cb)
 	k_work_queue_init(&bt_workq);
 	k_work_queue_start(&bt_workq, rx_thread_stack,
 			   CONFIG_BT_RX_STACK_SIZE,
-			   K_PRIO_COOP(CONFIG_BT_RX_PRIO), NULL);
+			   CONFIG_BT_RX_PRIO, NULL);
 	k_thread_name_set(&bt_workq.thread, "BT RX");
 #endif
 

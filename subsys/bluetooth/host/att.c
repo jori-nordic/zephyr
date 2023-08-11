@@ -189,8 +189,9 @@ static struct bt_att_tx_meta_data *tx_meta_data_alloc(k_timeout_t timeout)
 	 * so if we're in the same workqueue but there are no immediate
 	 * contexts available, there's no chance we'll get one by waiting.
 	 */
-	if (k_current_get() == &k_sys_work_q.thread) {
-		return k_fifo_get(&free_att_tx_meta_data, K_NO_WAIT);
+	if (bt_cannot_block()) {
+		LOG_DBG("in RX context: disabling timeout");
+		timeout = K_NO_WAIT;
 	}
 
 	return k_fifo_get(&free_att_tx_meta_data, timeout);

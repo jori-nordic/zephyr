@@ -431,8 +431,15 @@ void bt_conn_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 {
 	/* Make sure we notify any pending TX callbacks before processing
 	 * new data for this connection.
+	 *
+	 * Always do so from the same context for sanity. In this case that will
+	 * be the system workqueue. Scheduling and yielding like this only works
+	 * if the syswq prio is >= as our current prio.
 	 */
-	tx_notify(conn);
+	k_work_submit(&conn->tx_complete_work);
+	while (k_work_is_pending(&conn->tx_complete_work)) {
+		k_yield();
+	}
 
 	LOG_DBG("handle %u len %u flags %02x", conn->handle, buf->len, flags);
 

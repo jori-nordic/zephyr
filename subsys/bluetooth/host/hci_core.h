@@ -404,6 +404,9 @@ struct bt_dev {
 	/* Appearance Value */
 	uint16_t		appearance;
 #endif
+#if defined(CONFIG_BT_CONN)
+	k_tid_t			bt_recv_tid;
+#endif
 };
 
 extern struct bt_dev bt_dev;
@@ -449,6 +452,11 @@ bool bt_addr_le_is_bonded(uint8_t id, const bt_addr_le_t *addr);
 const bt_addr_le_t *bt_lookup_id_addr(uint8_t id, const bt_addr_le_t *addr);
 
 int bt_send(struct net_buf *buf);
+
+/* Returns false if current context is Bluetooth RX context or the system
+ * workqueue (which should never block).
+ */
+bool bt_cannot_block(void);
 
 /* Don't require everyone to include keys.h */
 struct bt_keys;

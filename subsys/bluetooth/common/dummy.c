@@ -27,8 +27,10 @@ BUILD_ASSERT(sizeof(bt_addr_le_t) == BT_ADDR_LE_SIZE);
  * than the Rx thread as the Tx thread needs to process the acknowledgements
  * before new Rx data is processed. This is a necessity to correctly detect
  * transaction violations in ATT and SMP protocols.
+ *
+ * Note that the only user of BT_HCI_TX_PRIO is the h5 driver.
  */
-BUILD_ASSERT(CONFIG_BT_HCI_TX_PRIO < CONFIG_BT_RX_PRIO);
+BUILD_ASSERT(K_PRIO_COOP(CONFIG_BT_HCI_TX_PRIO) < CONFIG_BT_RX_PRIO);
 
 /* The Bluetooth subsystem requires that higher priority events shall be given
  * in a priority higher than the Bluetooth Host's Tx and the Controller's

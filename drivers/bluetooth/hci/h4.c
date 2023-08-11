@@ -521,7 +521,7 @@ static int h4_open(void)
 	tid = k_thread_create(&rx_thread_data, rx_thread_stack,
 			      K_KERNEL_STACK_SIZEOF(rx_thread_stack),
 			      rx_thread, NULL, NULL, NULL,
-			      K_PRIO_COOP(CONFIG_BT_RX_PRIO),
+			      CONFIG_BT_RX_PRIO,
 			      0, K_NO_WAIT);
 	k_thread_name_set(tid, "bt_rx_thread");
 

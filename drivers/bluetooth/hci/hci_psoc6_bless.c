@@ -151,7 +151,7 @@ static int psoc6_bless_open(void)
 	tid = k_thread_create(&psoc6_bless_rx_thread_data, psoc6_bless_rx_thread_stack,
 			      K_KERNEL_STACK_SIZEOF(psoc6_bless_rx_thread_stack),
 			      psoc6_bless_rx_thread, NULL, NULL, NULL,
-			      K_PRIO_COOP(CONFIG_BT_RX_PRIO), 0, K_NO_WAIT);
+			      CONFIG_BT_RX_PRIO, 0, K_NO_WAIT);
 	k_thread_name_set(tid, "psoc6_bless_rx_thread");
 
 	return 0;
