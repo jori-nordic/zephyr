@@ -776,6 +776,7 @@ void bt_conn_data_ready(struct bt_conn *conn)
 
 struct bt_conn *get_conn_ready(void)
 {
+	/* FIXME: drain the queue on disconnect */
 	/* Here we only peek: we pop the conn (and insert it at the back if it
 	 * still has data) after the QoS function returns false.
 	 */

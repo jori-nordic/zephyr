@@ -13,6 +13,7 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/check.h>
 #include <zephyr/sys/math_extras.h>
 #include <zephyr/sys/util.h>
 
@@ -697,6 +698,7 @@ struct net_buf *bt_l2cap_create_pdu_timeout(struct net_buf_pool *pool,
 
 void raise_data_ready(struct bt_l2cap_le_chan *lechan)
 {
+	/* FIXME: do we need the lock? */
 	if (!atomic_set(&lechan->_seg_ready_lock, 1)) {
 		sys_slist_append(&lechan->chan.conn->upper_data_ready,
 				 &lechan->_seg_ready);
@@ -725,7 +727,7 @@ int bt_l2cap_send_cb(struct bt_conn *conn, uint16_t cid, struct net_buf *seg,
 {
 	struct bt_l2cap_hdr *hdr;
 
-	LOG_INF("conn %p cid %u len %zu", conn, cid, net_buf_frags_len(seg));
+	LOG_DBG("conn %p cid %u len %zu", conn, cid, net_buf_frags_len(seg));
 
 	hdr = net_buf_push(seg, sizeof(*hdr));
 	hdr->len = sys_cpu_to_le16(seg->len - sizeof(*hdr));
@@ -737,7 +739,7 @@ int bt_l2cap_send_cb(struct bt_conn *conn, uint16_t cid, struct net_buf *seg,
 	struct bt_l2cap_le_chan *chan = CONTAINER_OF(ch, struct bt_l2cap_le_chan, chan);
 
 	if (seg->user_data_size < sizeof(struct cons)) {
-		LOG_ERR("not enough room in user_data %d < %d pool %u pool %u",
+		LOG_ERR("not enough room in user_data: %d < %d. pool id %u",
 			seg->user_data_size,
 			CONFIG_BT_CONN_TX_USER_DATA_SIZE,
 			seg->pool_id);
@@ -745,9 +747,18 @@ int bt_l2cap_send_cb(struct bt_conn *conn, uint16_t cid, struct net_buf *seg,
 	}
 
 	cons(seg->user_data, cb, user_data);
-	LOG_WRN("push: cb %p userdata %p", cb, user_data);
+	LOG_DBG("push: cb %p userdata %p", cb, user_data);
 
+	/* FIXME: pull from tx_queue (what about when not dynamic?) */
 	/* FIXME: drain vbq on channel destroy. Make a test for this. */
+
+	/* This will only ever have _one_ segment on dynamic channels.
+	 * Could it be possible to pull from the tx_queue directly?
+	 *
+	 * for static channels, we can have multiple (ie gatt req + gatt notification)
+	 * TODO: test this theory.
+	 */
+	__ASSERT_NO_MSG(k_fifo_is_empty(&chan->tx_vbq));
 	net_buf_put(&chan->tx_vbq, seg);
 
 	raise_data_ready(chan); /* tis just a flag */
@@ -758,6 +769,12 @@ int bt_l2cap_send_cb(struct bt_conn *conn, uint16_t cid, struct net_buf *seg,
 bool chan_has_data(struct bt_l2cap_le_chan *lechan)
 {
 	return !k_fifo_is_empty(&lechan->tx_vbq);
+}
+
+static struct net_buf *l2cap_pull_seg(struct bt_l2cap_le_chan *lechan)
+{
+	/* TODO: pull from RX queue if chan is dynamic */
+	return k_fifo_peek_head(&lechan->tx_vbq);
 }
 
 /* TODO: move fragmentation in there */
@@ -774,9 +791,10 @@ struct net_buf *l2cap_data_pull(struct bt_conn *conn, size_t amount)
 						       _seg_ready);
 
 	/* Leave the PDU buffer in the queue until we have sent all its
-	 * fragments.
+	 * (HCI) fragments.
+	 * For SDUs that also applies to segments.
 	 */
-	struct net_buf *seg = k_fifo_peek_head(&lechan->tx_vbq);
+	struct net_buf *seg = l2cap_pull_seg(lechan);
 	__ASSERT(seg, "signaled ready but no segments available");
 
 	if (bt_buf_has_view(seg)) {
@@ -1081,6 +1099,7 @@ static void l2cap_chan_tx_process(struct k_work *work)
 		int err;
 		LOG_DBG("buf %p", buf);
 
+		/* TODO: do this on-demand */
 		err = l2cap_chan_le_send_frag(ch, &buf);
 
 		if (buf) {
@@ -1158,6 +1177,7 @@ static void l2cap_chan_destroy(struct bt_l2cap_chan *chan)
 	struct net_buf *buf;
 
 	LOG_DBG("chan %p cid 0x%04x", le_chan, le_chan->rx.cid);
+	/* k_oops(); */
 
 	/* Cancel ongoing work. Since the channel can be re-used after this
 	 * we need to sync to make sure that the kernel does not have it
@@ -2094,17 +2114,14 @@ static int l2cap_chan_le_send_frag(struct bt_l2cap_le_chan *ch,
 	}
 	err = bt_l2cap_send_cb(ch->chan.conn, ch->tx.cid, seg, cb, (void*)(uintptr_t)ch->tx.cid);
 
-	/* The only possible error is enotconn, in that case the data will be discarded anyways */
-	__ASSERT_NO_MSG(!err || err == -ENOTCONN);
-
-	if (err) {
-		LOG_INF("Unable to send seg %d", err);
+	CHECKIF(!err) {
+		LOG_ERR("cannot send SDU (err %d)", err);
 		atomic_inc(&ch->tx.credits);
 
 		/* The host takes ownership of the reference in seg when
 		 * bt_l2cap_send_cb is successful. The call returned an error,
 		 * so we must get rid of the reference that was taken in
-		 * l2cap_chan_create_seg.
+		 * get_seg.
 		 */
 		if (!*buf) {
 			/* Return stolen buf. */
