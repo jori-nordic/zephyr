@@ -295,7 +295,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 			bt_conn_reset_rx_state(conn);
 		}
 
-		LOG_DBG("First, len %u final %u", buf->len,
+		LOG_INF("First, len %u final %u", buf->len,
 			(buf->len < sizeof(uint16_t)) ? 0 : sys_get_le16(buf->data));
 
 		conn->rx = buf;
@@ -309,7 +309,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 		}
 
 		if (!buf->len) {
-			LOG_DBG("Empty ACL_CONT");
+			LOG_ERR("Empty ACL_CONT");
 			net_buf_unref(buf);
 			return;
 		}
@@ -327,7 +327,9 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 			return;
 		}
 
+		LOG_INF("cont");
 		net_buf_add_mem(conn->rx, buf->data, buf->len);
+		LOG_ERR("unref: should destroy");
 		net_buf_unref(buf);
 		break;
 	default:
@@ -351,6 +353,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 	acl_total_len = sys_get_le16(conn->rx->data) + sizeof(struct bt_l2cap_hdr);
 
 	if (conn->rx->len < acl_total_len) {
+		LOG_ERR("frame not complete");
 		/* L2CAP frame not complete. */
 		return;
 	}
@@ -365,7 +368,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 	buf = conn->rx;
 	conn->rx = NULL;
 
-	LOG_DBG("Successfully parsed %u byte L2CAP packet", buf->len);
+	LOG_ERR("Successfully parsed %u byte L2CAP packet", buf->len);
 	bt_l2cap_recv(conn, buf, true);
 }
 

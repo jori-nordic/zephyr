@@ -79,9 +79,6 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	LOG_DBG("%s", addr);
 
-	int err = bt_conn_set_security(conn, BT_SECURITY_L2);
-	__ASSERT_NO_MSG(err == 0);
-
 	dconn = bt_conn_ref(conn);
 	SET_FLAG(is_connected);
 }
@@ -157,6 +154,11 @@ static void connect(void)
 
 	LOG_DBG("Central initiating connection...");
 	WAIT_FOR_FLAG(is_connected);
+
+	k_msleep(1000);
+	err = bt_conn_set_security(dconn, BT_SECURITY_L2);
+	__ASSERT_NO_MSG(err == 0);
+
 	WAIT_FOR_FLAG(is_secured);
 
 	LOG_DBG("Central EATTing...");
@@ -167,18 +169,18 @@ static void connect(void)
 	LOG_ERR("Central EATT-ed...");
 }
 
-static void disconnect_device(struct bt_conn *conn, void *data)
-{
-	int err;
+/* static void disconnect_device(struct bt_conn *conn, void *data) */
+/* { */
+/* 	int err; */
 
-	SET_FLAG(is_connected);
+/* 	SET_FLAG(is_connected); */
 
-	err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-	ASSERT(!err, "Failed to initate disconnect (err %d)", err);
+/* 	err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN); */
+/* 	ASSERT(!err, "Failed to initate disconnect (err %d)", err); */
 
-	LOG_DBG("Waiting for disconnection...");
-	WAIT_FOR_FLAG_UNSET(is_connected);
-}
+/* 	LOG_DBG("Waiting for disconnection..."); */
+/* 	WAIT_FOR_FLAG_UNSET(is_connected); */
+/* } */
 
 void test_procedure_0(void)
 {
