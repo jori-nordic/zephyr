@@ -428,6 +428,7 @@ static uint32_t prefix_print(const struct log_output *output,
 			     uint32_t flags,
 			     bool func_on,
 			     log_timestamp_t timestamp,
+			     k_tid_t tid,
 			     const char *domain,
 			     const char *source,
 			     uint8_t level)
@@ -464,6 +465,10 @@ static uint32_t prefix_print(const struct log_output *output,
 		length += timestamp_print(output, flags, timestamp);
 	}
 
+#if defined(CONFIG_THREAD_NAME)
+	length += print_formatted(output, "[%s] ", k_thread_name_get(tid));
+#endif
+
 	if (IS_ENABLED(CONFIG_LOG_BACKEND_NET) &&
 	    flags & LOG_OUTPUT_FLAG_FORMAT_SYSLOG) {
 		length += print_formatted(
@@ -488,22 +493,23 @@ static void postfix_print(const struct log_output *output,
 	newline_print(output, flags);
 }
 
-void log_output_process(const struct log_output *output,
-			log_timestamp_t timestamp,
-			const char *domain,
-			const char *source,
-			uint8_t level,
-			const uint8_t *package,
-			const uint8_t *data,
-			size_t data_len,
-			uint32_t flags)
+void log_output_process2(const struct log_output *output,
+			 log_timestamp_t timestamp,
+			 k_tid_t tid,
+			 const char *domain,
+			 const char *source,
+			 uint8_t level,
+			 const uint8_t *package,
+			 const uint8_t *data,
+			 size_t data_len,
+			 uint32_t flags)
 {
 	bool raw_string = (level == LOG_LEVEL_INTERNAL_RAW_STRING);
 	uint32_t prefix_offset;
 	cbprintf_cb cb;
 
 	if (!raw_string) {
-		prefix_offset = prefix_print(output, flags, 0, timestamp, domain, source, level);
+		prefix_offset = prefix_print(output, flags, 0, timestamp, tid, domain, source, level);
 		cb = out_func;
 	} else {
 		prefix_offset = 0;
@@ -530,6 +536,19 @@ void log_output_process(const struct log_output *output,
 	}
 
 	log_output_flush(output);
+}
+
+void log_output_process(const struct log_output *output,
+			log_timestamp_t timestamp,
+			const char *domain,
+			const char *source,
+			uint8_t level,
+			const uint8_t *package,
+			const uint8_t *data,
+			size_t data_len,
+			uint32_t flags)
+{
+	log_output_process2(output, timestamp, NULL, domain, source, level, package, data, data_len, flags);
 }
 
 void log_output_msg_process(const struct log_output *output,
@@ -559,8 +578,9 @@ void log_output_msg_process(const struct log_output *output,
 	size_t plen, dlen;
 	uint8_t *package = log_msg_get_package(msg, &plen);
 	uint8_t *data = log_msg_get_data(msg, &dlen);
+	k_tid_t tid = log_msg_get_thread(msg);
 
-	log_output_process(output, timestamp, NULL, sname, level,
+	log_output_process2(output, timestamp, tid, NULL, sname, level,
 			   plen > 0 ? package : NULL, data, dlen, flags);
 }
 

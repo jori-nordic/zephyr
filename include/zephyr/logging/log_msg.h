@@ -14,6 +14,7 @@
 #include <zephyr/sys/util.h>
 #include <string.h>
 #include <zephyr/toolchain.h>
+#include <zephyr/kernel/thread.h>
 
 #ifdef __GNUC__
 #ifndef alloca
@@ -79,6 +80,7 @@ struct log_msg_hdr {
 	const void *source;
 	log_timestamp_t timestamp;
 #endif
+	k_tid_t tid;
 };
 
 /* Messages are aligned to alignment required by cbprintf package. */
@@ -651,6 +653,11 @@ static inline const void *log_msg_get_source(struct log_msg *msg)
 static inline log_timestamp_t log_msg_get_timestamp(struct log_msg *msg)
 {
 	return msg->hdr.timestamp;
+}
+
+static inline k_tid_t log_msg_get_thread(struct log_msg *msg)
+{
+	return msg->hdr.tid;
 }
 
 /** @brief Get data buffer.

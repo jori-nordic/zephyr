@@ -624,6 +624,8 @@ static void msg_commit(struct mpsc_pbuf_buffer *buffer, struct log_msg *msg)
 void z_log_msg_commit(struct log_msg *msg)
 {
 	msg->hdr.timestamp = timestamp_func();
+	msg->hdr.tid = k_current_get();
+
 	msg_commit(&log_buffer, msg);
 }
 
