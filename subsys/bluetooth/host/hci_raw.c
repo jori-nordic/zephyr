@@ -304,7 +304,9 @@ static uint8_t bt_send_ext(struct net_buf *buf)
 
 int bt_send(struct net_buf *buf)
 {
-	LOG_DBG("buf %p len %u", buf, buf->len);
+	if (bt_buf_get_type(buf) == BT_BUF_CMD) {
+		LOG_DBG("buf %p len %u", buf, buf->len);
+	}
 
 	if (buf->len == 0) {
 		return BT_HCI_ERR_INVALID_PARAM;

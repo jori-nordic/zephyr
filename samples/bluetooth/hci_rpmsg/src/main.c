@@ -24,10 +24,7 @@
 #include <zephyr/bluetooth/hci_raw.h>
 #include <zephyr/bluetooth/hci_vs.h>
 
-#if defined(CONFIG_BT_HCI_VS_FATAL_ERROR)
 #include <zephyr/logging/log_ctrl.h>
-#endif /* CONFIG_BT_HCI_VS_FATAL_ERROR */
-
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(hci_rpmsg, CONFIG_BT_LOG_LEVEL);
@@ -279,7 +276,7 @@ static void hci_rpmsg_send(struct net_buf *buf, bool is_fatal_err)
 		}
 	} while (ret < 0);
 
-	LOG_INF("Sent message of %d bytes.", ret);
+	LOG_DBG("Sent message of %d bytes.", ret);
 
 	net_buf_unref(buf);
 }
@@ -314,6 +311,9 @@ void bt_ctlr_assert_handle(char *file, uint32_t line)
 
 #endif /* !CONFIG_BT_HCI_VS_FATAL_ERROR */
 
+	/* Flush the logs before locking the CPU */
+	LOG_PANIC();
+
 	while (true) {
 	};
 }
@@ -322,8 +322,6 @@ void bt_ctlr_assert_handle(char *file, uint32_t line)
 #if defined(CONFIG_BT_HCI_VS_FATAL_ERROR)
 void k_sys_fatal_error_handler(unsigned int reason, const z_arch_esf_t *esf)
 {
-	LOG_PANIC();
-
 	/* Disable interrupts, this is unrecoverable */
 	(void)irq_lock();
 
@@ -344,6 +342,9 @@ void k_sys_fatal_error_handler(unsigned int reason, const z_arch_esf_t *esf)
 
 	LOG_ERR("Halting system");
 
+	/* Flush the logs before locking the CPU */
+	LOG_PANIC();
+
 	while (true) {
 	};
 
@@ -361,7 +362,7 @@ static void hci_ept_bound(void *priv)
 
 static void hci_ept_recv(const void *data, size_t len, void *priv)
 {
-	LOG_INF("Received message of %u bytes.", len);
+	LOG_DBG("Received message of %u bytes.", len);
 	hci_rpmsg_rx((uint8_t *) data, len);
 }
 
