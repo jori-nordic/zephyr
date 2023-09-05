@@ -720,7 +720,7 @@ static struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t 
 		net_buf_reset(buf);
 		net_buf_reserve(buf, BT_L2CAP_BUF_SIZE(0));
 
-		LOG_DBG("re-using REQ buf %p for RSP", buf);
+		LOG_ERR("re-using REQ buf %p for RSP", buf);
 	} else {
 		LOG_DBG("alloc buf & meta from global pools");
 		buf = bt_l2cap_create_pdu_timeout(NULL, 0, timeout);

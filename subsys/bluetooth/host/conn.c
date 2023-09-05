@@ -65,6 +65,8 @@ K_FIFO_DEFINE(free_tx);
 
 static void tx_free(struct bt_conn_tx *tx);
 
+NET_BUF_POOL_DEFINE(reco_bufs, CONFIG_BT_MAX_CONN, CONFIG_BT_BUF_ACL_RX_SIZE, 16, NULL);
+
 static void conn_tx_destroy(struct bt_conn *conn, struct bt_conn_tx *tx)
 {
 	__ASSERT_NO_MSG(tx);
@@ -262,6 +264,10 @@ struct bt_conn *bt_conn_new(struct bt_conn *conns, size_t size)
 
 	(void)memset(conn, 0, offsetof(struct bt_conn, ref));
 
+	LOG_ERR("acquiring reco buf");
+	conn->reco = net_buf_alloc(&reco_bufs, K_FOREVER);
+	LOG_ERR("done");
+
 #if defined(CONFIG_BT_CONN)
 	k_work_init_delayable(&conn->deferred_work, deferred_work);
 #endif /* CONFIG_BT_CONN */
@@ -278,7 +284,9 @@ void bt_conn_reset_rx_state(struct bt_conn *conn)
 		return;
 	}
 
-	net_buf_unref(conn->rx);
+	/* This is not the only place where we unref. The app will do the last
+	 * unref in the normal case.
+	 */
 	conn->rx = NULL;
 }
 
@@ -298,7 +306,16 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 		LOG_INF("First, len %u final %u", buf->len,
 			(buf->len < sizeof(uint16_t)) ? 0 : sys_get_le16(buf->data));
 
-		conn->rx = buf;
+		/* memcpy into the recombination buffer instead of stealing the
+		 * one from HCI
+		 */
+		__ASSERT_NO_MSG(conn->reco->ref == 1);
+
+		net_buf_reset(conn->reco);
+		conn->rx = conn->reco;
+
+		net_buf_add_mem(conn->rx, buf->data, buf->len);
+
 		break;
 	case BT_ACL_CONT:
 		if (!conn->rx) {
@@ -329,8 +346,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 
 		LOG_INF("cont");
 		net_buf_add_mem(conn->rx, buf->data, buf->len);
-		LOG_ERR("unref: should destroy");
-		net_buf_unref(buf);
+		/* LOG_ERR("unref: should destroy"); */
 		break;
 	default:
 		/* BT_ACL_START_NO_FLUSH and BT_ACL_COMPLETE are not allowed on
@@ -344,6 +360,8 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 	}
 
 	if (conn->rx->len < sizeof(uint16_t)) {
+		LOG_ERR("not enuf");
+		net_buf_unref(buf);
 		/* Still not enough data received to retrieve the L2CAP header
 		 * length field.
 		 */
@@ -354,18 +372,28 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 
 	if (conn->rx->len < acl_total_len) {
 		LOG_ERR("frame not complete");
+		net_buf_unref(buf);
 		/* L2CAP frame not complete. */
 		return;
 	}
 
 	if (conn->rx->len > acl_total_len) {
 		LOG_ERR("ACL len mismatch (%u > %u)", conn->rx->len, acl_total_len);
+		net_buf_unref(buf);
 		bt_conn_reset_rx_state(conn);
 		return;
 	}
 
 	/* L2CAP frame complete. */
-	buf = conn->rx;
+
+	/* Send the whole packet using the original buffer.
+	 * This is done in order to block further pulling from HCI.
+	 *
+	 * This is in turn done because ATT will steal the buffer it is given if
+	 * it's a REQ.
+	 */
+	net_buf_reset(buf);
+	net_buf_add_mem(buf, conn->rx->data, conn->rx->len);
 	conn->rx = NULL;
 
 	LOG_ERR("Successfully parsed %u byte L2CAP packet", buf->len);
@@ -1333,6 +1361,10 @@ void bt_conn_unref(struct bt_conn *conn)
 	LOG_DBG("handle %u ref %ld -> %ld", conn->handle, old, atomic_get(&conn->ref));
 
 	__ASSERT(old > 0, "Conn reference counter is 0");
+
+	if (atomic_get(&conn->ref) == 0) {
+		net_buf_unref(conn->reco);
+	}
 
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) && conn->type == BT_CONN_TYPE_LE &&
 	    conn->role == BT_CONN_ROLE_PERIPHERAL && atomic_get(&conn->ref) == 0) {

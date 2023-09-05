@@ -215,6 +215,9 @@ struct bt_conn {
 #endif
 	};
 
+	/* buffer used for L2CAP recombination */
+	struct net_buf *reco;
+
 #if defined(CONFIG_BT_REMOTE_VERSION)
 	struct bt_conn_rv {
 		uint8_t  version;
