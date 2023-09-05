@@ -66,7 +66,7 @@ void destroyd(struct net_buf *buf)
 	net_buf_destroy(buf);
 }
 
-NET_BUF_POOL_FIXED_DEFINE(hci_rx_pool, BT_BUF_RX_COUNT,
+NET_BUF_POOL_FIXED_DEFINE(hci_rx_pool, 1,
 			  BT_BUF_RX_SIZE, CONFIG_BT_CONN_TX_USER_DATA_SIZE,
 			  destroyd);
 #endif /* CONFIG_BT_HCI_ACL_FLOW_CONTROL */

@@ -690,6 +690,7 @@ static struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t 
 		 */
 		re_use = false;
 	}
+	re_use = false;
 
 	if (re_use) {
 		/* There can only ever be one transaction at a time on a
