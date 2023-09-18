@@ -736,6 +736,7 @@ static struct net_buf *bt_att_chan_create_pdu(struct bt_att_chan *chan, uint8_t 
 	}
 
 	if (IS_ENABLED(CONFIG_BT_EATT)) {
+		LOG_ERR("reserve");
 		net_buf_reserve(buf, BT_L2CAP_SDU_BUF_SIZE(0));
 	}
 
