@@ -21,12 +21,14 @@ static uint8_t packet[100];
 static uint8_t adva[6] = {0xc0, 0x01, 0x13, 0x37, 0x42, 0xc0};
 
 /* b'\x10\tBluetooth-Shell' */
-static uint8_t advdata[] = {0x10, 0x09, 0x42, 0x6c, 0x75, 0x65, 0x74, 0x6f, 0x6f, 0x74, 0x68, 0x2d, 0x53, 0x68, 0x65, 0x6c, 0x6c};
+/* static uint8_t advdata[] = {0x10, 0x09, 0x42, 0x6c, 0x75, 0x65, 0x74, 0x6f, 0x6f, 0x74, 0x68, 0x2d, 0x53, 0x68, 0x65, 0x6c, 0x6c}; */
+static uint8_t advdata[] = {0x02, 0x01, 0x06, 0x09, 0x09, 'M', 'o', 's', 'q', 'u', 'i', 't', 'o'};
 
 void* make_packet(void)
 {
 	/* LE PDU header */
-	uint8_t pdu_type = 0b0000; /* ADV_IND */
+	/* uint8_t pdu_type = 0b0000; /\* ADV_IND *\/ */
+	uint8_t pdu_type = 0b0010; /* ADV_NONCONN_IND */
 	uint8_t chsel = 0;	   /* 1 = support chsel algo #2 */
 	uint8_t txadd = 1;	   /* public = 0 random = 1 */
 	uint8_t rxadd = 0;
@@ -109,9 +111,6 @@ start:
 
 	nrf_radio_packet_configure(NRF_RADIO, &packet_conf);
 
-	/* Frequency */
-	nrf_radio_frequency_set(NRF_RADIO, 2426); /* (page 2682) ch38: 2426 MHz */
-
 	/* CRC:
 	 * 24bit: (x24) + x10 + x9 + x6 + x4 + x3 + x1 + x0
 	 * init: 0x555555
@@ -133,7 +132,10 @@ start:
 	 * b1 = SR[5]
 	 * etc..
 	 */
-	nrf_radio_datawhiteiv_set(NRF_RADIO, 38); /* channel 38 */
+	nrf_radio_datawhiteiv_set(NRF_RADIO, 37); /* channel 38 */
+
+	/* Frequency */
+	nrf_radio_frequency_set(NRF_RADIO, 2402); /* (page 2682) ch38: 2426 MHz */
 
 	/* Configure the PAYLOAD */
 	nrf_radio_packetptr_set(NRF_RADIO, make_packet());
@@ -149,19 +151,19 @@ start:
 
 	nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_TXEN);
 	/* NRF_RADIO->TASKS_TXEN = 1; */
-	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_READY)) {k_msleep(1);};
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_READY)) {};
 
 	/* Wait until payload has been clocked out */
-	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_PAYLOAD)) {k_msleep(1);};
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_PAYLOAD)) {};
 	printk("got PAYLOAD\n");
 
 	/* Wait until RADIO is off */
-	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_DISABLED)) {k_msleep(1);};
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_DISABLED)) {};
 	printk("got DISABLED\n");
 
 	printk("radio TX ok\n\n");
 
-	k_msleep(40);
+	/* k_msleep(40); */
 	goto start;
 
 	return 0;
