@@ -66,6 +66,12 @@ void* make_packet(void)
 	return &packet[0];
 }
 
+#if defined(CONFIG_NATIVE_BUILD)
+#define WAIT k_msleep(1)
+#else
+#define WAIT
+#endif
+
 int main(void)
 {
 	printk("init\n");
@@ -151,14 +157,20 @@ start:
 
 	nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_TXEN);
 	/* NRF_RADIO->TASKS_TXEN = 1; */
-	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_READY)) {};
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_READY)) {
+		WAIT;
+	};
 
 	/* Wait until payload has been clocked out */
-	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_PAYLOAD)) {};
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_PAYLOAD)) {
+		WAIT;
+	};
 	printk("got PAYLOAD\n");
 
 	/* Wait until RADIO is off */
-	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_DISABLED)) {};
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_DISABLED)) {
+		WAIT;
+	};
 	printk("got DISABLED\n");
 
 	printk("radio TX ok\n\n");
