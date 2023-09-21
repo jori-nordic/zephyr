@@ -18,7 +18,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 static uint8_t packet[100];
 
 /* 0x01 -> random 0xc0 -> static */
-static uint8_t adva[6] = {0x01, 0xc0, 0x13, 0x37, 0x42, 0x69};
+static uint8_t adva[6] = {0xc0, 0x01, 0x13, 0x37, 0x42, 0xc0};
 
 /* b'\x10\tBluetooth-Shell' */
 static uint8_t advdata[] = {0x10, 0x09, 0x42, 0x6c, 0x75, 0x65, 0x74, 0x6f, 0x6f, 0x74, 0x68, 0x2d, 0x53, 0x68, 0x65, 0x6c, 0x6c};
@@ -43,33 +43,25 @@ void* make_packet(void)
 	(void)adva;
 	(void)advdata;
 
-	uint32_t pdu_length = sizeof(h0) + sizeof(h1) + sizeof(adva) + sizeof(advdata);
+	uint32_t pdu_length = sizeof(adva) + sizeof(advdata);
 	printk("length: %d h0: %x h1: %x\n", pdu_length, h0, h1);
 
 	/* Representation in RAM has only: S0, LENGTH, S1, PAYLOAD */
 
-	/* S0: 0 bytes */
-	uint8_t i = 0;
-	packet[i + 0] = 0x42;
-
-	i++;
-	packet[i + 0] = pdu_length;	/* LENGTH: 8 bits */
-	/* S1: 0 bits */
-
-	/* PAYLOAD starts here */
-	packet[i + 1] = h0;
-	packet[i + 2] = h1;
+	/* S0 + LENGTH */
+	packet[0] = h0;
+	packet[1] = h1;
 
 	/* LE PDU starts here */
-	memcpy(&packet[i + 3], adva, sizeof(adva));
+	memcpy(&packet[2], adva, sizeof(adva));
 
 	/* ADV_IND PDU starts here */
-	memcpy(&packet[i + 3 + sizeof(adva)], advdata, sizeof(advdata));
+	memcpy(&packet[2 + sizeof(adva)], advdata, sizeof(advdata));
 
 	LOG_HEXDUMP_ERR(packet, pdu_length, "PAYLOAD");
 
 	/* idk what S0 and LENGTH are used for, don't actually pass them to the radio */
-	return &packet[i+1];
+	return &packet[0];
 }
 
 int main(void)
@@ -98,11 +90,13 @@ start:
 
 	/* Set Access Address */
 	uint32_t ble_aa = 0x8E89BED6;
+	/* uint32_t ble_aa = 0xd6be898e; */
 	nrf_radio_base0_set(NRF_RADIO, ble_aa << 8);
 	nrf_radio_prefix0_set(NRF_RADIO, (ble_aa >> 24) & 0xFF);
 	/* NRF_RADIO->TXADDRESS = 0; /\* logical address 0 *\/ */
 
-	static nrf_radio_packet_conf_t packet_conf = {.lflen = 8UL,
+	static nrf_radio_packet_conf_t packet_conf = {
+		.lflen = 8UL,
 		.s0len = 1UL,
 		.s1len = 0UL,
 		.s1incl = 0UL,
@@ -112,6 +106,7 @@ start:
 		.big_endian = 0,
 		.whiteen = 1,
 		.plen = NRF_RADIO_PREAMBLE_LENGTH_8BIT};
+
 	nrf_radio_packet_configure(NRF_RADIO, &packet_conf);
 
 	/* Frequency */
@@ -121,7 +116,8 @@ start:
 	 * 24bit: (x24) + x10 + x9 + x6 + x4 + x3 + x1 + x0
 	 * init: 0x555555
 	 */
-	uint32_t crcpoly = BIT(10) | BIT(9) | BIT(6) | BIT(4) | BIT(3) | BIT(1) | BIT(0);
+	/* uint32_t crcpoly = BIT(10) | BIT(9) | BIT(6) | BIT(4) | BIT(3) | BIT(1) | BIT(0); */
+	uint32_t crcpoly = 0x65B;
 	nrf_radio_crc_configure(NRF_RADIO, 3, NRF_RADIO_CRC_ADDR_SKIP, crcpoly);
 	nrf_radio_crcinit_set(NRF_RADIO, 0x555555);
 
@@ -165,7 +161,7 @@ start:
 
 	printk("radio TX ok\n\n");
 
-	k_msleep(100);
+	k_msleep(40);
 	goto start;
 
 	return 0;
