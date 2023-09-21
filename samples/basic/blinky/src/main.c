@@ -9,6 +9,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <nrf.h>
 #include <hal/nrf_radio.h>
+#include <hal/nrf_ppi.h>
 
 #include <zephyr/logging/log.h>
 
@@ -60,9 +61,8 @@ void* make_packet(void)
 	/* ADV_IND PDU starts here */
 	memcpy(&packet[2 + sizeof(adva)], advdata, sizeof(advdata));
 
-	LOG_HEXDUMP_ERR(packet, pdu_length, "PAYLOAD");
+	LOG_HEXDUMP_ERR(packet, pdu_length + 2, "PAYLOAD");
 
-	/* idk what S0 and LENGTH are used for, don't actually pass them to the radio */
 	return &packet[0];
 }
 
@@ -71,6 +71,24 @@ void* make_packet(void)
 #else
 #define WAIT
 #endif
+
+uint16_t freqs[] = {2402, 2426, 2480};
+uint8_t indices[] = {37, 38, 39};
+
+uint8_t inc_freq(void)
+{
+	static uint8_t i = 0;
+
+	nrf_radio_datawhiteiv_set(NRF_RADIO, indices[i]);
+	nrf_radio_frequency_set(NRF_RADIO, freqs[i]);
+
+	i++;
+	if (i>2) {
+		i = 0;
+	}
+
+	return i;
+}
 
 int main(void)
 {
@@ -84,10 +102,8 @@ int main(void)
 	nrf_radio_power_set(NRF_RADIO, 1);
 	k_msleep(200);
 
-start:
 	printk("Start loop\n");
 
-	/* Setup automatic START and DISABLE */
 	/* READY->START + END->DISABLE */
 	nrf_radio_shorts_set(NRF_RADIO, 3);
 
@@ -101,7 +117,6 @@ start:
 	/* uint32_t ble_aa = 0xd6be898e; */
 	nrf_radio_base0_set(NRF_RADIO, ble_aa << 8);
 	nrf_radio_prefix0_set(NRF_RADIO, (ble_aa >> 24) & 0xFF);
-	/* NRF_RADIO->TXADDRESS = 0; /\* logical address 0 *\/ */
 
 	static nrf_radio_packet_conf_t packet_conf = {
 		.lflen = 8UL,
@@ -146,8 +161,6 @@ start:
 	/* Configure the PAYLOAD */
 	nrf_radio_packetptr_set(NRF_RADIO, make_packet());
 
-	/* Write packet configuration */
-
 	/* Ramp up radio for TX and start TXing right after */
 	printk("Trigger TXEN\n");
 
@@ -156,7 +169,6 @@ start:
 	nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
 
 	nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_TXEN);
-	/* NRF_RADIO->TASKS_TXEN = 1; */
 	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_READY)) {
 		WAIT;
 	};
@@ -175,8 +187,32 @@ start:
 
 	printk("radio TX ok\n\n");
 
-	/* k_msleep(40); */
-	goto start;
+	k_msleep(2);
+
+	/* nrf_ppi_channel_endpoint_setup(NRF_PPI, */
+	/* 			       NRF_PPI_CHANNEL9, */
+	/* 			       (uint32_t)&NRF_RADIO->EVENTS_DISABLED, */
+	/* 			       (uint32_t)&NRF_RADIO->TASKS_TXEN); */
+
+packetptr:
+	/* Configure the PAYLOAD */
+	nrf_radio_packetptr_set(NRF_RADIO, &packet[0]);
+
+	/* Setup new frequency */
+	uint8_t nextch = inc_freq();
+	if (nextch == 1) {
+		k_msleep(20);
+	}
+
+	nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
+	nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_TXEN);
+
+	/* Wait until payload has been clocked out */
+	while (!nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_DISABLED)) {
+		WAIT;
+	};
+
+	goto packetptr;
 
 	return 0;
 }
