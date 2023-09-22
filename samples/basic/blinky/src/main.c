@@ -24,6 +24,7 @@ static uint8_t adva[6] = {0xc0, 0x01, 0x13, 0x37, 0x42, 0xc0};
 /* b'\x10\tBluetooth-Shell' */
 /* static uint8_t advdata[] = {0x10, 0x09, 0x42, 0x6c, 0x75, 0x65, 0x74, 0x6f, 0x6f, 0x74, 0x68, 0x2d, 0x53, 0x68, 0x65, 0x6c, 0x6c}; */
 static uint8_t advdata[] = {0x02, 0x01, 0x06, 0x09, 0x09, 'M', 'o', 's', 'q', 'u', 'i', 't', 'o'};
+static uint8_t hello[] = "hello-micro";
 
 void* make_packet(void)
 {
@@ -33,7 +34,7 @@ void* make_packet(void)
 	uint8_t chsel = 0;	   /* 1 = support chsel algo #2 */
 	uint8_t txadd = 1;	   /* public = 0 random = 1 */
 	uint8_t rxadd = 0;
-	uint8_t length = sizeof(adva) + sizeof(advdata); /* length of ADV payload */
+	uint8_t length = sizeof(adva) + sizeof(advdata) - 8 + sizeof(hello) - 1; /* length of ADV payload */
 
 	uint8_t h0 =
 		pdu_type |
@@ -59,7 +60,9 @@ void* make_packet(void)
 	memcpy(&packet[2], adva, sizeof(adva));
 
 	/* ADV_IND PDU starts here */
+	advdata[3] = sizeof(hello);
 	memcpy(&packet[2 + sizeof(adva)], advdata, sizeof(advdata));
+	memcpy(&packet[2 + sizeof(adva) + 5], hello, sizeof(hello) - 1);
 
 	LOG_HEXDUMP_ERR(packet, pdu_length + 2, "PAYLOAD");
 
