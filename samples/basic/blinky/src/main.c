@@ -107,9 +107,11 @@ int main(void)
 	/* READY->START + END->DISABLE */
 	nrf_radio_shorts_set(NRF_RADIO, 3);
 
+	/* POWER = 0 */
 	nrf_radio_txpower_set(NRF_RADIO, NRF_RADIO_TXPOWER_0DBM);
 
 	/* Ble_1Mbit */
+	/* MODE = 3 */
 	nrf_radio_mode_set(NRF_RADIO, 3);
 
 	/* Set Access Address */
@@ -118,6 +120,9 @@ int main(void)
 	nrf_radio_base0_set(NRF_RADIO, ble_aa << 8);
 	nrf_radio_prefix0_set(NRF_RADIO, (ble_aa >> 24) & 0xFF);
 
+	/* PCNF0 = 0x8 | (0x1 << 8)
+	 * PCNF1 = 0xFF | (0x3 << 16) | (0x1 << 25)
+	 */
 	static nrf_radio_packet_conf_t packet_conf = {
 		.lflen = 8UL,
 		.s0len = 1UL,
@@ -138,6 +143,7 @@ int main(void)
 	 */
 	/* uint32_t crcpoly = BIT(10) | BIT(9) | BIT(6) | BIT(4) | BIT(3) | BIT(1) | BIT(0); */
 	uint32_t crcpoly = 0x65B;
+	/* 0x3 | 0x1 << 8 */
 	nrf_radio_crc_configure(NRF_RADIO, 3, NRF_RADIO_CRC_ADDR_SKIP, crcpoly);
 	nrf_radio_crcinit_set(NRF_RADIO, 0x555555);
 
