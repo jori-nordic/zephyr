@@ -1,3 +1,15 @@
+;; redefine fns to be able to run this in CL
+(defun register (addr value)
+  (format t "reg write: ~x: ~x" addr value))
+
+(defun write-packet (ptr array)
+  (format t "~A" array)
+  ;; dummy ptr is returned
+  10)
+
+(defun delay (ms) (sleep (/ ms 1000)))
+;; end redef
+
 (defun configure-radio ()
     (register :constlat #x1)
     (register :hfclkstart #x1)
@@ -25,44 +37,42 @@
     (register :radio-datawhiteiv 37)
     (register :radio-frequency #x2))
 
-(defvar packetlist
+(defun make-ad (type payload)
+  (append '()
+          (list (+ 1 (length payload)))
+          (list type)
+          payload))
+
+(defun ascii (string)
+  "Converts a string to a list of ASCII values"
+  (let ((al '()))
+    (dotimes (i (length string))
+      (push (char-code (char string i)) al))
+    (reverse al)))
+
+(defvar empty-pdu
   (list
-   #x42
-   #x13
+   #x42 #x13
 
-   #xc0
-   #x01
-   #x13
-   #x37
-   #x42
-   #xc0
+   #xc0 #x01 #x13 #x37 #x42 #xc0
+   ))
 
-   #x02
-   #x01
-   #x06
-   #x09
-   #x09
+(defvar pdu
+  (append empty-pdu
+          (make-ad #x1 '(#x6))
+          (make-ad #x9 (ascii "ulisp   "))))
 
-   #x75
-   #x6c
-   #x69
-   #x73
-   #x70
-   #x20
-   #x20
-   )
-  )
+(defun start-adv (pdu)
+  (let ((ptr
+          (- (write-packet 0 pdu)
+             (- (length pdu) 1))))
 
-(defvar endptr (write-packet 0 packetlist))
-(defvar ptr (- endptr (length packetlist) -1))
-
-(defun start-adv ()
-  (loop
-    (register :radio-packetptr ptr)
-    (register :radio-disabled 0)
-    (register :radio-txen 1)
-    (delay 20))
-  )
+    (format t "ptr: ~X" ptr)
+    (loop
+      (register :radio-packetptr ptr)
+      (register :radio-disabled 0)
+      (register :radio-txen 1)
+      (delay 20))))
 
 (configure-radio)
-(start-adv)
+(start-adv pdu)
