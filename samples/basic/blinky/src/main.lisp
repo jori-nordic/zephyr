@@ -1,4 +1,3 @@
-
 (defun configure-radio ()
     (register :constlat #x1)
     (register :hfclkstart #x1)
@@ -15,7 +14,7 @@
 
     (register :radio-pcnf0 (logior #x8 (ash 1 8)))
     (register :radio-pcnf1 (logior
-                            #x8
+                            #xFF
                             (ash #x3 16)
                             (ash #x1 25)))
 
@@ -55,14 +54,14 @@
   )
 
 (defvar endptr (write-packet 0 packetlist))
-(defvar ptr (- endptr (length packetlist)))
+(defvar ptr (- endptr (length packetlist) -1))
 
 (defun start-adv ()
   (loop
     (register :radio-packetptr ptr)
     (register :radio-disabled 0)
     (register :radio-txen 1)
-    (delay 1))
+    (delay 20))
   )
 
 (configure-radio)
