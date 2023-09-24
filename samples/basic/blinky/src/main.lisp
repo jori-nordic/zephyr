@@ -13,6 +13,7 @@
 (defun b (n) (ash 1 n))
 
 (defun r (fn l)
+  "Recursively apply fn to every element of l"
   (if (not (cdr l))
       (car l)
       (funcall fn (car l) (r fn (cdr l)))))
@@ -21,31 +22,31 @@
   (r 'logior (mapcar 'b bits)))
 
 (defun configure-radio ()
-    (register :constlat #x1)
-    (register :hfclkstart #x1)
-    (register :radio-power #x0)
-    (register :radio-power #x1)
+  (register :constlat #x1)
+  (register :hfclkstart #x1)
+  (register :radio-power #x0)
+  (register :radio-power #x1)
 
-    (register :radio-shorts (mask 0 1))
-    (register :radio-txpower #x0)
-    (register :radio-mode #x3)
+  (register :radio-shorts (mask 0 1))
+  (register :radio-txpower #x0)
+  (register :radio-mode #x3)
 
-    (defvar access-addr #x8E89BED6)
-    (register :radio-base0 (ash access-addr 8))
-    (register :radio-prefix0 (logand #xFF (ash access-addr -24)))
+  (defvar access-addr #x8E89BED6)
+  (register :radio-base0 (ash access-addr 8))
+  (register :radio-prefix0 (logand #xFF (ash access-addr -24)))
 
-    (register :radio-pcnf0 (mask 3 8))
-    (register :radio-pcnf1 (logior
-                            #xFF
-                            (ash #x3 16)
-                            (b 25)))
+  (register :radio-pcnf0 (mask 3 8))
+  (register :radio-pcnf1 (logior
+                          #xFF
+                          (ash #x3 16)
+                          (b 25)))
 
-    (register :radio-crccnf (logior #x3 (b 8)))
-    (register :radio-crcpoly (mask 10 9 6 4 3 1 0))
-    (register :radio-crcinit #x555555)
+  (register :radio-crccnf (logior #x3 (b 8)))
+  (register :radio-crcpoly (mask 10 9 6 4 3 1 0))
+  (register :radio-crcinit #x555555)
 
-    (register :radio-datawhiteiv 37)
-    (register :radio-frequency #x2))
+  (register :radio-datawhiteiv 37)
+  (register :radio-frequency #x2))
 
 (defun make-ad (type payload)
   (append '()
