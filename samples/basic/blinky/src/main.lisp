@@ -10,13 +10,15 @@
 (defun delay (ms) (sleep (/ ms 1000)))
 ;; end redef
 
+(defun b (n) (ash 1 n))
+
 (defun configure-radio ()
     (register :constlat #x1)
     (register :hfclkstart #x1)
     (register :radio-power #x0)
     (register :radio-power #x1)
 
-    (register :radio-shorts #x3)
+    (register :radio-shorts (logior (b 0) (b 1)))
     (register :radio-txpower #x0)
     (register :radio-mode #x3)
 
@@ -24,13 +26,13 @@
     (register :radio-base0 (ash access-addr 8))
     (register :radio-prefix0 (logand #xFF (ash access-addr -24)))
 
-    (register :radio-pcnf0 (logior #x8 (ash 1 8)))
+    (register :radio-pcnf0 (logior (b 3) (b 8)))
     (register :radio-pcnf1 (logior
                             #xFF
                             (ash #x3 16)
-                            (ash #x1 25)))
+                            (b 25)))
 
-    (register :radio-crccnf (logior #x3 (ash #x1 8)))
+    (register :radio-crccnf (logior #x3 (b 8)))
     (register :radio-crcpoly #x65B)
     (register :radio-crcinit #x555555)
 
