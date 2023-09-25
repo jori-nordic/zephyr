@@ -61,17 +61,22 @@
       (push (char-code (char string i)) al))
     (reverse al)))
 
-(defvar empty-pdu
-  (list
-   #x42 #x13
+(defvar addr '(#xc0 #x01 #x13 #x37 #x42 #xc0))
 
-   #xc0 #x01 #x13 #x37 #x42 #xc0
-   ))
+(defvar ad-data
+  (append '()
+          (make-ad #x1 '(#x6))
+          (make-ad #x9 (ascii "hello-ulisp"))))
+
+(defun make-pdu (addr data)
+  (append '()
+          '(#x13)
+          (list (+ (length data) (length addr)))
+          addr
+          data))
 
 (defvar pdu
-  (append empty-pdu
-          (make-ad #x1 '(#x6))
-          (make-ad #x9 (ascii "ulisp   "))))
+  (make-pdu addr ad-data))
 
 (defun start-adv (pdu)
   (let ((ptr
