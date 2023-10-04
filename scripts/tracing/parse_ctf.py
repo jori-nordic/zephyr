@@ -18,6 +18,7 @@ Generate trace using samples/subsys/tracing for example:
     ./scripts/tracing/parse_ctf.py -t ctf
 """
 
+import json
 import sys
 import datetime
 import colorama
@@ -38,6 +39,40 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def spit_json(path, trace_events):
+
+    # add_metadata(trace_events, "thread_name", 0, KERNELSPACE_HYPERCALL_NR, {'name': "Kernelspace"})
+    # add_metadata(trace_events, "thread_name", 0, USERSPACE_HYPERCALL_NR, {'name': "Userspace"})
+    # add_metadata(trace_events, "process_name", 0, USERSPACE_HYPERCALL_NR, {'name': "VM0"})
+    # add_metadata(trace_events, "process_labels", 0, USERSPACE_HYPERCALL_NR, {'labels': "Ubuntu 16.04"})
+    # add_metadata(trace_events, "thread_sort_index", 0, KERNELSPACE_HYPERCALL_NR, {'sort_index': -5})
+    # add_metadata(trace_events, "thread_sort_index", 0, USERSPACE_HYPERCALL_NR, {'sort_index': -10})
+
+    content = json.dumps({
+        "traceEvents": trace_events,
+        "displayTimeUnit": "ns"
+    })
+
+    with open(path, "w") as f:
+        f.write(content)
+
+g_events = []
+
+def format_json(name, ts):
+    # Chrome trace format
+    return {
+        'pid': 0,
+        'tid': 0,
+        'name': name,
+        'ph': 'X',
+        'dur': 10,
+        'ts': ts,
+        'args': {
+            'cpu': 0,
+            'depth': 0
+        },
+    }
+
 def main():
     colorama.init()
 
@@ -53,18 +88,11 @@ def main():
                 return t
         return {}
 
-    for msg in msg_it:
-
-        if not isinstance(msg, bt2._EventMessageConst):
-            continue
-
+    def do_trace(msg):
         ns_from_origin = msg.default_clock_snapshot.ns_from_origin
         event = msg.event
         # Compute the time difference since the last event message.
         diff_s = 0
-
-        if last_event_ns_from_origin is not None:
-            diff_s = (ns_from_origin - last_event_ns_from_origin) / 1e9
 
         dt = datetime.datetime.fromtimestamp(ns_from_origin / 1e9)
 
@@ -89,12 +117,9 @@ def main():
             else:
                 cpu_string = ""
 
-            if thread_name:
-                print(f"{dt} (+{diff_s:.6f} s): {event.name}: {thread_name} {cpu_string}")
-            elif thread_id:
-                print(f"{dt} (+{diff_s:.6f} s): {event.name}: {thread_id} {cpu_string}")
-            else:
-                print(f"{dt} (+{diff_s:.6f} s): {event.name}")
+            # if thread_name:
+            # elif thread_id:
+            # else:
 
             if event.name in ['thread_switched_out', 'thread_switched_in']:
                 if thread_name:
@@ -120,7 +145,6 @@ def main():
 
         elif event.name in ['thread_info']:
             stack_size = event.payload_field['stack_size']
-            print(f"{dt} (+{diff_s:.6f} s): {event.name} (Stack size: {stack_size})")
         elif event.name in ['start_call', 'end_call']:
             if event.payload_field['id'] == 39:
                 c = Fore.GREEN
@@ -128,18 +152,21 @@ def main():
                 c = Fore.CYAN
             else:
                 c = Fore.YELLOW
-            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} {event.payload_field['id']}" + Fore.RESET)
         elif event.name in ['semaphore_init', 'semaphore_take', 'semaphore_give']:
             c = Fore.CYAN
-            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} ({event.payload_field['id']})" + Fore.RESET)
         elif event.name in ['mutex_init', 'mutex_take', 'mutex_give']:
             c = Fore.MAGENTA
-            print(c + f"{dt} (+{diff_s:.6f} s): {event.name} ({event.payload_field['id']})" + Fore.RESET)
 
-        else:
-            print(f"{dt} (+{diff_s:.6f} s): {event.name}")
+        g_events.append(format_json(event.name, ns_from_origin))
 
-        last_event_ns_from_origin = ns_from_origin
+    try:
+        for msg in msg_it:
+            if not isinstance(msg, bt2._EventMessageConst):
+                continue
+
+            do_trace(msg)
+    finally:
+        spit_json('./out.json', g_events)
 
 if __name__=="__main__":
     main()
