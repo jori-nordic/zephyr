@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/usb/usb_device.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -243,6 +244,17 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 int main(void)
 {
 	int err;
+#if defined(CONFIG_USB_DEVICE_STACK)
+	int ret;
+
+	ret = usb_enable(NULL);
+	if (ret) {
+		printk("usb backend enable failed");
+		return;
+	}
+#endif /* CONFIG_USB_DEVICE_STACK */
+	k_sleep(K_SECONDS(3));
+
 	err = bt_enable(NULL);
 
 	if (err) {
