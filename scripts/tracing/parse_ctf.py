@@ -50,12 +50,12 @@ def add_metadata(name, pid, tid, args):
 g_thread_names = {}
 
 def add_thread(tid, name, active):
-    if f'{tid}' not in g_thread_names.keys():
-        g_thread_names[f'{tid}'] = {'name': str(name), 'active': active}
+    if tid not in g_thread_names.keys():
+        g_thread_names[tid] = {'name': str(name), 'active': active}
         return False
 
-    prev = g_thread_names[f'{tid}']['active']
-    g_thread_names[f'{tid}']['active'] = active
+    prev = g_thread_names[tid]['active']
+    g_thread_names[tid]['active'] = active
 
     return prev == active
 
@@ -66,7 +66,7 @@ def spit_json(path, trace_events):
     trace_events.append(add_metadata("thread_name", 0, 3, {'name': 'Semaphore'}))
     trace_events.append(add_metadata("thread_name", 0, 4, {'name': 'Timer'}))
     for k in g_thread_names.keys():
-        trace_events.append(add_metadata("thread_name", 0, k, {'name': g_thread_names[k]['name']}))
+        trace_events.append(add_metadata("thread_name", 0, int(k), {'name': g_thread_names[k]['name']}))
 
     content = json.dumps({
         "traceEvents": trace_events,
