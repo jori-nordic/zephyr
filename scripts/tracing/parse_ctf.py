@@ -109,7 +109,7 @@ def main():
     timeline = []
 
     def do_trace(msg):
-        ns_from_origin = msg.default_clock_snapshot.ns_from_origin
+        ns_from_origin = msg.default_clock_snapshot.ns_from_origin / 1000
         event = msg.event
         ph = 'X'
         name = event.name
@@ -117,6 +117,8 @@ def main():
         global g_isr_active
         global prev_ts
 
+        # workaround for UI getting confused when two events appear
+        # at the same reported time
         if prev_ts == ns_from_origin:
             ns_from_origin += 1
 
@@ -185,8 +187,9 @@ def main():
         elif 'timer' in name:
             tid = 4
 
-        # else:
-        #     import pdb;pdb.set_trace()
+        else:
+            print(f'Unknown event: {event.name} payload {event.payload_field}')
+            raise(Exception)
 
         g_events.append(format_json(name, ns_from_origin, ph, tid))
 
