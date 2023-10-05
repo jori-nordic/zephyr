@@ -146,7 +146,7 @@ def main():
                 # Means the thread is already switched in/out,
                 # adding another event will confuse the UI
                 # It probably means that we are coming from an ISR
-                g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
+                # g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
                 return
 
             if ph == 'B' and g_isr_active:
@@ -162,7 +162,7 @@ def main():
 
         elif 'isr' in name:
             # debug
-            g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
+            # g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
 
             if 'isr_enter' in name:
                 if g_isr_active:
