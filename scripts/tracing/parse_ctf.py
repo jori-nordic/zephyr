@@ -21,8 +21,6 @@ Generate trace using samples/subsys/tracing for example:
 import json
 import sys
 import datetime
-import colorama
-from colorama import Fore
 import argparse
 try:
     import bt2
@@ -39,14 +37,32 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-def spit_json(path, trace_events):
+def add_metadata(name, pid, tid, args):
+    return {
+        'pid': pid,
+        'tid': tid,
+        'name': name,
+        'ph': 'M',
+        'cat': "__metadata",
+        'args': args,
+    }
 
-    # add_metadata(trace_events, "thread_name", 0, KERNELSPACE_HYPERCALL_NR, {'name': "Kernelspace"})
-    # add_metadata(trace_events, "thread_name", 0, USERSPACE_HYPERCALL_NR, {'name': "Userspace"})
-    # add_metadata(trace_events, "process_name", 0, USERSPACE_HYPERCALL_NR, {'name': "VM0"})
-    # add_metadata(trace_events, "process_labels", 0, USERSPACE_HYPERCALL_NR, {'labels': "Ubuntu 16.04"})
-    # add_metadata(trace_events, "thread_sort_index", 0, KERNELSPACE_HYPERCALL_NR, {'sort_index': -5})
-    # add_metadata(trace_events, "thread_sort_index", 0, USERSPACE_HYPERCALL_NR, {'sort_index': -10})
+g_thread_names = {}
+
+def add_thread(tid, name, active):
+    if f'{tid}' not in g_thread_names.keys():
+        g_thread_names[f'{tid}'] = {'name': str(name), 'active': active}
+        return False
+
+    prev = g_thread_names[f'{tid}']['active']
+    g_thread_names[f'{tid}']['active'] = active
+
+    return prev == active
+
+def spit_json(path, trace_events):
+    trace_events.append(add_metadata("thread_name", 0, 0, {'name': 'general'}))
+    for k in g_thread_names.keys():
+        trace_events.append(add_metadata("thread_name", 0, k, {'name': g_thread_names[k]['name']}))
 
     content = json.dumps({
         "traceEvents": trace_events,
@@ -58,106 +74,63 @@ def spit_json(path, trace_events):
 
 g_events = []
 
-def format_json(name, ts):
+def format_json(name, ts, ph, tid=0):
     # Chrome trace format
-    return {
+    # `args` has to have at least one arg, is
+    # shown when clicking the event
+    evt = {
         'pid': 0,
-        'tid': 0,
+        'tid': int(tid),
         'name': name,
-        'ph': 'X',
-        'dur': 10,
+        'ph': ph,
         'ts': ts,
         'args': {
             'cpu': 0,
-            'depth': 0
         },
     }
 
-def main():
-    colorama.init()
+    if ph == 'X':
+        # fake duration for now
+        evt['dur'] = 100
 
+    return evt
+
+def main():
     args = parse_args()
 
     msg_it = bt2.TraceCollectionMessageIterator(args.trace)
     last_event_ns_from_origin = None
     timeline = []
 
-    def get_thread(name):
-        for t in timeline:
-            if t.get('name', None) == name and t.get('in', 0 ) != 0 and not t.get('out', None):
-                return t
-        return {}
-
     def do_trace(msg):
         ns_from_origin = msg.default_clock_snapshot.ns_from_origin
         event = msg.event
-        # Compute the time difference since the last event message.
-        diff_s = 0
+        ph = 'X'
+        name = event.name
+        tid = 0
 
-        dt = datetime.datetime.fromtimestamp(ns_from_origin / 1e9)
+        if 'thread' in event.name:
+            name = 'thread_active'
 
-        if event.name in [
-                'thread_switched_out',
-                'thread_switched_in',
-                'thread_pending',
-                'thread_ready',
-                'thread_resume',
-                'thread_suspend',
-                'thread_create',
-                'thread_abort'
-                ]:
-
-            cpu = event.payload_field.get("cpu", None)
-            thread_id = event.payload_field.get("thread_id", None)
-            thread_name = event.payload_field.get("name", None)
-
-            th = {}
-            if event.name in ['thread_switched_out', 'thread_switched_in'] and cpu is not None:
-                cpu_string = f"(cpu: {cpu})"
+            if 'thread_switched_in' in event.name:
+                ph = 'B'
+            elif 'thread_switched_out' in event.name:
+                ph = 'E'
             else:
-                cpu_string = ""
+                print(f'THREAD OTHER: {event.name}')
+                raise(Exception)
 
-            # if thread_name:
-            # elif thread_id:
-            # else:
+            tid = event.payload_field['thread_id']
 
-            if event.name in ['thread_switched_out', 'thread_switched_in']:
-                if thread_name:
-                    th = get_thread(thread_name)
-                    if not th:
-                        th['name'] = thread_name
-                else:
-                    th = get_thread(thread_id)
-                    if not th:
-                        th['name'] = thread_id
+            # Means that this event tries to mark the thread as active
+            already = add_thread(tid, event.payload_field['name'], ph == 'B')
 
-                if event.name in ['thread_switched_out']:
-                    th['out'] = ns_from_origin
-                    tin = th.get('in', None)
-                    tout = th.get('out', None)
-                    if tout is not None and tin is not None:
-                        diff = tout - tin
-                        th['runtime'] = diff
-                elif event.name in ['thread_switched_in']:
-                    th['in'] = ns_from_origin
+            if already:
+                # Means the thread is already switched in/out,
+                # adding another event will confuse the UI
+                return
 
-                    timeline.append(th)
-
-        elif event.name in ['thread_info']:
-            stack_size = event.payload_field['stack_size']
-        elif event.name in ['start_call', 'end_call']:
-            if event.payload_field['id'] == 39:
-                c = Fore.GREEN
-            elif event.payload_field['id'] in [37, 38]:
-                c = Fore.CYAN
-            else:
-                c = Fore.YELLOW
-        elif event.name in ['semaphore_init', 'semaphore_take', 'semaphore_give']:
-            c = Fore.CYAN
-        elif event.name in ['mutex_init', 'mutex_take', 'mutex_give']:
-            c = Fore.MAGENTA
-
-        g_events.append(format_json(event.name, ns_from_origin))
+        g_events.append(format_json(name, ns_from_origin, ph, tid))
 
     try:
         for msg in msg_it:
