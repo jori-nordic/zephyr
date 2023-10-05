@@ -203,8 +203,13 @@ def main():
                 continue
 
             do_trace(msg)
+    except bt2._Error as e:
+        if e._msg != 'graph object could not run once':
+            raise(e)
+        print(f'Trace does not terminate cleanly')
     finally:
         spit_json('./out.json', g_events)
+        print(f'Done')
 
 if __name__=="__main__":
     main()
