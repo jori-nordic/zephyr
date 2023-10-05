@@ -109,7 +109,7 @@ def main():
     timeline = []
 
     def do_trace(msg):
-        ns_from_origin = msg.default_clock_snapshot.ns_from_origin / 1000
+        ns_from_origin = msg.default_clock_snapshot.ns_from_origin // 1000
         event = msg.event
         ph = 'X'
         name = event.name
@@ -117,10 +117,12 @@ def main():
         global g_isr_active
         global prev_ts
 
+        # print(f'{event.name} - {ns_from_origin}')
         # workaround for UI getting confused when two events appear
         # at the same reported time
-        if prev_ts == ns_from_origin:
+        while prev_ts >= ns_from_origin:
             ns_from_origin += 1
+            # print('workaround')
 
         prev_ts = ns_from_origin
 
@@ -144,12 +146,12 @@ def main():
                 # Means the thread is already switched in/out,
                 # adding another event will confuse the UI
                 # It probably means that we are coming from an ISR
-                g_events.append(format_json(event.name, ns_from_origin - 2, 'X', 0))
-                if g_isr_active:
-                    g_isr_active = False
-                    g_events.append(format_json('isr_active', ns_from_origin - 1, 'E', 1))
-
+                g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
                 return
+
+            if ph == 'B' and g_isr_active:
+                g_isr_active = False
+                g_events.append(format_json('isr_active', ns_from_origin, 'E', 1))
 
         elif 'idle' in name:
             # Means no thread is switched in.
@@ -159,10 +161,19 @@ def main():
                 g_events.append(format_json('isr_active', ns_from_origin - 1, 'E', 1))
 
         elif 'isr' in name:
+            # debug
+            g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
+
             if 'isr_enter' in name:
+                if g_isr_active:
+                    return
+
                 ph = 'B'
                 g_isr_active = True
             elif 'isr_exit' in name:
+                if not g_isr_active:
+                    return
+
                 ph = 'E'
                 g_isr_active = False
             else:
@@ -170,13 +181,6 @@ def main():
 
             name = 'isr_active'
             tid = 1
-
-            # debug
-            g_events.append(format_json(event.name, ns_from_origin - 1, 'X', 0))
-
-            if ph == 'B' and g_isr_active:
-                # exit ISR
-                g_events.append(format_json(name, ns_from_origin - 1, 'E', tid))
 
         elif 'mutex' in name:
             tid = 2
