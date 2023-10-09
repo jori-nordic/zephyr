@@ -17,6 +17,7 @@
 #include <zephyr/bluetooth/conn.h>
 
 #include "utils.h"
+#include "sync.h"
 #include "bstests.h"
 
 #include <zephyr/logging/log.h>
@@ -44,7 +45,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		return;
 	}
 
-	LOG_DBG("%s", addr);
+	LOG_INF("%s", addr);
 
 	dconn = bt_conn_ref(conn);
 	SET_FLAG(is_connected);
@@ -56,7 +57,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_DBG("%p %s (reason 0x%02x)", conn, addr, reason);
+	LOG_INF("%p %s (reason 0x%02x)", conn, addr, reason);
 
 	bt_conn_unref(dconn);
 	UNSET_FLAG(is_connected);
@@ -161,6 +162,7 @@ static uint8_t notified(struct bt_conn *conn, struct bt_gatt_subscribe_params *p
 
 	if (atomic_get(&notifications) == 3) {
 		LOG_INF("sleeping on the job");
+		backchannel_sync_send();
 		k_sleep(K_MSEC(100));
 		LOG_INF("back to work");
 	}
@@ -202,6 +204,8 @@ void subscribe(void)
 
 void test_procedure_0(void)
 {
+	ASSERT(backchannel_init() == 0, "Failed to open backchannel\n");
+
 	LOG_DBG("Test start: ATT disconnect protocol");
 	int err;
 

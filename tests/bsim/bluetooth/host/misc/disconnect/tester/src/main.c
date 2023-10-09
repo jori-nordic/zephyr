@@ -21,6 +21,7 @@
 #include "host/l2cap_internal.h"
 
 #include "utils.h"
+#include "sync.h"
 #include "bstests.h"
 
 #include <zephyr/logging/log.h>
@@ -543,6 +544,8 @@ static void init_tinyhost(void)
 
 void test_procedure_0(void)
 {
+	ASSERT(backchannel_init() == 0, "Failed to open backchannel\n");
+
 	init_tinyhost();
 
 	/* Start advertising & wait for a connection */
@@ -561,8 +564,9 @@ void test_procedure_0(void)
 
 	PASS("Tester done\n");
 
-	/* FIXME: use backchannels for this */
-	k_sleep(K_MSEC(1000));
+	/* Wait until DUT starts sleeping */
+	backchannel_sync_wait();
+	k_sleep(K_MSEC(50));
 
 	/* FIXME: do this gracefully */
 	k_oops();

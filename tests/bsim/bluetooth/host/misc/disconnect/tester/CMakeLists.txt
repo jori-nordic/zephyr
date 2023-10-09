@@ -7,6 +7,7 @@ project(bsim_test_disconnect_tester)
 
 target_sources(app PRIVATE
   src/main.c
+  ../common/sync.c
 )
 
 zephyr_include_directories(
