@@ -57,7 +57,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("%p %s (reason 0x%02x)", conn, addr, reason);
+	LOG_INF("disconnected %p %s (reason 0x%02x)", conn, addr, reason);
 
 	bt_conn_unref(dconn);
 	UNSET_FLAG(is_connected);
@@ -169,10 +169,17 @@ static uint8_t notified(struct bt_conn *conn, struct bt_gatt_subscribe_params *p
 	atomic_inc(&notifications);
 
 	if (atomic_get(&notifications) == 3) {
-		LOG_INF("sleeping on the job");
+		LOG_INF("##################### BRB..");
 		backchannel_sync_send();
-		k_sleep(K_MSEC(100));
-		LOG_INF("back to work");
+
+		/* Make scheduler rotate us in and out multiple times */
+		for (int i=0; i<10; i++) {
+			LOG_DBG("sleep");
+			k_sleep(K_MSEC(100));
+			LOG_DBG("sleep");
+		}
+
+		LOG_INF("##################### ..back to work");
 	}
 
 	return BT_GATT_ITER_CONTINUE;
@@ -252,7 +259,7 @@ void test_procedure_0(void)
 
 	WAIT_FOR_FLAG_UNSET(is_connected);
 
-	PASS("DUT done\n");
+	PASS("DUT exit\n");
 }
 
 void test_tick(bs_time_t HW_device_time)

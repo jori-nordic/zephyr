@@ -573,7 +573,7 @@ void test_procedure_0(void)
 	/* Wait >2 conn events, to be sure at least one notification makes it to
 	 * the other peer before breaking the link.
 	 */
-	k_sleep(K_MSEC(100));
+	k_sleep(K_MSEC(50));
 
 	LOG_INF("kill radio");
 	hwll_disconnect_phy();
