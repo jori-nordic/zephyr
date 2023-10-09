@@ -23,6 +23,7 @@
 #include "utils.h"
 #include "sync.h"
 #include "bstests.h"
+#include "NRF_HWLowL.h"		/* for hwll_disconnect_phy(); */
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(bt_tinyhost, LOG_LEVEL_INF);
@@ -182,7 +183,7 @@ static void handle_att_write(struct net_buf *buf)
 	uint16_t handle = net_buf_pull_le16(buf);
 
 	LOG_INF("Got write for 0x%04x len %d", handle, buf->len);
-	LOG_HEXDUMP_ERR(buf->data, buf->len, "payload");
+	LOG_HEXDUMP_DBG(buf->data, buf->len, "payload");
 
 	static uint8_t ccc_write[2] = {0x03, 0x00};
 
@@ -562,14 +563,24 @@ void test_procedure_0(void)
 		gatt_notify();
 	}
 
-	PASS("Tester done\n");
-
 	/* Wait until DUT starts sleeping */
 	backchannel_sync_wait();
-	k_sleep(K_MSEC(50));
 
-	/* FIXME: do this gracefully */
-	k_oops();
+	for (int n = 0; n < 3; n++) {
+		gatt_notify();
+	}
+
+	/* Wait >2 conn events, to be sure at least one notification makes it to
+	 * the other peer before breaking the link.
+	 */
+	k_sleep(K_MSEC(100));
+
+	LOG_INF("kill radio");
+	hwll_disconnect_phy();
+
+	/* Pass has to be before the exit() for process to not error out */
+	PASS("Tester exit\n");
+	bs_trace_silent_exit(0);
 }
 
 void test_tick(bs_time_t HW_device_time)

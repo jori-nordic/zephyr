@@ -146,10 +146,18 @@ static uint8_t notified(struct bt_conn *conn, struct bt_gatt_subscribe_params *p
 	static uint8_t indication[] = INDICATION_PAYLOAD;
 	bool is_nfy;
 
-	ASSERT(length >= sizeof(indication), "Unexpected data");
-	ASSERT(length <= sizeof(notification), "Unexpected data");
-
 	LOG_HEXDUMP_DBG(data, length, "HVx data");
+
+	if (length == 0) {
+		/* The host's backward way of telling us we are unsubscribed
+		 * from this characteristic.
+		 */
+		LOG_DBG("Unsubscribed");
+		return BT_GATT_ITER_CONTINUE;
+	}
+
+	ASSERT(length >= sizeof(indication), "Unexpected data\n");
+	ASSERT(length <= sizeof(notification), "Unexpected data\n");
 
 	is_nfy = memcmp(data, notification, length) == 0;
 
@@ -240,7 +248,8 @@ void test_procedure_0(void)
 
 	do_dlu();
 
-	WAIT_FOR_VAL(notifications, 3);
+	WAIT_FOR_EXPR(notifications, < 4);
+
 	WAIT_FOR_FLAG_UNSET(is_connected);
 
 	PASS("DUT done\n");

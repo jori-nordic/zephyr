@@ -18,6 +18,10 @@ extern enum bst_result_t bst_result;
 #define SET_FLAG(flag)     (void)atomic_set(&flag, (atomic_t) true)
 #define UNSET_FLAG(flag)   (void)atomic_set(&flag, (atomic_t) false)
 
+#define WAIT_FOR_EXPR(var, expr)                                                                    \
+	while (atomic_get(&var) expr) {                                                         \
+		(void)k_sleep(K_MSEC(1));                                                          \
+	}
 #define WAIT_FOR_VAL(var, val)                                                                    \
 	while (atomic_get(&var) != val) {                                                         \
 		(void)k_sleep(K_MSEC(1));                                                          \
