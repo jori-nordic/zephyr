@@ -24,12 +24,8 @@ LOG_MODULE_REGISTER(dut, LOG_LEVEL_INF);
 
 DEFINE_FLAG(is_connected);
 DEFINE_FLAG(is_subscribed);
-DEFINE_FLAG(one_indication);
-DEFINE_FLAG(two_notifications);
 DEFINE_FLAG(flag_data_length_updated);
 
-static atomic_t nwrites;
-static atomic_t indications;
 static atomic_t notifications;
 
 /* Defined in hci_core.c */
@@ -142,44 +138,6 @@ static void connect(void)
 	/* No security support on the tinyhost unfortunately */
 }
 
-static ssize_t written_to(struct bt_conn *conn,
-			  const struct bt_gatt_attr *attr,
-			  const void *buf,
-			  uint16_t len,
-			  uint16_t offset,
-			  uint8_t flags)
-{
-	LOG_INF("written to: handle 0x%x len %d flags 0x%x",
-		attr->handle,
-		len,
-		flags);
-
-	LOG_HEXDUMP_DBG(buf, len, "Write data");
-
-	if (atomic_get(&nwrites) == 0) {
-		/* Suspend on the first write, which is an ATT Request */
-		LOG_INF("suspending HCI TX thread");
-		k_thread_suspend(bt_testing_tx_tid_get());
-	}
-
-	atomic_inc(&nwrites);
-
-	return len;
-}
-
-#define test_service_uuid                                                                          \
-	BT_UUID_DECLARE_128(BT_UUID_128_ENCODE(0xf0debc9a, 0x7856, 0x3412, 0x7856, 0x341278563412))
-#define test_characteristic_uuid                                                                   \
-	BT_UUID_DECLARE_128(BT_UUID_128_ENCODE(0xf2debc9a, 0x7856, 0x3412, 0x7856, 0x341278563412))
-
-BT_GATT_SERVICE_DEFINE(test_gatt_service, BT_GATT_PRIMARY_SERVICE(test_service_uuid),
-		       BT_GATT_CHARACTERISTIC(test_characteristic_uuid,
-					      (BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE |
-					       BT_GATT_CHRC_NOTIFY | BT_GATT_CHRC_INDICATE),
-					      BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-					      NULL, written_to, NULL),
-		       BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),);
-
 static uint8_t notified(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
 			const void *data, uint16_t length)
 {
@@ -197,10 +155,14 @@ static uint8_t notified(struct bt_conn *conn, struct bt_gatt_subscribe_params *p
 	LOG_INF("%s from 0x%x", is_nfy ? "notified" : "indicated",
 		params->value_handle);
 
-	if (is_nfy) {
-		atomic_inc(&notifications);
-	} else {
-		atomic_inc(&indications);
+	ASSERT(is_nfy, "Unexpected indication\n");
+
+	atomic_inc(&notifications);
+
+	if (atomic_get(&notifications) == 3) {
+		LOG_INF("sleeping on the job");
+		k_sleep(K_MSEC(100));
+		LOG_INF("back to work");
 	}
 
 	return BT_GATT_ITER_CONTINUE;
@@ -238,21 +200,6 @@ void subscribe(void)
 	WAIT_FOR_FLAG(is_subscribed);
 }
 
-static void send_write_handle(void)
-{
-	int err;
-	uint16_t handle;
-	uint8_t data[sizeof(handle)];
-	const struct bt_gatt_attr *attr = &test_gatt_service.attrs[2];
-
-	/* Inform tester which handle it should write to */
-	handle = bt_gatt_attr_get_handle(attr);
-	sys_put_le16(handle, data);
-
-	err = bt_gatt_notify(dconn, attr, data, sizeof(data));
-	ASSERT(!err, "Failed to transmit handle for write (err %d)\n", err);
-}
-
 void test_procedure_0(void)
 {
 	LOG_DBG("Test start: ATT disconnect protocol");
@@ -263,55 +210,34 @@ void test_procedure_0(void)
 	LOG_DBG("Central: Bluetooth initialized.");
 
 	/* Test purpose:
-	 * Test Spec V.3 P.F 3.3.2 Sequential protocol
-	 *
-	 * Verify that a Zephyr host server/client combo can process
-	 * concurrently: one Request, one Indication, multiple
-	 * Notifications and multiple Commands.
-	 *
-	 * To do this, the application on the DUT will purposefully stall the
-	 * HCI TX thread, ensuring that the responses are not sent until the
-	 * tester has finished sending everything.
+	 * Make sure the host handles long blocking in notify callbacks
+	 * gracefully, especially in the case of a disconnect while waiting.
 	 *
 	 * Test procedure:
 	 *
 	 * [setup]
-	 * - connect ACL
+	 * - connect ACL, DUT is central and GATT client
 	 * - update data length (tinyhost doens't have recombination)
-	 * - dut: subscribe to INDICATE and NOTIFY on tester CHRC
-	 * - dut: send a handle the tester can write to
+	 * - dut: subscribe to NOTIFY on tester CHRC
 	 *
-	 * [proc]
-	 * - tester: send one ATT write request
-	 * - tester: send one ATT indication
-	 * - tester: send two ATT notifications
-	 * - tester: send two ATT commands
-	 *
-	 * - dut: handle the REQuest, build & put the RSP PDU on the HCI TX queue
-	 * - dut: suspend the HCI TX thread
-	 * - dut: handle the INDication
-	 * - dut: handle the notifications
-	 * - dut: handle the (write) commands
-	 * - dut: resume the TX thread after a short while
+	 * [procedure]
+	 * - tester: start periodic notifications
+	 * - dut: wait 100ms in notification RX callback
+	 * - tester: disconnect (not gracefully) while DUT is waiting
+	 *   -> simulates a power or range loss situation
+	 * - dut: exit notification callback
+	 * - dut: wait for `disconnected` conn callback
 	 *
 	 * [verdict]
-	 * - all procedures complete successfully, no buffer allocation failures
-	 *   or timeouts.
+	 * - The DUT gets the `disconnected` callback, no hanging or timeouts.
 	 */
 	connect();
 	subscribe();
 
 	do_dlu();
 
-	send_write_handle();
-
-	WAIT_FOR_VAL(indications, 1);
-	WAIT_FOR_VAL(notifications, 2);
-	/* One REQ, two CMDs */
-	WAIT_FOR_VAL(nwrites, 3);
-
-	/* Send RSP to LL */
-	k_thread_resume(bt_testing_tx_tid_get());
+	WAIT_FOR_VAL(notifications, 3);
+	WAIT_FOR_FLAG_UNSET(is_connected);
 
 	PASS("DUT done\n");
 }

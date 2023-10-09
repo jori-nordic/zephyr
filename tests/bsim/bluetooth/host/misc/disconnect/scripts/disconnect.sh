@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 BOARD="${BOARD:-nrf52_bsim}"
-dut_exe="bs_${BOARD}_tests_bsim_bluetooth_host_att_disconnect_dut_prj_conf"
-tester_exe="bs_${BOARD}_tests_bsim_bluetooth_host_att_disconnect_tester_prj_conf"
+dut_exe="bs_${BOARD}_tests_bsim_bluetooth_host_misc_disconnect_dut_prj_conf"
+tester_exe="bs_${BOARD}_tests_bsim_bluetooth_host_misc_disconnect_tester_prj_conf"
 
 source ${ZEPHYR_BASE}/tests/bsim/sh_common.source
 
-test_name="att_disconnect"
+test_name="misc_disconnect"
 simulation_id="${test_name}"
 verbosity_level=2
 EXECUTE_TIMEOUT=30
