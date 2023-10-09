@@ -25,4 +25,25 @@ Execute "./$tester_exe" \
 Execute "./$dut_exe" \
     -v=${verbosity_level} -s="${simulation_id}" -d=0 -testid=dut -RealEncryption=0
 
-wait_for_background_jobs
+# wait_for_background_jobs, but doesn't exit on error
+exit_code=0
+for process_id in $_process_ids; do
+wait $process_id || let "exit_code=$?"
+done
+
+# Make pcaps
+for j in {0..1}; do
+    i=$(printf '%02i' $j)
+
+    ${BSIM_OUT_PATH}/components/ext_2G4_phy_v1/dump_post_process/csv2pcap -o \
+    ${BSIM_OUT_PATH}/results/${simulation_id}/Trace_$i.Tx.pcap \
+    ${BSIM_OUT_PATH}/results/${simulation_id}/d_2G4_$i.Tx.csv
+
+    ${BSIM_OUT_PATH}/components/ext_2G4_phy_v1/dump_post_process/csv2pcap -o \
+    ${BSIM_OUT_PATH}/results/${simulation_id}/Trace_$i.Rx.pcap \
+    ${BSIM_OUT_PATH}/results/${simulation_id}/d_2G4_$i.Rx.csv
+
+    echo "${BSIM_OUT_PATH}/results/${simulation_id}/Trace_$i.Tx.pcap"
+    echo "${BSIM_OUT_PATH}/results/${simulation_id}/Trace_$i.Rx.pcap"
+done
+
