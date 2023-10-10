@@ -65,6 +65,8 @@ def spit_json(path, trace_events):
     trace_events.append(add_metadata("thread_name", 0, 2, {'name': 'Mutex'}))
     trace_events.append(add_metadata("thread_name", 0, 3, {'name': 'Semaphore'}))
     trace_events.append(add_metadata("thread_name", 0, 4, {'name': 'Timer'}))
+    trace_events.append(add_metadata("thread_name", 0, 5, {'name': 'Network buffers'}))
+
     for k in g_thread_names.keys():
         trace_events.append(add_metadata("thread_name", 0, int(k), {'name': g_thread_names[k]['name']}))
 
@@ -79,7 +81,7 @@ def spit_json(path, trace_events):
 g_events = []
 g_isr_active = False
 
-def format_json(name, ts, ph, tid=0):
+def format_json(name, ts, ph, tid=0, obj=0, cnt=0):
     # Chrome trace format
     # `args` has to have at least one arg, is
     # shown when clicking the event
@@ -97,6 +99,13 @@ def format_json(name, ts, ph, tid=0):
     if ph == 'X':
         # fake duration for now
         evt['dur'] = 10
+
+    if ph == 'C':
+        evt['args'] = {'count': int(cnt)}
+        return evt
+
+    if obj != 0:
+        evt['args'] = {'obj': f'{hex(obj)}'}
 
     return evt
 
@@ -133,6 +142,18 @@ def main():
                 ph = 'B'
             elif 'thread_switched_out' in event.name:
                 ph = 'E'
+            elif 'thread_create' in event.name:
+                tid = event.payload_field['thread_id']
+                g_events.append(format_json(name, ns_from_origin, ph, tid))
+                return
+            elif 'thread_info' in event.name:
+                tid = event.payload_field['thread_id']
+                g_events.append(format_json(name, ns_from_origin, ph, tid))
+                return
+            elif 'thread_name_set' in event.name:
+                tid = event.payload_field['thread_id']
+                g_events.append(format_json(name, ns_from_origin, ph, tid))
+                return
             else:
                 print(f'THREAD OTHER: {event.name}')
                 raise(Exception)
@@ -190,6 +211,34 @@ def main():
 
         elif 'timer' in name:
             tid = 4
+
+        elif 'net_buf' in name:
+            tid = 5
+
+            # TODO: use counter events to graph usage
+            if 'net_buf_allocated' in name:
+                buf = event.payload_field['buf']
+
+                # TODO: one TID per buffer pool
+                if buf != 0:
+                    ph = 'B'
+                    pool = event.payload_field['pool']
+                    g_events.append(format_json(f"buffer [{hex(buf)}]", ns_from_origin, ph, tid, buf))
+                    return
+
+            elif 'net_buf_destroyed' in name:
+                ph = 'E'
+                pool = event.payload_field['pool']
+                buf = event.payload_field['buf']
+                g_events.append(format_json(f"buffer [{hex(buf)}]", ns_from_origin, ph, tid, buf))
+                return
+
+            elif 'ref' in name:
+                ph = 'C'
+                buf = event.payload_field['buf']
+                cnt = event.payload_field['count']
+                g_events.append(format_json(f"[{hex(buf)}] reference", ns_from_origin, ph, tid, buf, cnt))
+                return
 
         else:
             print(f'Unknown event: {event.name} payload {event.payload_field}')

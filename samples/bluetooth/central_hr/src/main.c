@@ -250,7 +250,7 @@ int main(void)
 	ret = usb_enable(NULL);
 	if (ret) {
 		printk("usb backend enable failed");
-		return;
+		return 0;
 	}
 #endif /* CONFIG_USB_DEVICE_STACK */
 	k_sleep(K_SECONDS(3));
