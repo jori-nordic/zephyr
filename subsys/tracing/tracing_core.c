@@ -114,6 +114,8 @@ static int tracing_init(void)
 	k_thread_name_set(&tracing_thread, TRACING_THREAD_NAME);
 #endif
 
+	NRF_P0->DIRSET = BIT(16);
+
 	return 0;
 }
 
@@ -129,9 +131,21 @@ void tracing_trigger_output(bool before_put_is_empty)
 	}
 }
 
+extern bool is_usb_driver(void);
+
 bool is_tracing_thread(void)
 {
-	return (!k_is_in_isr() && (k_current_get() == tracing_thread_tid));
+	if (k_is_in_isr()) {
+		return false;
+	}
+
+	bool tracing = k_current_get() == tracing_thread_tid;
+
+	if (tracing || is_usb_driver()) {
+		return true;
+	}
+
+	return false;
 }
 #endif
 
@@ -157,4 +171,5 @@ void tracing_buffer_handle(uint8_t *data, uint32_t length)
 void tracing_packet_drop_handle(void)
 {
 	atomic_inc(&tracing_packet_drop_num);
+	NRF_P0->OUT ^= BIT(16);
 }
