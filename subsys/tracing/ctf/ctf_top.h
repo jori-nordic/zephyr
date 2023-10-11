@@ -332,19 +332,19 @@ static inline void ctf_top_timer_status_sync_exit(uint32_t timer, uint32_t resul
 	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_TIMER_STATUS_SYNC_EXIT), timer, result);
 }
 
-static inline void ctf_top_net_buf_alloc(uint32_t pool, ctf_bounded_string_t name)
+static inline void ctf_top_net_buf_alloc(uint32_t pool, uint32_t free, ctf_bounded_string_t name)
 {
-	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_NET_BUF_ALLOC), pool, name);
+	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_NET_BUF_ALLOC), pool, free, name);
 }
 
-static inline void ctf_top_net_buf_allocated(uint32_t pool, uint32_t buf, ctf_bounded_string_t name)
+static inline void ctf_top_net_buf_allocated(uint32_t pool, uint32_t free, uint32_t buf, ctf_bounded_string_t name)
 {
-	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_NET_BUF_ALLOCATED), pool, buf, name);
+	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_NET_BUF_ALLOCATED), pool, free, buf, name);
 }
 
-static inline void ctf_top_net_buf_destroyed(uint32_t pool, uint32_t buf, ctf_bounded_string_t name)
+static inline void ctf_top_net_buf_destroyed(uint32_t pool, uint32_t free, uint32_t buf, ctf_bounded_string_t name)
 {
-	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_NET_BUF_DESTROYED), pool, buf, name);
+	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_NET_BUF_DESTROYED), pool, free, buf, name);
 }
 
 static inline void ctf_top_net_buf_ref(uint32_t buf, uint32_t count)

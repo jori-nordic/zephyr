@@ -81,7 +81,7 @@ def spit_json(path, trace_events):
 g_events = []
 g_isr_active = False
 
-def format_json(name, ts, ph, tid=0, obj=0, cnt=0):
+def format_json(name, ts, ph, tid=0, meta=None):
     # Chrome trace format
     # `args` has to have at least one arg, is
     # shown when clicking the event
@@ -92,7 +92,7 @@ def format_json(name, ts, ph, tid=0, obj=0, cnt=0):
         'ph': ph,
         'ts': ts,
         'args': {
-            'cpu': 0,
+            'dummy': 0,
         },
     }
 
@@ -100,12 +100,8 @@ def format_json(name, ts, ph, tid=0, obj=0, cnt=0):
         # fake duration for now
         evt['dur'] = 10
 
-    if ph == 'C':
-        evt['args'] = {'count': int(cnt)}
-        return evt
-
-    if obj != 0:
-        evt['args'] = {'obj': f'{hex(obj)}'}
+    if meta is not None:
+        evt['args'] = meta
 
     return evt
 
@@ -120,9 +116,10 @@ def main():
     def do_trace(msg):
         ns_from_origin = msg.default_clock_snapshot.ns_from_origin // 1000
         event = msg.event
-        ph = 'X'
+        ph = 'i'
         name = event.name
         tid = 0
+        meta = None
         global g_isr_active
         global prev_ts
 
@@ -215,36 +212,44 @@ def main():
         elif 'net_buf' in name:
             tid = 5
 
-            # TODO: use counter events to graph usage
-            if 'net_buf_allocated' in name:
+            if 'net_buf_allocated' in name or 'net_buf_destroyed' in name:
                 buf = event.payload_field['buf']
+                poolname = event.payload_field['name']
 
-                # TODO: one TID per buffer pool
-                if buf != 0:
-                    ph = 'B'
+                # FIXME: add free count in C code
+                if buf == 0:
+                    ph = 'i'
+                    free = event.payload_field['free']
+                    meta = {'name': str(poolname), 'count': int(free)}
+                else:
+                    ph = 'C'
                     pool = event.payload_field['pool']
-                    g_events.append(format_json(f"buffer [{hex(buf)}]", ns_from_origin, ph, tid, buf))
-                    return
+                    free = event.payload_field['free']
+                    meta = {'count': int(free)}
+                    g_events.append(format_json(f"pool [{poolname} - {hex(pool)}] free", ns_from_origin, ph, tid, meta))
 
-            elif 'net_buf_destroyed' in name:
-                ph = 'E'
-                pool = event.payload_field['pool']
-                buf = event.payload_field['buf']
-                g_events.append(format_json(f"buffer [{hex(buf)}]", ns_from_origin, ph, tid, buf))
-                return
+                    # still record this event to get the buffer value, as the
+                    # 'count' events cannot have metadata other than counts
+                    ph = 'i'
+                    meta = {'name': str(poolname), 'buf': f'{hex(buf)}'}
+            elif 'net_buf_alloc' in name:
+                poolname = event.payload_field['name']
+                free = event.payload_field['free']
+                meta = {'name': str(poolname), 'count': int(free)}
 
             elif 'ref' in name:
                 ph = 'C'
                 buf = event.payload_field['buf']
                 cnt = event.payload_field['count']
-                g_events.append(format_json(f"[{hex(buf)}] reference", ns_from_origin, ph, tid, buf, cnt))
+                meta = {'count': int(cnt)}
+                g_events.append(format_json(f"[{hex(buf)}] reference", ns_from_origin, ph, tid, meta))
                 return
 
         else:
             print(f'Unknown event: {event.name} payload {event.payload_field}')
             raise(Exception)
 
-        g_events.append(format_json(name, ns_from_origin, ph, tid))
+        g_events.append(format_json(name, ns_from_origin, ph, tid, meta))
 
     try:
         for msg in msg_it:

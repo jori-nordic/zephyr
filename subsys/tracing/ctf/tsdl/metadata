@@ -316,6 +316,7 @@ event {
 	id = 0x34;
 	fields := struct {
 		uint32_t pool;
+        uint32_t free;
         ctf_bounded_string_t name[20];
 	};
 };
@@ -325,6 +326,7 @@ event {
 	id = 0x35;
 	fields := struct {
 		uint32_t pool;
+        uint32_t free;
         uint32_t buf;
         ctf_bounded_string_t name[20];
 	};
@@ -335,6 +337,7 @@ event {
 	id = 0x36;
 	fields := struct {
 		uint32_t pool;
+        uint32_t free;
         uint32_t buf;
         ctf_bounded_string_t name[20];
 	};

@@ -337,12 +337,19 @@ static void _get_pool_name(void *fifo, ctf_bounded_string_t *name)
 	}
 }
 
+static uint32_t _get_pool_free_count(void *fifo)
+{
+	struct net_buf_pool *pool = CONTAINER_OF(fifo, struct net_buf_pool, free);
+
+	return atomic_get(&pool->avail_count);
+}
+
 void sys_port_trace_net_buf_get_enter(void *pool)
 {
 	ctf_bounded_string_t name = { "" };
 	_get_pool_name(pool, &name);
 
-	ctf_top_net_buf_alloc((uint32_t)pool, name);
+	ctf_top_net_buf_alloc((uint32_t)pool, _get_pool_free_count(pool), name);
 }
 
 void sys_port_trace_net_buf_get_exit(void *pool, struct net_buf *buf)
@@ -350,7 +357,7 @@ void sys_port_trace_net_buf_get_exit(void *pool, struct net_buf *buf)
 	ctf_bounded_string_t name = { "" };
 	_get_pool_name(pool, &name);
 
-	ctf_top_net_buf_allocated((uint32_t)pool, (uint32_t)buf, name);
+	ctf_top_net_buf_allocated((uint32_t)pool, _get_pool_free_count(pool), (uint32_t)buf, name);
 }
 
 void sys_port_trace_net_buf_destroy(void *pool, struct net_buf *buf)
@@ -358,7 +365,7 @@ void sys_port_trace_net_buf_destroy(void *pool, struct net_buf *buf)
 	ctf_bounded_string_t name = { "" };
 	_get_pool_name(pool, &name);
 
-	ctf_top_net_buf_destroyed((uint32_t)pool, (uint32_t)buf, name);
+	ctf_top_net_buf_destroyed((uint32_t)pool, _get_pool_free_count(pool), (uint32_t)buf, name);
 }
 
 void sys_port_trace_net_buf_ref(struct net_buf *buf)
