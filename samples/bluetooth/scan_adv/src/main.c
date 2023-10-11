@@ -13,6 +13,7 @@
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
+#include <zephyr/usb/usb_device.h>
 
 static uint8_t mfg_data[] = { 0xff, 0xff, 0x00 };
 
@@ -37,6 +38,17 @@ int main(void)
 	int err;
 
 	printk("Starting Scanner/Advertiser Demo\n");
+
+#if defined(CONFIG_USB_DEVICE_STACK)
+	int ret;
+
+	ret = usb_enable(NULL);
+	if (ret) {
+		printk("usb backend enable failed");
+		return 0;
+	}
+#endif /* CONFIG_USB_DEVICE_STACK */
+	k_sleep(K_SECONDS(3));
 
 	/* Initialize the Bluetooth Subsystem */
 	err = bt_enable(NULL);
