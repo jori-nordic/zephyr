@@ -403,8 +403,8 @@ void net_buf_destroy(struct net_buf *buf)
 {
 	struct net_buf_pool *pool = net_buf_pool_get(buf->pool_id);
 
-	sys_port_trace_net_buf_destroy(pool, buf);
 	k_lifo_put(&pool->free, buf);
+	sys_port_trace_net_buf_destroy(pool, buf);
 }
 
 #if defined(CONFIG_NET_BUF_LOG)
@@ -418,9 +418,11 @@ struct net_buf *net_buf_get(struct k_fifo *fifo, k_timeout_t timeout)
 
 	NET_BUF_DBG("%s():%d: fifo %p", func, line, fifo);
 
-	sys_port_trace_net_buf_get_enter(fifo);
+	struct net_buf_pool *pool = CONTAINER_OF((struct k_lifo *)fifo, struct net_buf_pool, free);
+
+	sys_port_trace_net_buf_get_enter(pool);
 	buf = k_fifo_get(fifo, timeout);
-	sys_port_trace_net_buf_get_exit(fifo, buf);
+	sys_port_trace_net_buf_get_exit(pool, buf);
 	if (!buf) {
 		return NULL;
 	}

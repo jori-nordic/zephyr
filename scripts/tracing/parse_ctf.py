@@ -215,27 +215,38 @@ def main():
             if 'net_buf_allocated' in name or 'net_buf_destroyed' in name:
                 buf = event.payload_field['buf']
                 poolname = event.payload_field['name']
+                pool = event.payload_field['pool']
 
-                # FIXME: add free count in C code
                 if buf == 0:
                     ph = 'i'
                     free = event.payload_field['free']
                     meta = {'name': str(poolname), 'count': int(free)}
                 else:
+                    # Record pool free count
                     ph = 'C'
-                    pool = event.payload_field['pool']
                     free = event.payload_field['free']
                     meta = {'count': int(free)}
                     g_events.append(format_json(f"pool [{poolname} - {hex(pool)}] free", ns_from_origin, ph, tid, meta))
 
-                    # still record this event to get the buffer value, as the
-                    # 'count' events cannot have metadata other than counts
-                    ph = 'i'
-                    meta = {'name': str(poolname), 'buf': f'{hex(buf)}'}
+                    # Record buffer lifetime as duration event
+                    if 'allocated' in name:
+                        ph = 'B'
+                    else:
+                        ph = 'E'
+
+                    # Can't add metadata cos it seems bluetooth plays tricks with the command buffers,
+                    # and the pool data ain't right afterwards
+                    meta = None
+                    g_events.append(format_json(f"buf [{hex(buf)}]", ns_from_origin, ph, tid, meta))
+
+                    ph = 'i'    # debug
+                    meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'buf': f'{hex(buf)}'}
+
             elif 'net_buf_alloc' in name:
                 poolname = event.payload_field['name']
+                pool = event.payload_field['pool']
                 free = event.payload_field['free']
-                meta = {'name': str(poolname), 'count': int(free)}
+                meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'count': int(free)}
 
             elif 'ref' in name:
                 ph = 'C'

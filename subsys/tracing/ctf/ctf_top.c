@@ -325,9 +325,8 @@ void sys_trace_k_timer_status_sync_exit(struct k_timer *timer, uint32_t result)
 	BUILD_ASSERT(0, "ohno");
 #endif
 
-static void _get_pool_name(void *fifo, ctf_bounded_string_t *name)
+static void _get_pool_name(struct net_buf_pool *pool, ctf_bounded_string_t *name)
 {
-	struct net_buf_pool *pool = CONTAINER_OF(fifo, struct net_buf_pool, free);
 	const char *pname = pool->name;
 
 	if (pname != NULL && pname[0] != '\0') {
@@ -337,10 +336,8 @@ static void _get_pool_name(void *fifo, ctf_bounded_string_t *name)
 	}
 }
 
-static uint32_t _get_pool_free_count(void *fifo)
+static uint32_t _get_pool_free_count(struct net_buf_pool *pool)
 {
-	struct net_buf_pool *pool = CONTAINER_OF(fifo, struct net_buf_pool, free);
-
 	return atomic_get(&pool->avail_count);
 }
 
