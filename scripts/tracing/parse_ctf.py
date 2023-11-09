@@ -227,8 +227,8 @@ def main():
                     # Record pool free count
                     ph = 'C'
                     free = event.payload_field['free']
-                    meta = {'count': int(free)}
-                    g_events.append(format_json(f"pool [{poolname} - {hex(pool)}] free", ns_from_origin, ph, tid, meta))
+                    meta = {f'{poolname} ({hex(pool)})': int(free)}
+                    g_events.append(format_json(f"free bufs", ns_from_origin, ph, tid, meta))
 
                     # Record buffer lifetime as duration event
                     if 'allocated' in name:
@@ -253,8 +253,8 @@ def main():
                 ph = 'C'
                 buf = event.payload_field['buf']
                 cnt = event.payload_field['count']
-                meta = {'count': int(cnt)}
-                g_events.append(format_json(f"[{hex(buf)}] reference", ns_from_origin, ph, tid, meta))
+                meta = {f'buf ({hex(buf)})': int(cnt)}
+                g_events.append(format_json(f"refcount", ns_from_origin, ph, tid, meta))
                 return
 
         else:
