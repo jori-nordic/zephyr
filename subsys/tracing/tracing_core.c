@@ -157,4 +157,8 @@ void tracing_buffer_handle(uint8_t *data, uint32_t length)
 void tracing_packet_drop_handle(void)
 {
 	atomic_inc(&tracing_packet_drop_num);
+#if defined(CONFIG_TRACING_BACKEND_POSIX)
+	/* Graphing buffer lifetime cannot work if we drop packets. */
+	k_oops();
+#endif
 }
