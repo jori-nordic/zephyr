@@ -220,7 +220,9 @@ def main():
                 if buf == 0:
                     ph = 'i'
                     free = event.payload_field['free']
-                    meta = {'name': str(poolname), 'count': int(free)}
+                    meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
+                    g_events.append(format_json(f"net_buf_alloc_failed", ns_from_origin, ph, tid, meta))
+                    return
                 else:
                     # Record pool free count
                     ph = 'C'
@@ -234,10 +236,9 @@ def main():
                     else:
                         ph = 'E'
 
-                    # Can't add metadata cos it seems bluetooth plays tricks with the command buffers,
-                    # and the pool data ain't right afterwards
-                    meta = None
+                    meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
                     g_events.append(format_json(f"buf [{hex(buf)}]", ns_from_origin, ph, tid, meta))
+                    return
 
                     ph = 'i'    # debug
                     meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'buf': f'{hex(buf)}'}

@@ -248,6 +248,7 @@ struct net_buf *net_buf_alloc_len(struct net_buf_pool *pool, size_t size,
 	__ASSERT_NO_MSG(pool);
 
 	NET_BUF_DBG("%s():%d: pool %p size %zu", func, line, pool, size);
+	sys_port_trace_net_buf_get_enter(pool);
 
 	/* We need to prevent race conditions
 	 * when accessing pool->uninit_count.
@@ -311,12 +312,14 @@ struct net_buf *net_buf_alloc_len(struct net_buf_pool *pool, size_t size,
 	buf = k_lifo_get(&pool->free, timeout);
 #endif
 	if (!buf) {
+		sys_port_trace_net_buf_get_exit(pool, buf);
 		NET_BUF_ERR("%s():%d: Failed to get free buffer", func, line);
 		return NULL;
 	}
 
 success:
 	NET_BUF_DBG("allocated buf %p", buf);
+	sys_port_trace_net_buf_get_exit(pool, buf);
 
 	if (size) {
 #if __ASSERT_ON
@@ -403,8 +406,8 @@ void net_buf_destroy(struct net_buf *buf)
 {
 	struct net_buf_pool *pool = net_buf_pool_get(buf->pool_id);
 
-	k_lifo_put(&pool->free, buf);
 	sys_port_trace_net_buf_destroy(pool, buf);
+	k_lifo_put(&pool->free, buf);
 }
 
 #if defined(CONFIG_NET_BUF_LOG)
@@ -418,11 +421,7 @@ struct net_buf *net_buf_get(struct k_fifo *fifo, k_timeout_t timeout)
 
 	NET_BUF_DBG("%s():%d: fifo %p", func, line, fifo);
 
-	struct net_buf_pool *pool = CONTAINER_OF((struct k_lifo *)fifo, struct net_buf_pool, free);
-
-	sys_port_trace_net_buf_get_enter(pool);
 	buf = k_fifo_get(fifo, timeout);
-	sys_port_trace_net_buf_get_exit(pool, buf);
 	if (!buf) {
 		return NULL;
 	}
