@@ -114,7 +114,7 @@ def main():
     timeline = []
 
     def do_trace(msg):
-        ns_from_origin = msg.default_clock_snapshot.ns_from_origin // 1000
+        ns_from_origin = msg.default_clock_snapshot.ns_from_origin / 1000
         event = msg.event
         ph = 'i'
         name = event.name
@@ -127,7 +127,7 @@ def main():
         # workaround for UI getting confused when two events appear
         # at the same reported time
         while prev_ts >= ns_from_origin:
-            ns_from_origin += 1
+            ns_from_origin += .001
             # print('workaround')
 
         prev_ts = ns_from_origin
