@@ -1204,11 +1204,6 @@ static void usbd_sof_trigger_iso_read(void)
 	}
 }
 
-bool is_usb_driver(void)
-{
-	return k_current_get() == &usbd_work_queue.thread;
-}
-
 /* Work handler */
 static void usbd_work_handler(struct k_work *item)
 {

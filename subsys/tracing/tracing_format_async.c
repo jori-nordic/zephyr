@@ -19,8 +19,6 @@ void tracing_format_string(const char *str, ...)
 		return;
 	}
 
-	/* __BKPT(0); */
-
 	va_start(args, str);
 
 	TRACING_LOCK();
@@ -45,7 +43,6 @@ void tracing_format_raw_data(uint8_t *data, uint32_t length)
 		return;
 	}
 
-	/* __BKPT(0); */
 	TRACING_LOCK();
 	before_put_is_empty = tracing_buffer_is_empty();
 	put_success = tracing_format_raw_data_put(data, length);
@@ -65,7 +62,6 @@ void tracing_format_data(tracing_data_t *tracing_data_array, uint32_t count)
 	if (!is_tracing_enabled() || is_tracing_thread()) {
 		return;
 	}
-	/* __BKPT(0); */
 
 	TRACING_LOCK();
 	before_put_is_empty = tracing_buffer_is_empty();
