@@ -406,6 +406,7 @@ void net_buf_destroy(struct net_buf *buf)
 {
 	struct net_buf_pool *pool = net_buf_pool_get(buf->pool_id);
 
+	__ASSERT_NO_MSG(buf);
 	sys_port_trace_net_buf_destroy(pool, buf);
 	k_lifo_put(&pool->free, buf);
 }
