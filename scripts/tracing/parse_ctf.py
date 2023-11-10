@@ -3,21 +3,6 @@
 # Copyright (c) 2020 Intel Corporation.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""
-Script to parse CTF data and print to the screen in a custom and colorful
-format.
-
-Generate trace using samples/subsys/tracing for example:
-
-    west build -b qemu_x86 samples/subsys/tracing  -t run \
-      -- -DCONF_FILE=prj_uart_ctf.conf
-
-    mkdir ctf
-    cp build/channel0_0 ctf/
-    cp subsys/tracing/ctf/tsdl/metadata ctf/
-    ./scripts/tracing/parse_ctf.py -t ctf
-"""
-
 import json
 import sys
 import datetime
