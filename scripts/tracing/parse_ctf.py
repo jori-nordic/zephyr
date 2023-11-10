@@ -48,6 +48,7 @@ def add_metadata(name, pid, tid, args):
     }
 
 g_thread_names = {}
+active_buffers = []
 
 def add_thread(tid, name, active):
     if tid not in g_thread_names.keys():
@@ -233,8 +234,14 @@ def main():
                     # Record buffer lifetime as duration event
                     if 'allocated' in name:
                         ph = 'B'
+                        if buf in active_buffers:
+                            raise Exception(f"Missing destroy for buf {hex(buf)}")
+                        active_buffers.append(buf)
                     else:
                         ph = 'E'
+                        if buf not in active_buffers:
+                            raise Exception(f"Missing alloc for buf {hex(buf)}")
+                        active_buffers.remove(buf)
 
                     meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
                     g_events.append(format_json(f"buf [{hex(buf)}]", ns_from_origin, ph, tid, meta))
