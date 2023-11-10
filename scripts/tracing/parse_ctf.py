@@ -35,16 +35,9 @@ def add_metadata(name, pid, tid, args):
 g_thread_names = {}
 g_buf_names = {}
 active_buffers = {}
-
-def add_thread(tid, name, active):
-    if tid not in g_thread_names.keys():
-        g_thread_names[tid] = {'name': str(name), 'active': active}
-        return False
-
-    prev = g_thread_names[tid]['active']
-    g_thread_names[tid]['active'] = active
-
-    return prev == active
+g_events = []
+g_isr_active = False
+NET_BUF_TID = 5
 
 def spit_json(path, trace_events):
     trace_events.append(add_metadata("thread_name", 0, 0, {'name': 'general'}))
@@ -68,9 +61,6 @@ def spit_json(path, trace_events):
 
     with open(path, "w") as f:
         f.write(content)
-
-g_events = []
-g_isr_active = False
 
 def format_json(name, ts, ph, tid=0, meta=None, pid=0):
     # Chrome trace format
@@ -96,100 +86,204 @@ def format_json(name, ts, ph, tid=0, meta=None, pid=0):
 
     return evt
 
-prev_ts = 0
+def add_thread(tid, name, active):
+    if tid not in g_thread_names.keys():
+        g_thread_names[tid] = {'name': str(name), 'active': active}
+        return False
+
+    prev = g_thread_names[tid]['active']
+    g_thread_names[tid]['active'] = active
+
+    return prev == active
+
+def exit_isr(timestamp):
+    # If a thread is switched in, we are no longer in ISR context
+    # Generate a synthetic ISR end event
+    g_isr_active = False
+    g_events.append(format_json('isr_active', timestamp, 'E', 1))
+
+def handle_thread_event(event, timestamp):
+    if any(match in event.name for match in ['info', 'create', 'name_set']):
+        tid = event.payload_field['thread_id']
+        g_events.append(format_json(event.name, timestamp, 'i', 0))
+        return
+
+    if 'thread_switched_in' in event.name:
+        ph = 'B'
+    elif 'thread_switched_out' in event.name:
+        ph = 'E'
+    else:
+        raise Exception(f'THREAD OTHER: {event.name}')
+
+    tid = event.payload_field['thread_id']
+
+    # Is this thread already running?
+    already = add_thread(tid, event.payload_field['name'], ph == 'B')
+
+    if already and ph == 'B':
+        # Means the thread is already switched in/out,
+        # adding another event will confuse the UI
+        # It probably means that we are returning from an ISR
+        print(f'Ignoring thread begin event for TID {hex(tid)}')
+        return
+
+    if ph == 'B' and g_isr_active:
+        exit_isr(timestamp)
+
+    g_events.append(format_json('running', timestamp, ph, tid, None))
+
+def handle_buf_lifetime(event, timestamp):
+    tid = NET_BUF_TID
+    buf = event.payload_field['buf']
+    poolname = event.payload_field['name']
+    pool = event.payload_field['pool']
+
+    if buf == 0:
+        ph = 'i'
+        free = event.payload_field['free']
+        meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
+        g_events.append(format_json(f"net_buf_alloc_failed", timestamp, ph, tid, meta))
+
+    else:
+        # Record pool free count
+        ph = 'C'
+        free = event.payload_field['free']
+        meta = {f'{poolname} ({hex(pool)})': int(free)}
+        g_events.append(format_json(f"free bufs", timestamp, ph, tid, meta, 1))
+
+        # Record buffer lifetime as duration event
+        # FIXME: this is not necessary anymore, the refcnt as flamegraph is enough
+        if 'allocated' in event.name:
+            ph = 'B'
+            if buf in active_buffers.keys():
+                raise Exception(f"Missing destroy for buf {hex(buf)}")
+            active_buffers[buf] = 1
+            g_events.append(format_json(f"ref", timestamp, ph, buf, meta, 2))
+        else:
+            ph = 'E'
+            if buf not in active_buffers.keys():
+                raise Exception(f"Missing alloc for buf {hex(buf)}")
+            del active_buffers[buf]
+            g_events.append(format_json(f"ref", timestamp, ph, buf, meta, 2))
+
+        meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
+        g_events.append(format_json(f"buf [{hex(buf)}]", timestamp, ph, buf, meta, 1))
+
+def handle_buf_event(event, timestamp):
+    name = event.name
+    tid = NET_BUF_TID
+
+    if 'net_buf_allocated' in name or 'net_buf_destroyed' in name:
+        handle_buf_lifetime(event, timestamp)
+        return
+
+    elif 'net_buf_alloc' in name:
+        ph = 'i'
+        poolname = event.payload_field['name']
+        pool = event.payload_field['pool']
+        free = event.payload_field['free']
+        meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'count': int(free)}
+        g_events.append(format_json(name, timestamp, ph, tid, meta))
+
+    elif 'ref' in name:
+        buf = event.payload_field['buf']
+        cnt = event.payload_field['count']
+        tid = buf
+
+        # TODO: keep track of origin pool and mention it in the name
+
+        if tid not in g_buf_names.keys():
+            g_buf_names[tid] = {'name': hex(buf), 'active': 0}
+
+        if buf not in active_buffers.keys():
+            raise Exception(f"Refcounting a buf that hasn't been allocated: {hex(buf)}")
+
+        if 'unref' in name:
+            ph = 'E'
+            active_buffers[buf] -= 1
+        else:
+            ph = 'B'
+            active_buffers[buf] += 1
+
+        if cnt != active_buffers[buf]:
+            print(f"Something doesn't add up: {hex(buf)}")
+
+        g_events.append(format_json(f"ref", timestamp, ph, tid, None, 2))
+
+def handle_isr_event(event, timestamp):
+    name = event.name
+    global g_isr_active
+
+    if 'isr_enter' in name:
+        if g_isr_active:
+            # print(f'Ignoring duplicate ISR enter (TS {timestamp} us)')
+            return
+
+        ph = 'B'
+        g_isr_active = True
+
+    elif 'isr_exit' in name:
+        if not g_isr_active:
+            # print(f'Ignoring duplicate ISR exit (TS {timestamp} us)')
+            return
+
+        ph = 'E'
+        g_isr_active = False
+
+    else:
+        raise(Exception)
+
+    # It's a bit sad, but we don't currently have that much info.
+    # Adding the ISR vector number to zephyr's tracing would be a good start.
+    name = 'isr_active'
+    tid = 1
+
+    g_events.append(format_json('isr_active', timestamp, ph, tid, None))
+
+prev_evt_time_us = 0
+def workaround_timing(evt_us):
+    global prev_evt_time_us
+    # workaround for UI getting confused when two events appear
+    # at the same reported time. Especially 'B' and 'E' evts.
+    # 1ns seems to be enough to make it work.
+    if prev_evt_time_us >= evt_us:
+        evt_us = prev_evt_time_us + 0.001
+
+    prev_evt_time_us = evt_us
+
+    return evt_us
+
 def main():
     args = parse_args()
 
     msg_it = bt2.TraceCollectionMessageIterator(args.trace)
-    last_event_ns_from_origin = None
     timeline = []
 
     def do_trace(msg):
-        ns_from_origin = msg.default_clock_snapshot.ns_from_origin / 1000
+        # Timestamp is in microseconds, with nanosecond resolution
+        timestamp = msg.default_clock_snapshot.ns_from_origin / 1000
+        timestamp = workaround_timing(timestamp)
+
+        # Setup default event data
         event = msg.event
         ph = 'i'
         name = event.name
         tid = 0
         meta = None
-        global g_isr_active
-        global prev_ts
 
-        # print(f'{event.name} - {ns_from_origin}')
-        # workaround for UI getting confused when two events appear
-        # at the same reported time
-        while prev_ts >= ns_from_origin:
-            ns_from_origin += .001
-            # print('workaround')
-
-        prev_ts = ns_from_origin
-
-        if 'thread' in event.name:
-            name = 'thread_active'
-
-            if 'thread_switched_in' in event.name:
-                ph = 'B'
-            elif 'thread_switched_out' in event.name:
-                ph = 'E'
-            elif 'thread_create' in event.name:
-                tid = event.payload_field['thread_id']
-                g_events.append(format_json(name, ns_from_origin, ph, tid))
-                return
-            elif 'thread_info' in event.name:
-                tid = event.payload_field['thread_id']
-                g_events.append(format_json(name, ns_from_origin, ph, tid))
-                return
-            elif 'thread_name_set' in event.name:
-                tid = event.payload_field['thread_id']
-                g_events.append(format_json(name, ns_from_origin, ph, tid))
-                return
-            else:
-                print(f'THREAD OTHER: {event.name}')
-                raise(Exception)
-
-            tid = event.payload_field['thread_id']
-
-            # Means that this event tries to mark the thread as active
-            already = add_thread(tid, event.payload_field['name'], ph == 'B')
-
-            if already and ph == 'B':
-                # Means the thread is already switched in/out,
-                # adding another event will confuse the UI
-                # It probably means that we are coming from an ISR
-                # g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
-                return
-
-            if ph == 'B' and g_isr_active:
-                g_isr_active = False
-                g_events.append(format_json('isr_active', ns_from_origin, 'E', 1))
+        if 'thread' in name:
+            handle_thread_event(event, timestamp)
+            return
 
         elif 'idle' in name:
             # Means no thread is switched in.
             # Also a valid way of exiting the ISR
             if g_isr_active:
-                g_isr_active = False
-                g_events.append(format_json('isr_active', ns_from_origin - 1, 'E', 1))
+                exit_isr(timestamp)
 
         elif 'isr' in name:
-            # debug
-            # g_events.append(format_json(event.name, ns_from_origin, 'X', 0))
-
-            if 'isr_enter' in name:
-                if g_isr_active:
-                    return
-
-                ph = 'B'
-                g_isr_active = True
-            elif 'isr_exit' in name:
-                if not g_isr_active:
-                    return
-
-                ph = 'E'
-                g_isr_active = False
-            else:
-                raise(Exception)
-
-            name = 'isr_active'
-            tid = 1
+            handle_isr_event(event, timestamp)
+            return
 
         elif 'mutex' in name:
             tid = 2
@@ -201,84 +295,14 @@ def main():
             tid = 4
 
         elif 'net_buf' in name:
-            tid = 5
-
-            if 'net_buf_allocated' in name or 'net_buf_destroyed' in name:
-                buf = event.payload_field['buf']
-                poolname = event.payload_field['name']
-                pool = event.payload_field['pool']
-
-                if buf == 0:
-                    ph = 'i'
-                    free = event.payload_field['free']
-                    meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
-                    g_events.append(format_json(f"net_buf_alloc_failed", ns_from_origin, ph, tid, meta))
-                    return
-                else:
-                    # Record pool free count
-                    ph = 'C'
-                    free = event.payload_field['free']
-                    meta = {f'{poolname} ({hex(pool)})': int(free)}
-                    g_events.append(format_json(f"free bufs", ns_from_origin, ph, tid, meta))
-
-                    # Record buffer lifetime as duration event
-                    if 'allocated' in name:
-                        ph = 'B'
-                        if buf in active_buffers.keys():
-                            raise Exception(f"Missing destroy for buf {hex(buf)}")
-                        active_buffers[buf] = 1
-                        g_events.append(format_json(f"ref", ns_from_origin, ph, buf, meta, 2))
-                    else:
-                        ph = 'E'
-                        if buf not in active_buffers.keys():
-                            raise Exception(f"Missing alloc for buf {hex(buf)}")
-                        del active_buffers[buf]
-                        g_events.append(format_json(f"ref", ns_from_origin, ph, buf, meta, 2))
-
-                    meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
-                    g_events.append(format_json(f"buf [{hex(buf)}]", ns_from_origin, ph, buf, meta, 1))
-                    return
-
-                    ph = 'i'    # debug
-                    meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'buf': f'{hex(buf)}'}
-
-            elif 'net_buf_alloc' in name:
-                poolname = event.payload_field['name']
-                pool = event.payload_field['pool']
-                free = event.payload_field['free']
-                meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'count': int(free)}
-
-            elif 'ref' in name:
-                buf = event.payload_field['buf']
-                cnt = event.payload_field['count']
-                tid = buf
-
-                # TODO: keep track of origin pool and mention it in the name
-
-                if tid not in g_buf_names.keys():
-                    g_buf_names[tid] = {'name': hex(buf), 'active': 0}
-
-                if buf not in active_buffers.keys():
-                    raise Exception(f"Refcounting a buf that hasn't been allocated: {hex(buf)}")
-
-                if 'unref' in name:
-                    ph = 'E'
-                    active_buffers[buf] -= 1
-                else:
-                    ph = 'B'
-                    active_buffers[buf] += 1
-
-                if cnt != active_buffers[buf]:
-                    print(f"Something doesn't add up: {hex(buf)}")
-
-                g_events.append(format_json(f"ref", ns_from_origin, ph, tid, meta, 2))
-                return
+            handle_buf_event(event, timestamp)
+            return
 
         else:
-            print(f'Unknown event: {event.name} payload {event.payload_field}')
-            raise(Exception)
+            raise Exception(f'Unknown event: {event.name} payload {event.payload_field}')
 
-        g_events.append(format_json(name, ns_from_origin, ph, tid, meta))
+        # FIXME: move this next to the generated events
+        g_events.append(format_json(name, timestamp, ph, tid, meta))
 
     try:
         for msg in msg_it:
