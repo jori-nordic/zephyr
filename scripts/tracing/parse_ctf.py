@@ -48,7 +48,8 @@ def add_metadata(name, pid, tid, args):
     }
 
 g_thread_names = {}
-active_buffers = []
+g_buf_names = {}
+active_buffers = {}
 
 def add_thread(tid, name, active):
     if tid not in g_thread_names.keys():
@@ -66,7 +67,11 @@ def spit_json(path, trace_events):
     trace_events.append(add_metadata("thread_name", 0, 2, {'name': 'Mutex'}))
     trace_events.append(add_metadata("thread_name", 0, 3, {'name': 'Semaphore'}))
     trace_events.append(add_metadata("thread_name", 0, 4, {'name': 'Timer'}))
-    trace_events.append(add_metadata("thread_name", 0, 5, {'name': 'Network buffers'}))
+
+    for k in g_buf_names.keys():
+        name = g_buf_names[k]['name']
+        trace_events.append(add_metadata("thread_name", 2, int(k), {'name': f'Refs on {name}'}))
+        trace_events.append(add_metadata("thread_name", 1, int(k), {'name': f'Buf lifetime for {name}'}))
 
     for k in g_thread_names.keys():
         trace_events.append(add_metadata("thread_name", 0, int(k), {'name': g_thread_names[k]['name']}))
@@ -82,12 +87,12 @@ def spit_json(path, trace_events):
 g_events = []
 g_isr_active = False
 
-def format_json(name, ts, ph, tid=0, meta=None):
+def format_json(name, ts, ph, tid=0, meta=None, pid=0):
     # Chrome trace format
     # `args` has to have at least one arg, is
     # shown when clicking the event
     evt = {
-        'pid': 0,
+        'pid': int(pid),
         'tid': int(tid),
         'name': name,
         'ph': ph,
@@ -234,17 +239,19 @@ def main():
                     # Record buffer lifetime as duration event
                     if 'allocated' in name:
                         ph = 'B'
-                        if buf in active_buffers:
+                        if buf in active_buffers.keys():
                             raise Exception(f"Missing destroy for buf {hex(buf)}")
-                        active_buffers.append(buf)
+                        active_buffers[buf] = 1
+                        g_events.append(format_json(f"ref", ns_from_origin, ph, buf, meta, 2))
                     else:
                         ph = 'E'
-                        if buf not in active_buffers:
+                        if buf not in active_buffers.keys():
                             raise Exception(f"Missing alloc for buf {hex(buf)}")
-                        active_buffers.remove(buf)
+                        del active_buffers[buf]
+                        g_events.append(format_json(f"ref", ns_from_origin, ph, buf, meta, 2))
 
                     meta = {'pool_name': str(poolname), 'pool_addr': f'{hex(pool)}'}
-                    g_events.append(format_json(f"buf [{hex(buf)}]", ns_from_origin, ph, tid, meta))
+                    g_events.append(format_json(f"buf [{hex(buf)}]", ns_from_origin, ph, buf, meta, 1))
                     return
 
                     ph = 'i'    # debug
@@ -257,11 +264,29 @@ def main():
                 meta = {'name': str(poolname), 'pool': f'{hex(pool)}', 'count': int(free)}
 
             elif 'ref' in name:
-                ph = 'C'
                 buf = event.payload_field['buf']
                 cnt = event.payload_field['count']
-                meta = {f'buf ({hex(buf)})': int(cnt)}
-                g_events.append(format_json(f"refcount", ns_from_origin, ph, tid, meta))
+                tid = buf
+
+                # TODO: keep track of origin pool and mention it in the name
+
+                if tid not in g_buf_names.keys():
+                    g_buf_names[tid] = {'name': hex(buf), 'active': 0}
+
+                if buf not in active_buffers.keys():
+                    raise Exception(f"Refcounting a buf that hasn't been allocated: {hex(buf)}")
+
+                if 'unref' in name:
+                    ph = 'E'
+                    active_buffers[buf] -= 1
+                else:
+                    ph = 'B'
+                    active_buffers[buf] += 1
+
+                if cnt != active_buffers[buf]:
+                    print(f"Something doesn't add up: {hex(buf)}")
+
+                g_events.append(format_json(f"ref", ns_from_origin, ph, tid, meta, 2))
                 return
 
         else:
