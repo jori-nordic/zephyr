@@ -1354,12 +1354,7 @@ struct net_buf * __must_check net_buf_get(struct k_fifo *fifo,
  *
  * @param buf Buffer to destroy.
  */
-static inline void net_buf_destroy(struct net_buf *buf)
-{
-	struct net_buf_pool *pool = net_buf_pool_get(buf->pool_id);
-
-	k_lifo_put(&pool->free, buf);
-}
+void net_buf_destroy(struct net_buf *buf);
 
 /**
  * @brief Reset buffer

@@ -7,6 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/kernel_structs.h>
 #include <kernel_internal.h>
+#include <zephyr/net/buf.h>
 #include <ctf_top.h>
 
 
@@ -318,4 +319,58 @@ void sys_trace_k_timer_status_sync_exit(struct k_timer *timer, uint32_t result)
 		(uint32_t)(uintptr_t)timer,
 		result
 		);
+}
+
+#if defined(CONFIG_TRACING_CTF) && !defined(CONFIG_NET_BUF_POOL_USAGE)
+	BUILD_ASSERT(0, "ohno");
+#endif
+
+static void _get_pool_name(struct net_buf_pool *pool, ctf_bounded_string_t *name)
+{
+	const char *pname = pool->name;
+
+	if (pname != NULL && pname[0] != '\0') {
+		strncpy(name->buf, pname, sizeof(name->buf));
+		/* strncpy may not always null-terminate */
+		name->buf[sizeof(name->buf) - 1] = 0;
+	}
+}
+
+static uint32_t _get_pool_free_count(struct net_buf_pool *pool)
+{
+	return atomic_get(&pool->avail_count);
+}
+
+void sys_port_trace_net_buf_get_enter(void *pool)
+{
+	ctf_bounded_string_t name = { "" };
+	_get_pool_name(pool, &name);
+
+	ctf_top_net_buf_alloc((uint32_t)pool, _get_pool_free_count(pool), name);
+}
+
+void sys_port_trace_net_buf_get_exit(void *pool, struct net_buf *buf)
+{
+	ctf_bounded_string_t name = { "" };
+	_get_pool_name(pool, &name);
+
+	ctf_top_net_buf_allocated((uint32_t)pool, _get_pool_free_count(pool), (uint32_t)buf, name);
+}
+
+void sys_port_trace_net_buf_destroy(void *pool, struct net_buf *buf)
+{
+	ctf_bounded_string_t name = { "" };
+	_get_pool_name(pool, &name);
+
+	ctf_top_net_buf_destroyed((uint32_t)pool, _get_pool_free_count(pool), (uint32_t)buf, name);
+}
+
+void sys_port_trace_net_buf_ref(struct net_buf *buf)
+{
+	ctf_top_net_buf_ref((uint32_t)buf, (uint32_t)buf->ref);
+}
+
+void sys_port_trace_net_buf_unref(struct net_buf *buf)
+{
+	ctf_top_net_buf_unref((uint32_t)buf, (uint32_t)buf->ref);
 }

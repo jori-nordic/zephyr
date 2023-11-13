@@ -10,6 +10,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/kernel_structs.h>
 #include <zephyr/init.h>
+#include <zephyr/net/buf.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -433,6 +434,15 @@ void sys_trace_k_timer_status_sync_enter(struct k_timer *timer);
 void sys_trace_k_timer_status_sync_exit(struct k_timer *timer, uint32_t result);
 
 void sys_trace_k_event_init(struct k_event *event);
+
+/* Buffers */
+/* Forward-declaration, since buf.h includes this file */
+struct net_buf;
+void sys_port_trace_net_buf_get_enter(void *pool);
+void sys_port_trace_net_buf_get_exit(void *pool, struct net_buf *buf);
+void sys_port_trace_net_buf_destroy(void *pool, struct net_buf *buf);
+void sys_port_trace_net_buf_ref(struct net_buf *buf);
+void sys_port_trace_net_buf_unref(struct net_buf *buf);
 
 #ifdef __cplusplus
 }
