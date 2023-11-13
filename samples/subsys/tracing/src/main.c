@@ -25,7 +25,7 @@
 #define PRIORITY 7
 
 /* delay between greetings (in ms) */
-#define SLEEPTIME 500
+#define SLEEPTIME 20
 
 
 /*
@@ -38,7 +38,9 @@ void helloLoop(const char *my_name,
 {
 	const char *tname;
 
-	while (1) {
+	uint32_t start = k_uptime_get_32();
+
+	while (k_uptime_get_32() - start < 15000) {
 		/* take my semaphore */
 		k_sem_take(my_sem, K_FOREVER);
 
@@ -56,6 +58,8 @@ void helloLoop(const char *my_name,
 		k_msleep(SLEEPTIME);
 		k_sem_give(other_sem);
 	}
+
+	printk("Time's up!\n");
 }
 
 /* define semaphores */
