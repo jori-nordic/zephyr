@@ -52,6 +52,11 @@ Device Drivers and Device Tree
             drdy-pin = <2>;
         };
     };
+* The optional ``setup()`` function in the Bluetooth HCI driver API (enabled through
+  ``CONFIG_BT_HCI_SETUP``) has gained a function parameter of type ``struct bt_hci_setup_params *``.
+  By default, the struct is empty, but drivers can opt-in to ``CONFIG_BT_HCI_SET_PUBLIC_ADDR`` if
+  they support setting the controller's public identity address, which will then be passed in the
+  ``pub_addr`` field.
 
 Power Management
 ================

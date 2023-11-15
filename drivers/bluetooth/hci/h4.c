@@ -529,7 +529,7 @@ static int h4_open(void)
 }
 
 #if defined(CONFIG_BT_HCI_SETUP)
-static int h4_setup(void)
+static int h4_setup(struct bt_hci_setup_params *params)
 {
 	/* Extern bt_h4_vnd_setup function.
 	 * This function executes vendor-specific commands sequence to

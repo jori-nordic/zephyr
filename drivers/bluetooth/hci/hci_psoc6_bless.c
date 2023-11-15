@@ -196,7 +196,7 @@ static int psoc6_bless_send(struct net_buf *buf)
 	return 0;
 }
 
-static int psoc6_bless_setup(void)
+static int psoc6_bless_setup(struct bt_hci_setup_params *params)
 {
 	struct net_buf *buf;
 	int err;

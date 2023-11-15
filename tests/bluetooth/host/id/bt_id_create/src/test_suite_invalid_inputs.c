@@ -79,26 +79,6 @@ ZTEST(bt_id_create_invalid_inputs, test_id_list_is_full)
 }
 
 /*
- *  Test invalid input arguments to bt_id_create() by using a valid address of type public and using
- *  NULL value for the IRK.
- *
- *  Constraints:
- *   - A valid address of type public is used
- *   - Input IRK is NULL
- *
- *  Expected behaviour:
- *   - '-EINVAL' error code is returned representing invalid values were used.
- */
-ZTEST(bt_id_create_invalid_inputs, test_public_address)
-{
-	int err;
-
-	err = bt_id_create(BT_LE_ADDR, NULL);
-
-	zassert_true(err == -EINVAL, "Unexpected error code '%d' was returned", err);
-}
-
-/*
  *  Test invalid input arguments to bt_id_create() by using a valid address of type RPA and using
  *  NULL value for the IRK.
  *
