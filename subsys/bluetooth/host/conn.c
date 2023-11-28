@@ -93,10 +93,21 @@ static void tx_complete_work(struct k_work *work);
 static void deferred_work(struct k_work *work);
 static void notify_connected(struct bt_conn *conn);
 
+static volatile int allocs;
+
+void destroy(struct net_buf *buf) {
+	allocs--;
+	struct net_buf_pool *pool = net_buf_pool_get(buf->pool_id);
+
+	LOG_INF("[%s] free bufs: %d / %d", pool->name, pool->avail_count, pool->buf_count);
+
+	net_buf_destroy(buf);
+}
+
 static struct bt_conn acl_conns[CONFIG_BT_MAX_CONN];
 NET_BUF_POOL_DEFINE(acl_tx_pool, CONFIG_BT_L2CAP_TX_BUF_COUNT,
 		    BT_L2CAP_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU),
-		    CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+		    CONFIG_BT_CONN_TX_USER_DATA_SIZE, destroy);
 
 #if CONFIG_BT_L2CAP_TX_FRAG_COUNT > 0
 /* Dedicated pool for fragment buffers in case queued up TX buffers don't
@@ -107,7 +118,7 @@ NET_BUF_POOL_DEFINE(acl_tx_pool, CONFIG_BT_L2CAP_TX_BUF_COUNT,
  */
 NET_BUF_POOL_FIXED_DEFINE(frag_pool, CONFIG_BT_L2CAP_TX_FRAG_COUNT,
 			  BT_BUF_ACL_SIZE(CONFIG_BT_BUF_ACL_TX_SIZE),
-			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, destroy);
 
 #endif /* CONFIG_BT_L2CAP_TX_FRAG_COUNT > 0 */
 
@@ -454,7 +465,7 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 	}
 
 	if (conn->state != BT_CONN_CONNECTED) {
-		LOG_ERR("not connected!");
+		LOG_WRN("not connected!");
 		return -ENOTCONN;
 	}
 
@@ -1357,6 +1368,7 @@ uint8_t bt_conn_index(const struct bt_conn *conn)
 }
 
 
+
 #if defined(CONFIG_NET_BUF_LOG)
 struct net_buf *bt_conn_create_pdu_timeout_debug(struct net_buf_pool *pool,
 						 size_t reserve,
@@ -1414,6 +1426,8 @@ struct net_buf *bt_conn_create_pdu_timeout(struct net_buf_pool *pool,
 
 	reserve += sizeof(struct bt_hci_acl_hdr) + BT_BUF_RESERVE;
 	net_buf_reserve(buf, reserve);
+
+	LOG_INF("allocated bufs: %d", allocs++);
 
 	return buf;
 }

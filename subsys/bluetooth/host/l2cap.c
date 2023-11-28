@@ -84,13 +84,21 @@ struct l2cap_tx_meta {
 static struct l2cap_tx_meta_data l2cap_tx_meta_data_storage[CONFIG_BT_CONN_TX_MAX];
 K_FIFO_DEFINE(free_l2cap_tx_meta_data);
 
+static volatile int meta;
+
 static struct l2cap_tx_meta_data *alloc_tx_meta_data(void)
 {
+	LOG_INF("alloc l2cap meta (in-use %d)", meta);
+	if (!k_fifo_is_empty(&free_l2cap_tx_meta_data)) {
+		meta++;
+	}
 	return k_fifo_get(&free_l2cap_tx_meta_data, K_NO_WAIT);
 }
 
 static void free_tx_meta_data(struct l2cap_tx_meta_data *data)
 {
+	meta--;
+	LOG_INF("freed l2cap meta (in-use %d)", meta);
 	(void)memset(data, 0, sizeof(*data));
 	k_fifo_put(&free_l2cap_tx_meta_data, data);
 }
@@ -977,7 +985,7 @@ static void l2cap_chan_destroy(struct bt_l2cap_chan *chan)
 	struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
 	struct net_buf *buf;
 
-	LOG_DBG("chan %p cid 0x%04x", le_chan, le_chan->rx.cid);
+	LOG_WRN("destroy chan %p cid 0x%04x", le_chan, le_chan->rx.cid);
 
 	/* Cancel ongoing work. Since the channel can be re-used after this
 	 * we need to sync to make sure that the kernel does not have it
@@ -998,6 +1006,7 @@ static void l2cap_chan_destroy(struct bt_l2cap_chan *chan)
 		le_chan->tx_buf = NULL;
 	}
 
+	LOG_INF("remove buffers");
 	/* Remove buffers on the TX queue */
 	while ((buf = net_buf_get(&le_chan->tx_queue, K_NO_WAIT))) {
 		free_buf_tx_meta_data(&buf);
@@ -1660,6 +1669,7 @@ static void le_ecred_conn_rsp(struct bt_l2cap *l2cap, uint8_t ident,
 			 * established.
 			 */
 			if (!dcid) {
+				LOG_INF("chan not established");
 				bt_l2cap_chan_remove(conn, &chan->chan);
 				bt_l2cap_chan_del(&chan->chan);
 				continue;
@@ -1667,6 +1677,7 @@ static void le_ecred_conn_rsp(struct bt_l2cap *l2cap, uint8_t ident,
 
 			c = bt_l2cap_le_lookup_tx_cid(conn, dcid);
 			if (c) {
+				LOG_INF("chan already established");
 				/* If a device receives a
 				 * L2CAP_CREDIT_BASED_CONNECTION_RSP packet
 				 * with an already assigned Destination CID,
