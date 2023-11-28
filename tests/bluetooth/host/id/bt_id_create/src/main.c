@@ -233,6 +233,10 @@ ZTEST(bt_id_create, test_public_address)
 	int id_count, new_id;
 	bt_addr_le_t addr = *BT_LE_ADDR;
 
+	if (!IS_ENABLED(CONFIG_BT_HCI_SET_PUBLIC_ADDR)) {
+		ztest_test_skip();
+	}
+
 	id_count = bt_dev.id_count;
 	atomic_set_bit(bt_dev.flags, BT_DEV_ENABLE);
 	/* Calling bt_addr_le_create_static() isn't expected */

@@ -1,0 +1,7 @@
+config SELECT_BT_HCI_SET_PUBLIC_ADDR
+	bool "dummy kconfig"
+	select BT_HCI_SET_PUBLIC_ADDR
+	help
+	  dummy kconfig
+
+source "Kconfig.zephyr"
