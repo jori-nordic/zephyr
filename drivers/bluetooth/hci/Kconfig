@@ -17,6 +17,7 @@ choice BT_HCI_BUS_TYPE
 config BT_H4
 	bool "H:4 UART"
 	select BT_UART
+	select BT_HCI_SETUP
 	help
 	  Bluetooth H:4 UART driver. Requires hardware flow control
 	  lines to be available.

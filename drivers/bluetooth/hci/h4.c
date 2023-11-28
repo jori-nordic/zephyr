@@ -529,6 +529,7 @@ static int h4_open(void)
 }
 
 #if defined(CONFIG_BT_HCI_SETUP)
+int bt_h4_vnd_setup(const struct device *dev) {};
 static int h4_setup(struct bt_hci_setup_params *params)
 {
 	/* Extern bt_h4_vnd_setup function.
