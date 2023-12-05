@@ -106,7 +106,6 @@ struct bt_att_chan {
 	struct bt_l2cap_le_chan	chan;
 	ATOMIC_DEFINE(flags, ATT_NUM_FLAGS);
 	struct bt_att_req	*req;
-	struct k_fifo		tx_queue;
 	struct k_work_delayable	timeout_work;
 	sys_snode_t		node;
 };
@@ -131,17 +130,21 @@ static uint16_t bt_att_mtu(struct bt_att_chan *chan)
 	return MIN(chan->chan.rx.mtu, chan->chan.tx.mtu);
 }
 
+enum {
+	EVT_ATT_SENT = 0,
+};
+
 /* ATT connection specific data */
 struct bt_att {
 	struct bt_conn		*conn;
 	/* Shared request queue */
 	sys_slist_t		reqs;
-	struct k_fifo		tx_queue;
 #if CONFIG_BT_ATT_PREPARE_COUNT > 0
 	sys_slist_t		prep_queue;
 #endif
 	/* Contains bt_att_chan instance(s) */
 	sys_slist_t		chans;
+	struct k_event		events;
 #if defined(CONFIG_BT_EATT)
 	struct {
 		struct k_work_delayable connection_work;
@@ -295,7 +298,11 @@ static int chan_send(struct bt_att_chan *chan, struct net_buf *buf)
 		/* Check if sent is pending already, if it does it cannot be
 		 * modified so the operation will need to be queued.
 		 */
+		/* FIXME: so notifications can't be sent on EATT chan w/ a
+		 * pending req? that's not legal.
+		 */
 		if (atomic_test_bit(chan->flags, ATT_PENDING_SENT)) {
+			LOG_DBG("already pending chan %p", chan);
 			return -EAGAIN;
 		}
 
@@ -318,7 +325,10 @@ static int chan_send(struct bt_att_chan *chan, struct net_buf *buf)
 		 */
 		err = bt_l2cap_chan_send(&chan->chan.chan, buf);
 		if (err < 0) {
-			data->att_chan = prev_chan;
+			if (err == -ENOBUFS) {
+				LOG_ERR("Ran out of TX buffers or contexts.");
+			}
+			data->att_chan = prev_chan; /* FIXME: What's this about? */
 			atomic_clear_bit(chan->flags, ATT_PENDING_SENT);
 			data->err = err;
 
@@ -347,16 +357,19 @@ static int chan_send(struct bt_att_chan *chan, struct net_buf *buf)
 	net_buf_simple_save(&buf->b, &state);
 
 	data->att_chan = chan;
+	atomic_set_bit(chan->flags, ATT_PENDING_SENT);
 
 	err = bt_l2cap_send(chan->att->conn, BT_L2CAP_CID_ATT, buf);
-	if (err) {
+	if (err < 0) {
 		if (err == -ENOBUFS) {
 			LOG_ERR("Ran out of TX buffers or contexts.");
 		}
+
 		/* In case of an error has occurred restore the buffer state */
 		net_buf_simple_restore(&buf->b, &state);
-		data->att_chan = prev_chan;
+		data->att_chan = prev_chan; /* FIXME: what's this */
 		data->err = err;
+		atomic_clear_bit(chan->flags, ATT_PENDING_SENT);
 	}
 
 	return err;
@@ -374,40 +387,6 @@ static bool att_chan_matches_chan_opt(struct bt_att_chan *chan, enum bt_att_chan
 		return (chan_opt & BT_ATT_CHAN_OPT_ENHANCED_ONLY);
 	} else {
 		return (chan_opt & BT_ATT_CHAN_OPT_UNENHANCED_ONLY);
-	}
-}
-
-static struct net_buf *get_first_buf_matching_chan(struct k_fifo *fifo, struct bt_att_chan *chan)
-{
-	if (IS_ENABLED(CONFIG_BT_EATT)) {
-		struct k_fifo skipped;
-		struct net_buf *buf;
-		struct net_buf *ret = NULL;
-		struct bt_att_tx_meta_data *meta;
-
-		k_fifo_init(&skipped);
-
-		while ((buf = net_buf_get(fifo, K_NO_WAIT))) {
-			meta = bt_att_get_tx_meta_data(buf);
-			if (!ret &&
-			    att_chan_matches_chan_opt(chan, meta->chan_opt)) {
-				ret = buf;
-			} else {
-				net_buf_put(&skipped, buf);
-			}
-		}
-
-		__ASSERT_NO_MSG(k_fifo_is_empty(fifo));
-
-		while ((buf = net_buf_get(&skipped, K_NO_WAIT))) {
-			net_buf_put(fifo, buf);
-		}
-
-		__ASSERT_NO_MSG(k_fifo_is_empty(&skipped));
-
-		return ret;
-	} else {
-		return net_buf_get(fifo, K_NO_WAIT);
 	}
 }
 
@@ -442,26 +421,6 @@ static struct bt_att_req *get_first_req_matching_chan(sys_slist_t *reqs, struct 
 	} else {
 		return NULL;
 	}
-}
-
-static int process_queue(struct bt_att_chan *chan, struct k_fifo *queue)
-{
-	struct net_buf *buf;
-	int err;
-
-	buf = get_first_buf_matching_chan(queue, chan);
-	if (buf) {
-		err = bt_att_chan_send(chan, buf);
-		if (err) {
-			/* Push it back if it could not be send */
-			k_queue_prepend(&queue->_queue, buf);
-			return err;
-		}
-
-		return 0;
-	}
-
-	return -ENOENT;
 }
 
 /* Send requests without taking tx_sem */
@@ -503,11 +462,14 @@ static void bt_att_sent(struct bt_l2cap_chan *ch)
 {
 	struct bt_att_chan *chan = ATT_CHAN(ch);
 	struct bt_att *att = chan->att;
-	int err;
 
 	LOG_DBG("chan %p", chan);
 
 	atomic_clear_bit(chan->flags, ATT_PENDING_SENT);
+
+	/* Signal other threads that are waiting on resources */
+	k_event_post(&att->events, BIT(EVT_ATT_SENT));
+	k_event_clear(&att->events, BIT(EVT_ATT_SENT));
 
 	if (!att) {
 		LOG_DBG("Ignore sent on detached ATT chan");
@@ -530,14 +492,7 @@ static void bt_att_sent(struct bt_l2cap_chan *ch)
 		sys_slist_prepend(&att->reqs, node);
 	}
 
-	/* Process channel queue */
-	err = process_queue(chan, &chan->tx_queue);
-	if (!err) {
-		return;
-	}
-
-	/* Process global queue */
-	(void)process_queue(chan, &att->tx_queue);
+	/* TODO: notify/unblock GATT/application */
 }
 
 static void chan_rebegin_att_timeout(struct bt_att_tx_meta_data *user_data)
@@ -680,39 +635,13 @@ static int bt_att_chan_send(struct bt_att_chan *chan, struct net_buf *buf)
 	return chan_send(chan, buf);
 }
 
-static void att_send_process(struct bt_att *att)
-{
-	struct bt_att_chan *chan, *tmp, *prev = NULL;
-	int err = 0;
-
-	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&att->chans, chan, tmp, node) {
-		if (err == -ENOENT && prev &&
-		    (bt_att_is_enhanced(chan) == bt_att_is_enhanced(prev))) {
-			/* If there was nothing to send for the previous channel and the current
-			 * channel has the same "enhancedness", there will be nothing to send for
-			 * this channel either.
-			 */
-			continue;
-		}
-
-		err = process_queue(chan, &att->tx_queue);
-		if (!err) {
-			/* Success */
-			return;
-		}
-
-		prev = chan;
-	}
-}
-
 static void bt_att_chan_send_rsp(struct bt_att_chan *chan, struct net_buf *buf)
 {
 	int err;
 
 	err = chan_send(chan, buf);
 	if (err) {
-		/* Responses need to be sent back using the same channel */
-		net_buf_put(&chan->tx_queue, buf);
+		LOG_ERR("Failed to send response on chan %p. err %d", chan, err);
 	}
 }
 
@@ -729,6 +658,7 @@ static void send_err_rsp(struct bt_att_chan *chan, uint8_t req, uint16_t handle,
 
 	buf = bt_att_chan_create_pdu(chan, BT_ATT_OP_ERROR_RSP, sizeof(*rsp));
 	if (!buf) {
+		LOG_ERR("Failed to allocate error buffer");
 		return;
 	}
 
@@ -2906,9 +2836,9 @@ struct net_buf *bt_att_create_rsp_pdu(struct bt_att_chan *chan, uint8_t op, size
 
 static void att_reset(struct bt_att *att)
 {
+#if CONFIG_BT_ATT_PREPARE_COUNT > 0
 	struct net_buf *buf;
 
-#if CONFIG_BT_ATT_PREPARE_COUNT > 0
 	/* Discard queued buffers */
 	while ((buf = net_buf_slist_get(&att->prep_queue))) {
 		net_buf_unref(buf);
@@ -2921,10 +2851,6 @@ static void att_reset(struct bt_att *att)
 	(void)k_work_cancel_delayable_sync(&att->eatt.connection_work, &sync);
 #endif /* CONFIG_BT_EATT */
 
-	while ((buf = net_buf_get(&att->tx_queue, K_NO_WAIT))) {
-		net_buf_unref(buf);
-	}
-
 	/* Notify pending requests */
 	while (!sys_slist_is_empty(&att->reqs)) {
 		struct bt_att_req *req;
@@ -2933,6 +2859,7 @@ static void att_reset(struct bt_att *att)
 		node = sys_slist_get_not_empty(&att->reqs);
 		req = CONTAINER_OF(node, struct bt_att_req, node);
 		if (req->func) {
+			/* but _how_ unlikely, really */
 			req->func(att->conn, BT_ATT_ERR_UNLIKELY, NULL, 0,
 				  req->user_data);
 		}
@@ -2949,16 +2876,9 @@ static void att_reset(struct bt_att *att)
 
 static void att_chan_detach(struct bt_att_chan *chan)
 {
-	struct net_buf *buf;
-
 	LOG_DBG("chan %p", chan);
 
 	sys_slist_find_and_remove(&chan->att->chans, &chan->node);
-
-	/* Release pending buffers */
-	while ((buf = net_buf_get(&chan->tx_queue, K_NO_WAIT))) {
-		net_buf_unref(buf);
-	}
 
 	if (chan->req) {
 		/* Notify outstanding request */
@@ -3005,8 +2925,6 @@ static void att_chan_attach(struct bt_att *att, struct bt_att_chan *chan)
 	LOG_DBG("att %p chan %p flags %lu", att, chan, atomic_get(chan->flags));
 
 	if (sys_slist_is_empty(&att->chans)) {
-		/* Init general queues when attaching the first channel */
-		k_fifo_init(&att->tx_queue);
 #if CONFIG_BT_ATT_PREPARE_COUNT > 0
 		sys_slist_init(&att->prep_queue);
 #endif
@@ -3080,6 +2998,7 @@ static uint8_t att_req_retry(struct bt_att_chan *att_chan)
 	}
 
 	if (chan_send(att_chan, buf)) {
+		/* TODO: do something about this */
 		net_buf_unref(buf);
 		return BT_ATT_ERR_UNLIKELY;
 	}
@@ -3228,7 +3147,6 @@ static struct bt_att_chan *att_chan_new(struct bt_att *att, atomic_val_t flags)
 
 	(void)memset(chan, 0, sizeof(*chan));
 	chan->chan.chan.ops = &ops;
-	k_fifo_init(&chan->tx_queue);
 	atomic_set(chan->flags, flags);
 	chan->att = att;
 	att_chan_attach(att, chan);
@@ -3312,6 +3230,7 @@ static int bt_att_accept(struct bt_conn *conn, struct bt_l2cap_chan **ch)
 	att->conn = conn;
 	sys_slist_init(&att->reqs);
 	sys_slist_init(&att->chans);
+	k_event_init(&att->events);
 
 #if defined(CONFIG_BT_EATT)
 	k_work_init_delayable(&att->eatt.connection_work,
@@ -3749,23 +3668,138 @@ void bt_att_req_free(struct bt_att_req *req)
 	k_mem_slab_free(&req_slab, (void *)req);
 }
 
-int bt_att_send(struct bt_conn *conn, struct net_buf *buf)
+static struct bt_att_chan *get_first_available_chan(struct bt_att *att, struct net_buf *buf)
+{
+	struct bt_att_chan *chan;
+	struct bt_att_chan *tmp;
+
+	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&att->chans, chan, tmp, node) {
+		/* If there is an ongoing transaction, do not use the channel */
+		if (chan->req) {
+			LOG_DBG("Request already pending on chan %p", chan);
+			continue;
+		}
+
+		if (bt_att_mtu(chan) < buf->len) {
+			LOG_DBG("MTU too small: chan %p mtu %d requested %d",
+				chan, bt_att_mtu(chan), buf->len);
+			continue;
+		}
+		/* TODO: allow notifications */
+		/* if (is_att_req(buf) && atomic_test_bit(chan->flags, ATT_PENDING_SENT)) { */
+		if (atomic_test_bit(chan->flags, ATT_PENDING_SENT)) {
+			LOG_DBG("Channel busy: chan %p", chan);
+			continue;
+		}
+
+		LOG_DBG("Got channel: chan %p", chan);
+
+		return chan;
+	}
+
+	return NULL;
+}
+
+int bt_att_send_nonblocking(struct bt_conn *conn, struct net_buf *buf)
 {
 	struct bt_att *att;
+	struct bt_att_chan *avail_att_chan;
 
 	__ASSERT_NO_MSG(conn);
 	__ASSERT_NO_MSG(buf);
 
 	att = att_get(conn);
 	if (!att) {
-		net_buf_unref(buf);
 		return -ENOTCONN;
 	}
 
-	net_buf_put(&att->tx_queue, buf);
-	att_send_process(att);
+	avail_att_chan = get_first_available_chan(att, buf);
+	if (!avail_att_chan) {
+		LOG_DBG("no available bearer for len %d on conn %p", buf->len, conn);
+		return -EAGAIN;
+	}
 
-	return 0;
+	return bt_att_chan_send(avail_att_chan, buf);
+}
+
+/* TODO: kconfig this */
+#define SEND_RETRIES 100
+#define RETRY_TIMEOUT K_SECONDS(1)
+
+static bool should_retry(int err)
+{
+	/* Is this error going away if we wait a bit? */
+	return (err == -ENOMEM) || (err == -EAGAIN) || (err == -ENOBUFS);
+}
+
+static int wait_for_att_sent(struct bt_conn *conn)
+{
+	struct bt_att *att = att_get(conn);
+
+	if (!att) {
+		return -ENOTCONN;
+	}
+
+	LOG_DBG("waiting for att_sent");
+
+	uint32_t events = k_event_wait(&att->events, BIT(EVT_ATT_SENT), false, RETRY_TIMEOUT);
+
+	if (events) {
+		LOG_DBG("got att_sent event");
+		return 0;
+	} else {
+		LOG_DBG("timed out waiting");
+		return -ETIMEDOUT;
+	}
+}
+
+int bt_att_send(struct bt_conn *conn, struct net_buf *buf)
+{
+	int err;
+
+	__ASSERT_NO_MSG(buf->data);
+
+	if (!bt_can_block()) {
+		LOG_ERR("This context cannot block");
+		return -EDEADLK;
+	}
+
+	int64_t start_time = k_uptime_get();
+
+	/* Can we get stuck in a loop if no channel has the correct MTU? */
+	for (int t = 0; t < SEND_RETRIES; t++) {
+		/* This SHOULD NOT unref when there is an error */
+		/* This doesn't work:
+		 * L2 is "smart" and will keep a ref to the buffer.
+		 * Problem is that ref is kept for the channel we end up selecting.
+		 * It will then attempt to send it again.
+		 */
+		err = bt_att_send_nonblocking(conn, buf);
+		LOG_DBG("att-send-complete: buf %p err %d", buf, err);
+
+		if (should_retry(err)) {
+			__ASSERT_NO_MSG(buf->data);
+			wait_for_att_sent(conn);
+
+		} else if (err == 0) {
+
+			return 0;
+		} else {
+			goto fail;
+		}
+	}
+
+	LOG_ERR("Failed to send after %d tries (waited %dms)",
+		SEND_RETRIES, k_uptime_get() - start_time);
+	err = -ETIMEDOUT;
+
+fail:
+	net_buf_unref(buf);
+
+	/* Give a chance to other threads to run */
+	k_yield();
+
+	return err;
 }
 
 int bt_att_req_send(struct bt_conn *conn, struct bt_att_req *req)
