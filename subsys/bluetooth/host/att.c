@@ -3747,6 +3747,29 @@ int bt_att_send(struct bt_conn *conn, struct net_buf *buf)
 	return chan_send(avail_att_chan, buf);
 }
 
+int bt_att_wait_for_att_sent(struct bt_conn *conn, k_timeout_t timeout)
+{
+	struct bt_att *att = att_get(conn);
+
+	if (!att) {
+		return -ENOTCONN;
+	}
+
+	LOG_DBG("waiting for att_sent");
+
+	uint32_t events = k_event_wait(&att->events, BIT(EVT_ATT_SENT), false, timeout);
+
+	if (events) {
+		LOG_DBG("got att_sent event");
+
+		return 0;
+	}
+
+	LOG_DBG("timed out waiting");
+
+	return -ETIMEDOUT;
+}
+
 int bt_att_req_send(struct bt_conn *conn, struct bt_att_req *req)
 {
 	struct bt_att *att;

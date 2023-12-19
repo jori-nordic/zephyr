@@ -1454,11 +1454,15 @@ static void bt_gatt_service_init(void)
 	}
 }
 
+static void init_tx_queues(void);
+
 void bt_gatt_init(void)
 {
 	if (atomic_test_and_set_bit(gatt_flags, GATT_INITIALIZED)) {
 		return;
 	}
+
+	init_tx_queues();
 
 	bt_gatt_service_init();
 
@@ -2246,6 +2250,199 @@ struct notify_data {
 	};
 };
 
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+struct gatt_tx_queue {
+	struct k_fifo txq;
+	struct bt_conn *conn;	/* maybe optimize out? */
+	struct k_work_delayable work;
+};
+
+struct gatt_tx_queue tx_queues[CONFIG_BT_MAX_CONN];
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
+static int bt_gatt_send(struct bt_conn *conn, struct net_buf *buf);
+
+static int process_tx_queue(struct bt_conn *conn)
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+{
+	struct net_buf *buf;
+	int id = bt_conn_index(conn);
+	struct k_fifo *txq;
+	int err;
+
+	txq = &tx_queues[id].txq;
+	__ASSERT_NO_MSG(conn == tx_queues[id].conn);
+
+	k_sched_lock();
+	while ((buf = k_fifo_get(txq, K_NO_WAIT))) {
+		err = bt_gatt_send(conn, buf);
+		bt_conn_unref(conn); /* one ref per buf added to queue */
+
+		if (err) {
+			LOG_ERR("Failed to send queued buf %p err %d", buf, err);
+			net_buf_unref(buf);
+			k_sched_unlock();
+
+			return err;
+		}
+	}
+	k_sched_unlock();
+
+	return err;
+}
+#else
+{
+	return 0;
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
+static bool all_backed_up(struct bt_conn *conn)
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+{
+	int id = bt_conn_index(conn);
+
+	return !k_fifo_is_empty(&tx_queues[id].txq);
+}
+#else
+{
+	return false;
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+static void tx_queue_work(struct k_work *work)
+{
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct gatt_tx_queue *tx_queue = CONTAINER_OF(dwork, struct gatt_tx_queue, work);
+
+	process_tx_queue(tx_queue->conn);
+}
+
+static void init_tx_queues(void)
+{
+	for (int i = 0; i < ARRAY_SIZE(tx_queues); i++) {
+		k_fifo_init(&tx_queues[i].txq);
+		k_work_init_delayable(&tx_queues[i].work, tx_queue_work);
+	}
+}
+#else
+static void init_tx_queues(void)
+{
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
+static int schedule_for_tx(struct bt_conn *conn, struct net_buf *buf)
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+{
+	/* TODO: flush the queues on conn teardown
+	 */
+	int id = bt_conn_index(conn);
+
+	/* put the buf on the queue */
+	net_buf_put(&tx_queues[id].txq, buf);
+	tx_queues[id].conn = bt_conn_ref(conn);
+
+	/* schedule sending the buf */
+	/* FIXME: should that be ATT_TIMEOUT or some other soft-timeout? */
+	return bt_long_wq_schedule(&tx_queues[id].work, K_NO_WAIT);
+}
+#else
+{
+	return 0;
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
+extern int bt_att_wait_for_att_sent(struct bt_conn *conn, k_timeout_t timeout);
+
+static bool should_retry(int err)
+{
+	/* Is this error going away if we wait a bit? */
+	return (err == -ENOMEM) || (err == -EAGAIN) || (err == -ENOBUFS);
+}
+
+/* TODO: kconfig this */
+#define SEND_RETRIES 100
+#define RETRY_TIMEOUT K_SECONDS(1)
+
+static int bt_gatt_send(struct bt_conn *conn, struct net_buf *buf)
+{
+	int err;
+	int t;
+
+	__ASSERT_NO_MSG(buf->data);
+
+	/* To avoid re-ordering of notifications, we need to process the pending
+	 * bufs in the ACL conn's queue before attempting to send the current
+	 * one.
+	 */
+	if (all_backed_up(conn)) {
+		if (bt_can_block()) {
+			LOG_INF("processing existing queue for %p", conn);
+			process_tx_queue(conn);
+		} else {
+			err = schedule_for_tx(conn, buf);
+			__ASSERT_NO_MSG(err >= 0);
+			return 0;
+		}
+	}
+
+	/* Attempt to send right away */
+	err = bt_att_send(conn, buf);
+
+	/* Attempt was succesful. Buffer ownership has been transferred to lower
+	 * layers.
+	 */
+	if (!err) {
+		return 0;
+	}
+
+	if (!bt_can_block()) {
+		if (IS_ENABLED(CONFIG_BT_GATT_TX_QUEUE)) {
+			LOG_ERR("scheduled for TX: buf %p conn %p", buf, conn);
+			err = schedule_for_tx(conn, buf);
+			__ASSERT_NO_MSG(err >= 0);
+			return 0;
+		} else {
+			LOG_ERR("Failed to send: %d . This context cannot block", err);
+			err = -EDEADLK;
+			goto cleanup;
+		}
+	}
+
+	/* Blocking retries */
+	int64_t start_time = k_uptime_get();
+
+	for (t = 0; t < SEND_RETRIES; t++) {
+		err = bt_att_send(conn, buf);
+		LOG_DBG("att-send-complete: buf %p err %d", buf, err);
+
+		if (!err) {
+			return 0; /* buffer was sent */
+		}
+
+		if (should_retry(err)) {
+			__ASSERT_NO_MSG(buf->data);
+			bt_att_wait_for_att_sent(conn, RETRY_TIMEOUT);
+		} else {
+			goto cleanup; /* more explicit than `break` */
+		}
+	}
+
+	if (t >= SEND_RETRIES) {
+		LOG_ERR("Failed to send after %d tries (waited %dms)",
+			SEND_RETRIES, k_uptime_get() - start_time);
+		err = -ETIMEDOUT;
+	}
+
+cleanup:
+	/* We have to unref `buf` in case of error: lower layers only take
+	 * ownership if they return successfully.
+	 */
+	net_buf_unref(buf);
+
+	return err;
+}
+
 #if defined(CONFIG_BT_GATT_NOTIFY_MULTIPLE)
 
 static struct net_buf *nfy_mult[CONFIG_BT_MAX_CONN];
@@ -2275,7 +2472,7 @@ static int gatt_notify_mult_send(struct bt_conn *conn, struct net_buf *buf)
 		LOG_DBG("Converted BT_ATT_OP_NOTIFY_MULT with single attr to BT_ATT_OP_NOTIFY");
 	}
 
-	ret = bt_att_send(conn, buf);
+	ret = bt_gatt_send(conn, buf);
 	if (ret < 0) {
 		net_buf_unref(buf);
 	}
@@ -2466,7 +2663,7 @@ static int gatt_notify(struct bt_conn *conn, uint16_t handle,
 	memcpy(nfy->value, params->data, params->len);
 
 	bt_att_set_tx_meta_data(buf, params->func, params->user_data, BT_ATT_CHAN_OPT(params));
-	return bt_att_send(conn, buf);
+	return bt_gatt_send(conn, buf);
 }
 
 /* Converts error (negative errno) to ATT Error code */
@@ -4929,7 +5126,7 @@ int bt_gatt_write_without_response_cb(struct bt_conn *conn, uint16_t handle,
 
 	bt_att_set_tx_meta_data(buf, func, user_data, BT_ATT_CHAN_OPT_NONE);
 
-	return bt_att_send(conn, buf);
+	return bt_gatt_send(conn, buf);
 }
 
 static int gatt_exec_encode(struct net_buf *buf, size_t len, void *user_data)
