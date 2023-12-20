@@ -64,3 +64,5 @@ struct bt_gatt_attr;
 /* Check attribute permission */
 uint8_t bt_gatt_check_perm(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			uint16_t mask);
+
+void bt_gatt_req_available(struct bt_conn *conn);

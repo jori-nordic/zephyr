@@ -2257,10 +2257,63 @@ struct gatt_tx_queue {
 	struct k_work_delayable work;
 };
 
+/* This one has `struct net_buf *` in txq */
 struct gatt_tx_queue tx_queues[CONFIG_BT_MAX_CONN];
+
+/* This one has `struct bt_att_req *` in txq */
+struct gatt_tx_queue req_queues[CONFIG_BT_MAX_CONN];
 #endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
 
 static int bt_gatt_send(struct bt_conn *conn, struct net_buf *buf);
+
+static int process_req_queue(struct bt_conn *conn)
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+{
+	struct bt_att_req *req;
+	int id = bt_conn_index(conn);
+	struct k_fifo *txq;
+	int err = 0;
+
+	LOG_DBG("");
+
+	txq = &req_queues[id].txq;
+	__ASSERT_NO_MSG(conn == req_queues[id].conn);
+
+	k_sched_lock();
+	while (bt_att_can_send_req(conn)) {
+		req = k_fifo_peek_head(txq);
+		if (!req) {
+			LOG_DBG("no more requests in queue");
+			break;
+		}
+
+		err = bt_gatt_req_send_blocking(conn, req);
+		if (err && !bt_att_can_send_req(conn) && err != -ENOTCONN) {
+			LOG_DBG("all bearers busy");
+			break;
+		}
+
+		/* dequeue only if the error was not that we didn't have a
+		 * bearer available.
+		 */
+		req = k_fifo_get(txq, K_NO_WAIT);
+		bt_conn_unref(conn); /* one ref per req added to queue */
+
+		if (err) {
+			LOG_ERR("Failed to send queued req %p err %d", req, err);
+			bt_att_req_free(req);
+			break;
+		}
+	}
+	k_sched_unlock();
+
+	return err;
+}
+#else
+{
+	return 0;
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
 
 static int process_tx_queue(struct bt_conn *conn)
 #if defined(CONFIG_BT_GATT_TX_QUEUE)
@@ -2296,6 +2349,19 @@ static int process_tx_queue(struct bt_conn *conn)
 }
 #endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
 
+static bool req_all_backed_up(struct bt_conn *conn)
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+{
+	int id = bt_conn_index(conn);
+
+	return !k_fifo_is_empty(&req_queues[id].txq);
+}
+#else
+{
+	return false;
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
 static bool all_backed_up(struct bt_conn *conn)
 #if defined(CONFIG_BT_GATT_TX_QUEUE)
 {
@@ -2310,24 +2376,58 @@ static bool all_backed_up(struct bt_conn *conn)
 #endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
 
 #if defined(CONFIG_BT_GATT_TX_QUEUE)
+static bool is_req(struct gatt_tx_queue *txq)
+{
+	return IS_ARRAY_ELEMENT(req_queues, txq);
+}
+
 static void tx_queue_work(struct k_work *work)
 {
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
 	struct gatt_tx_queue *tx_queue = CONTAINER_OF(dwork, struct gatt_tx_queue, work);
 
-	process_tx_queue(tx_queue->conn);
+	if (is_req(tx_queue)) {
+		process_req_queue(tx_queue->conn);
+	} else {
+		process_tx_queue(tx_queue->conn);
+	}
 }
 
 static void init_tx_queues(void)
 {
+	/* Handles notifications + write w/o responses + cmds */
 	for (int i = 0; i < ARRAY_SIZE(tx_queues); i++) {
 		k_fifo_init(&tx_queues[i].txq);
 		k_work_init_delayable(&tx_queues[i].work, tx_queue_work);
+	}
+
+	/* Handles requests + indications */
+	/* TODO: separate indications from requests, spec allows it */
+	for (int i = 0; i < ARRAY_SIZE(req_queues); i++) {
+		k_fifo_init(&req_queues[i].txq);
+		k_work_init_delayable(&req_queues[i].work, tx_queue_work);
 	}
 }
 #else
 static void init_tx_queues(void)
 {
+}
+#endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
+
+static int schedule_req(struct bt_conn *conn, struct bt_att_req *req)
+#if defined(CONFIG_BT_GATT_TX_QUEUE)
+{
+	/* TODO: flush the queues on conn teardown
+	 */
+	int id = bt_conn_index(conn);
+
+	/* put the request on the queue */
+	k_fifo_put(&req_queues[id].txq, req);
+	req_queues[id].conn = bt_conn_ref(conn);
+}
+#else
+{
+	return 0;
 }
 #endif /* defined(CONFIG_BT_GATT_TX_QUEUE) */
 
@@ -2362,7 +2462,98 @@ static bool should_retry(int err)
 
 /* TODO: kconfig this */
 #define SEND_RETRIES 100
-#define RETRY_TIMEOUT K_SECONDS(1)
+#define RETRY_TIMEOUT K_SECONDS(5)
+
+static int gatt_req_send_blocking(struct bt_conn *conn, struct bt_att_req *req)
+{
+	int err;
+	int t;
+
+	/* This should only run if that condition is satisfied anyways */
+	while (!bt_att_can_send_req(conn)) {
+		bt_att_wait_for_att_sent(conn, RETRY_TIMEOUT);
+	}
+
+	/* attempt to send a request from the queue */
+	__ASSERT_NO_MSG(req->buf);
+	__ASSERT_NO_MSG(req->buf->data);
+
+	/* To avoid re-ordering of requests, we need to process the pending bufs
+	 * in the ACL conn's request queue before attempting to send the current
+	 * one.
+	 */
+	if (req_all_backed_up(conn)) {
+		if (bt_can_block()) {
+			LOG_INF("processing existing req queue for %p", conn);
+			process_req_queue(conn);
+		} else {
+			/* If the queue is not empty AND we cannot block, then
+			 * we have to defer sending the current `req` to the
+			 * queue.
+			 */
+			err = schedule_req(conn, req);
+			__ASSERT_NO_MSG(err >= 0);
+			return 0;
+		}
+	}
+
+	/* Attempt to send right away */
+	err = bt_att_send(conn, req->buf);
+
+	/* Attempt was succesful. Buffer ownership has been transferred to lower
+	 * layers.
+	 */
+	if (!err) {
+		return 0;
+	}
+
+	/* We were not able to send */
+	if (!bt_can_block()) {
+		if (IS_ENABLED(CONFIG_BT_GATT_TX_QUEUE)) {
+			LOG_ERR("scheduled req for TX: req %p conn %p", req, conn);
+			err = schedule_req(conn, req);
+			__ASSERT_NO_MSG(err >= 0);
+			return 0;
+		} else {
+			LOG_ERR("Failed to send: %d . This context cannot block", err);
+			err = -EDEADLK;
+			goto cleanup;
+		}
+	}
+
+	/* Blocking retries */
+	int64_t start_time = k_uptime_get();
+
+	for (t = 0; t < SEND_RETRIES; t++) {
+		err = bt_att_send(conn, req->buf);
+		LOG_DBG("att-send-complete: req %p err %d", req, err);
+
+		if (!err) {
+			return 0; /* buffer was sent */
+		}
+
+		if (should_retry(err)) {
+			__ASSERT_NO_MSG(buf->data);
+			bt_att_wait_for_att_sent(conn, RETRY_TIMEOUT);
+		} else {
+			goto cleanup; /* more explicit than `break` */
+		}
+	}
+
+	if (t >= SEND_RETRIES) {
+		LOG_ERR("Failed to send after %d tries (waited %dms)",
+			SEND_RETRIES, k_uptime_get() - start_time);
+		err = -ETIMEDOUT;
+	}
+
+cleanup:
+	/* We have to free req (that then unrefs `buf`) in case of error: lower
+	 * layers only take ownership if they return successfully.
+	 */
+	bt_att_req_free(req);
+
+	return err;
+}
 
 static int bt_gatt_send(struct bt_conn *conn, struct net_buf *buf)
 {
@@ -2441,6 +2632,13 @@ cleanup:
 	net_buf_unref(buf);
 
 	return err;
+}
+
+void bt_gatt_req_available(struct bt_conn *conn)
+{
+	int id = bt_conn_index(conn);
+
+	bt_long_wq_schedule(&req_queues[id].work, K_NO_WAIT);
 }
 
 #if defined(CONFIG_BT_GATT_NOTIFY_MULTIPLE)
@@ -2754,8 +2952,19 @@ static int gatt_req_send(struct bt_conn *conn, bt_att_func_t func, void *params,
 		return err;
 	}
 
-	err = bt_att_req_send(conn, req);
+	if (!bt_att_can_send_req(conn)) {
+		LOG_ERR("can't send req right now, putting on queue");
+		schedule_req(conn, req);
+	}
+
+	err = gatt_req_send_blocking(conn, req);
+	if (err && !bt_att_can_send_req(conn) && err != -ENOTCONN) {
+		LOG_ERR("failed to send (err %d) putting REQ %p on queue", err, req);
+		schedule_req(conn, req);
+	}
+
 	if (err) {
+		LOG_ERR("failed to send req %p, destroying", req);
 		bt_att_req_free(req);
 	}
 
@@ -2834,7 +3043,7 @@ static int gatt_indicate(struct bt_conn *conn, uint16_t handle,
 
 	req->buf = buf;
 
-	err = bt_att_req_send(conn, req);
+	err = gatt_req_send_blocking(conn, req);
 	if (err) {
 		bt_att_req_free(req);
 	}
@@ -5583,11 +5792,6 @@ int bt_gatt_unsubscribe(struct bt_conn *conn,
 		return -EINVAL;
 	}
 
-	/* Attempt to cancel if write is pending */
-	if (atomic_test_bit(params->flags, BT_GATT_SUBSCRIBE_FLAG_WRITE_PENDING)) {
-		bt_gatt_cancel(conn, params);
-	}
-
 	if (!has_subscription) {
 		int err;
 
@@ -5610,26 +5814,6 @@ int bt_gatt_unsubscribe(struct bt_conn *conn,
 	}
 
 	return 0;
-}
-
-void bt_gatt_cancel(struct bt_conn *conn, void *params)
-{
-	struct bt_att_req *req;
-	bt_att_func_t func = NULL;
-
-	k_sched_lock();
-
-	req = bt_att_find_req_by_user_data(conn, params);
-	if (req) {
-		func = req->func;
-		bt_att_req_cancel(conn, req);
-	}
-
-	k_sched_unlock();
-
-	if (func) {
-		func(conn, BT_ATT_ERR_UNLIKELY, NULL, 0, params);
-	}
 }
 
 #if defined(CONFIG_BT_GATT_AUTO_RESUBSCRIBE)

@@ -134,11 +134,16 @@ enum {
 	EVT_ATT_SENT = 0,
 };
 
+enum {
+	ATT_CAN_REQ,
+
+	/* Total number of flags - must be at the end of the enum */
+	ATT_OBJ_NUM_FLAGS,
+};
+
 /* ATT connection specific data */
 struct bt_att {
 	struct bt_conn		*conn;
-	/* Shared request queue */
-	sys_slist_t		reqs;
 #if CONFIG_BT_ATT_PREPARE_COUNT > 0
 	sys_slist_t		prep_queue;
 #endif
@@ -147,6 +152,7 @@ struct bt_att {
 	/* MTU of largest chan */
 	uint16_t                mtu;
 	struct k_event		events;
+	ATOMIC_DEFINE(flags, ATT_OBJ_NUM_FLAGS);
 #if defined(CONFIG_BT_EATT)
 	struct {
 		struct k_work_delayable connection_work;
@@ -164,7 +170,6 @@ K_MEM_SLAB_DEFINE(att_slab, sizeof(struct bt_att),
 K_MEM_SLAB_DEFINE(chan_slab, sizeof(struct bt_att_chan),
 		  CONFIG_BT_MAX_CONN * ATT_CHAN_MAX,
 		  __alignof__(struct bt_att_chan));
-static struct bt_att_req cancel;
 
 /** The thread ATT response handlers likely run on.
  *
@@ -394,48 +399,15 @@ static bool att_chan_matches_chan_opt(struct bt_att_chan *chan, enum bt_att_chan
 	}
 }
 
-static struct bt_att_req *get_first_req_matching_chan(sys_slist_t *reqs, struct bt_att_chan *chan)
-{
-	if (IS_ENABLED(CONFIG_BT_EATT)) {
-		sys_snode_t *curr, *prev = NULL;
-		struct bt_att_tx_meta_data *meta = NULL;
-
-		SYS_SLIST_FOR_EACH_NODE(reqs, curr) {
-			meta = bt_att_get_tx_meta_data(ATT_REQ(curr)->buf);
-			if (att_chan_matches_chan_opt(chan, meta->chan_opt)) {
-				break;
-			}
-
-			prev = curr;
-		}
-
-		if (curr) {
-			sys_slist_remove(reqs, prev, curr);
-
-			return ATT_REQ(curr);
-		}
-
-		return NULL;
-	}
-
-	sys_snode_t *node = sys_slist_get(reqs);
-
-	if (node) {
-		return ATT_REQ(node);
-	} else {
-		return NULL;
-	}
-}
-
-/* Send requests without taking tx_sem */
 static int chan_req_send(struct bt_att_chan *chan, struct bt_att_req *req)
 {
 	struct net_buf *buf;
 	int err;
 
-	if (bt_att_mtu(chan) < net_buf_frags_len(req->buf)) {
-		return -EMSGSIZE;
-	}
+	__ASSERT_NO_MSG(chan);
+	__ASSERT_NO_MSG(req);
+	__ASSERT_NO_MSG(req->func);
+	__ASSERT_NO_MSG(!chan->req);
 
 	LOG_DBG("chan %p req %p len %zu", chan, req, net_buf_frags_len(req->buf));
 
@@ -454,6 +426,7 @@ static int chan_req_send(struct bt_att_chan *chan, struct bt_att_req *req)
 		/* We still have the ownership of the buffer */
 		req->buf = buf;
 		chan->req = NULL;
+		atomic_set_bit(att->flags, ATT_CAN_REQ);
 	} else {
 		bt_gatt_req_set_mtu(req, bt_att_mtu(chan));
 	}
@@ -479,22 +452,6 @@ static void bt_att_sent(struct bt_l2cap_chan *ch)
 	/* Signal other threads that are waiting on resources */
 	k_event_post(&att->events, BIT(EVT_ATT_SENT));
 	k_event_clear(&att->events, BIT(EVT_ATT_SENT));
-
-	/* Process pending requests first since they require a response they
-	 * can only be processed one at time while if other queues were
-	 * processed before they may always contain a buffer starving the
-	 * request queue.
-	 */
-	if (!chan->req && !sys_slist_is_empty(&att->reqs)) {
-		sys_snode_t *node = sys_slist_get(&att->reqs);
-
-		if (chan_req_send(chan, ATT_REQ(node)) >= 0) {
-			return;
-		}
-
-		/* Prepend back to the list as it could not be sent */
-		sys_slist_prepend(&att->reqs, node);
-	}
 
 	/* TODO: notify/unblock GATT/application */
 }
@@ -739,53 +696,32 @@ static uint8_t att_mtu_req(struct bt_att_chan *chan, struct net_buf *buf)
 	return 0;
 }
 
-static int bt_att_chan_req_send(struct bt_att_chan *chan,
-				struct bt_att_req *req)
+/* analog of `bt_att_send` but for requests/indications.
+ * TODO: dedup so everything goes through the same path.
+ */
+int bt_att_req_send(struct bt_conn *conn, struct bt_att_req *req)
 {
-	__ASSERT_NO_MSG(chan);
+	__ASSERT_NO_MSG(conn);
 	__ASSERT_NO_MSG(req);
-	__ASSERT_NO_MSG(req->func);
-	__ASSERT_NO_MSG(!chan->req);
+	__ASSERT_NO_MSG(req->buf);
 
-	LOG_DBG("req %p", req);
+	att = att_get(conn);
+	if (!att) {
+		return -ENOTCONN;
+	}
+
+	if (att->mtu < net_buf_frags_len(req->buf->len)) {
+		LOG_ERR("MTU too small: %d < %d", att->mtu, buf->len);
+		return -EMSGSIZE;
+	}
+
+	avail_att_chan = get_first_available_chan(att, req->buf);
+	if (!avail_att_chan) {
+		LOG_DBG("no available bearer for len %d on conn %p", buf->len, conn);
+		return -EAGAIN;
+	}
 
 	return chan_req_send(chan, req);
-}
-
-static void att_req_send_process(struct bt_att *att)
-{
-	struct bt_att_req *req = NULL;
-	struct bt_att_chan *chan, *tmp, *prev = NULL;
-
-	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&att->chans, chan, tmp, node) {
-		/* If there is an ongoing transaction, do not use the channel */
-		if (chan->req) {
-			continue;
-		}
-
-		if (!req && prev && (bt_att_is_enhanced(chan) == bt_att_is_enhanced(prev))) {
-			/* If there was nothing to send for the previous channel and the current
-			 * channel has the same "enhancedness", there will be nothing to send for
-			 * this channel either.
-			 */
-			continue;
-		}
-
-		prev = chan;
-
-		/* Pull next request from the list */
-		req = get_first_req_matching_chan(&att->reqs, chan);
-		if (!req) {
-			continue;
-		}
-
-		if (bt_att_chan_req_send(chan, req) >= 0) {
-			return;
-		}
-
-		/* Prepend back to the list as it could not be sent */
-		sys_slist_prepend(&att->reqs, &req->node);
-	}
 }
 
 static uint8_t att_handle_rsp(struct bt_att_chan *chan, void *pdu, uint16_t len,
@@ -801,13 +737,7 @@ static uint8_t att_handle_rsp(struct bt_att_chan *chan, void *pdu, uint16_t len,
 
 	if (!chan->req) {
 		LOG_WRN("No pending ATT request");
-		goto process;
-	}
-
-	/* Check if request has been cancelled */
-	if (chan->req == &cancel) {
-		chan->req = NULL;
-		goto process;
+		return 0;
 	}
 
 	/* Reset func so it can be reused by the callback */
@@ -818,10 +748,12 @@ static uint8_t att_handle_rsp(struct bt_att_chan *chan, void *pdu, uint16_t len,
 	/* free allocated request so its memory can be reused */
 	bt_att_req_free(chan->req);
 	chan->req = NULL;
+	atomic_set_bit(att->flags, ATT_CAN_REQ);
 
-process:
-	/* Process pending requests */
-	att_req_send_process(chan->att);
+	/* notify GATT it is able to send another REQuest for this ACL. */
+	/* TODO: notify also on bearer init */
+	bt_gatt_req_available(conn);
+
 	if (func) {
 		func(chan->att->conn, err, pdu, len, params);
 	}
@@ -2340,7 +2272,7 @@ static uint8_t att_error_rsp(struct bt_att_chan *chan, struct net_buf *buf)
 	LOG_DBG("request 0x%02x handle 0x%04x error 0x%02x", rsp->request,
 		sys_le16_to_cpu(rsp->handle), rsp->error);
 
-	/* Don't retry if there is no req pending or it has been cancelled.
+	/* Don't retry if there is no req pending
 	 *
 	 * BLUETOOTH SPECIFICATION Version 5.2 [Vol 3, Part F]
 	 * page 1423:
@@ -2351,7 +2283,7 @@ static uint8_t att_error_rsp(struct bt_att_chan *chan, struct net_buf *buf)
 	 * specification, then the ATT_ERROR_RSP PDU shall still be considered to
 	 * state that the given request cannot be performed for an unknown reason.
 	 */
-	if (!chan->req || chan->req == &cancel || !rsp->error) {
+	if (!chan->req || !rsp->error) {
 		err = BT_ATT_ERR_UNLIKELY;
 		goto done;
 	}
@@ -2858,24 +2790,7 @@ static void att_reset(struct bt_att *att)
 	(void)k_work_cancel_delayable_sync(&att->eatt.connection_work, &sync);
 #endif /* CONFIG_BT_EATT */
 
-	/* Notify pending requests */
-	while (!sys_slist_is_empty(&att->reqs)) {
-		struct bt_att_req *req;
-		sys_snode_t *node;
-
-		node = sys_slist_get_not_empty(&att->reqs);
-		req = CONTAINER_OF(node, struct bt_att_req, node);
-		if (req->func) {
-			req->func(att->conn, -ECONNRESET, NULL, 0,
-				  req->user_data);
-		}
-
-		bt_att_req_free(req);
-	}
-
-	/* FIXME: `att->conn` is not reference counted. Consider using `bt_conn_ref`
-	 * and `bt_conn_unref` to follow convention.
-	 */
+	bt_conn_unref(att->conn);
 	att->conn = NULL;
 	k_mem_slab_free(&att_slab, (void *)att);
 }
@@ -3079,21 +2994,9 @@ static void bt_att_status(struct bt_l2cap_chan *ch, atomic_t *status)
 
 	/* If there is a request pending don't attempt to send */
 	if (chan->req) {
+		LOG_DBG("req already pending");
 		return;
 	}
-
-	/* Pull next request from the list */
-	node = sys_slist_get(&chan->att->reqs);
-	if (!node) {
-		return;
-	}
-
-	if (bt_att_chan_req_send(chan, ATT_REQ(node)) >= 0) {
-		return;
-	}
-
-	/* Prepend back to the list as it could not be sent */
-	sys_slist_prepend(&chan->att->reqs, node);
 }
 
 static void bt_att_released(struct bt_l2cap_chan *ch)
@@ -3233,8 +3136,7 @@ static int bt_att_accept(struct bt_conn *conn, struct bt_l2cap_chan **ch)
 	att_handle_rsp_thread = k_current_get();
 
 	(void)memset(att, 0, sizeof(*att));
-	att->conn = conn;
-	sys_slist_init(&att->reqs);
+	att->conn = bt_conn_ref(conn);
 	sys_slist_init(&att->chans);
 	k_event_init(&att->events);
 
@@ -3716,6 +3618,8 @@ static struct bt_att_chan *get_first_available_chan(struct bt_att *att, struct n
 		return chan;
 	}
 
+	atomic_clear_bit(att->flags, ATT_CAN_REQ);
+
 	return NULL;
 }
 
@@ -3747,6 +3651,13 @@ int bt_att_send(struct bt_conn *conn, struct net_buf *buf)
 	return chan_send(avail_att_chan, buf);
 }
 
+bool bt_att_can_send_req(struct bt_conn *conn)
+{
+	struct bt_att *att = att_get(conn);
+
+	return atomic_test_bit(att->flags, ATT_CAN_REQ);
+}
+
 int bt_att_wait_for_att_sent(struct bt_conn *conn, k_timeout_t timeout)
 {
 	struct bt_att *att = att_get(conn);
@@ -3768,95 +3679,6 @@ int bt_att_wait_for_att_sent(struct bt_conn *conn, k_timeout_t timeout)
 	LOG_DBG("timed out waiting");
 
 	return -ETIMEDOUT;
-}
-
-int bt_att_req_send(struct bt_conn *conn, struct bt_att_req *req)
-{
-	struct bt_att *att;
-
-	LOG_DBG("conn %p req %p", conn, req);
-
-	__ASSERT_NO_MSG(conn);
-	__ASSERT_NO_MSG(req);
-
-	att = att_get(conn);
-	if (!att) {
-		return -ENOTCONN;
-	}
-
-	sys_slist_append(&att->reqs, &req->node);
-	att_req_send_process(att);
-
-	return 0;
-}
-
-static bool bt_att_chan_req_cancel(struct bt_att_chan *chan,
-				   struct bt_att_req *req)
-{
-	if (chan->req != req) {
-		return false;
-	}
-
-	chan->req = &cancel;
-
-	bt_att_req_free(req);
-
-	return true;
-}
-
-void bt_att_req_cancel(struct bt_conn *conn, struct bt_att_req *req)
-{
-	struct bt_att *att;
-	struct bt_att_chan *chan, *tmp;
-
-	LOG_DBG("req %p", req);
-
-	if (!conn || !req) {
-		return;
-	}
-
-	att = att_get(conn);
-	if (!att) {
-		return;
-	}
-
-	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&att->chans, chan, tmp, node) {
-		/* Check if request is outstanding */
-		if (bt_att_chan_req_cancel(chan, req)) {
-			return;
-		}
-	}
-
-	/* Remove request from the list */
-	sys_slist_find_and_remove(&att->reqs, &req->node);
-
-	bt_att_req_free(req);
-}
-
-struct bt_att_req *bt_att_find_req_by_user_data(struct bt_conn *conn, const void *user_data)
-{
-	struct bt_att *att;
-	struct bt_att_chan *chan;
-	struct bt_att_req *req;
-
-	att = att_get(conn);
-	if (!att) {
-		return NULL;
-	}
-
-	SYS_SLIST_FOR_EACH_CONTAINER(&att->chans, chan, node) {
-		if (chan->req->user_data == user_data) {
-			return chan->req;
-		}
-	}
-
-	SYS_SLIST_FOR_EACH_CONTAINER(&att->reqs, req, node) {
-		if (req->user_data == user_data) {
-			return req;
-		}
-	}
-
-	return NULL;
 }
 
 bool bt_att_fixed_chan_only(struct bt_conn *conn)

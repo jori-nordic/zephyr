@@ -279,7 +279,7 @@ typedef int (*bt_att_encode_t)(struct net_buf *buf, size_t len,
 
 /* ATT request context */
 struct bt_att_req {
-	sys_snode_t node;
+	uint32_t __reserved_fifo; /* so we're able to put that on a fifo */
 	bt_att_func_t func;
 	struct net_buf *buf;
 #if defined(CONFIG_BT_SMP)
@@ -347,3 +347,5 @@ bool bt_att_tx_meta_data_match(const struct net_buf *buf, bt_gatt_complete_func_
 bool bt_att_chan_opt_valid(struct bt_conn *conn, enum bt_att_chan_opt chan_opt);
 
 void bt_gatt_req_set_mtu(struct bt_att_req *req, uint16_t mtu);
+
+bool bt_att_can_send_req(struct bt_conn *conn);
