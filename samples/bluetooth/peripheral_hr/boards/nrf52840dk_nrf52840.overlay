@@ -1,0 +1,37 @@
+   &spi1 {
+      compatible = "nordic,nrf-spim";
+      status = "okay";
+
+      pinctrl-0 = <&spi1_default_alt>;
+      /delete-property/ pinctrl-1;
+      pinctrl-names = "default";
+
+      cs-gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
+
+      bt-controller@0 {
+         status = "okay";
+         compatible = "zephyr,bt-hci-spi";
+         reg = <0>;
+         spi-max-frequency = <2000000>;
+
+         /* different scheme than pinctrl: IRQ is on P1.04 */
+         irq-gpios = <&gpio1 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+
+         reset-gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;
+         reset-assert-duration-ms = <420>;
+      };
+   };
+
+   &pinctrl {
+      spi1_default_alt: spi1_default_alt {
+         group1 {
+            /* schema: (name, port, number)
+             * only change the port and number.
+             * e.g. here: SCK is on P1.08
+             */
+            psels = <NRF_PSEL(SPIM_SCK, 1, 8)>,
+               <NRF_PSEL(SPIM_MOSI, 1, 7)>,
+               <NRF_PSEL(SPIM_MISO, 1, 6)>;
+         };
+      };
+   };
