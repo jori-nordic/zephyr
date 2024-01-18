@@ -55,6 +55,70 @@ NET_BUF_POOL_FIXED_DEFINE(hci_rx_pool, BT_BUF_RX_COUNT,
 			  NULL);
 #endif /* CONFIG_BT_HCI_ACL_FLOW_CONTROL */
 
+
+struct net_buf *bt_buf_get_evt_num_completed(k_timeout_t timeout)
+{
+	struct net_buf *buf;
+
+	buf = net_buf_alloc(&num_complete_pool, timeout);
+	if (buf) {
+		net_buf_reserve(buf, BT_BUF_RESERVE);
+		bt_buf_set_type(buf, BT_BUF_EVT);
+	}
+
+	return buf;
+}
+
+static struct net_buf *bt_buf_get_rx_evt(uint8_t evt_code)
+{
+	switch (evt_code) {
+	case BT_HCI_EVT_NUM_COMPLETED_PACKETS:
+		return bt_buf_get_evt_num_completed(K_FOREVER);
+	case BT_HCI_EVT_CMD_COMPLETE:
+	case BT_HCI_EVT_CMD_STATUS:
+		return bt_buf_get_cmd_complete(K_FOREVER);
+	default:
+		return net_buf_alloc(&evt_pool, K_FOREVER);
+	}
+}
+
+BUILD_ASSERT(IS_ENABLED(CONFIG_BT_HCI_ACL_FLOW_CONTROL));
+BUILD_ASSERT(!IS_ENABLED(CONFIG_BT_ISO_UNICAST));
+BUILD_ASSERT(!IS_ENABLED(CONFIG_BT_ISO_SYNC_RECEIVER));
+
+#define H4_NONE 0x00
+#define H4_CMD  0x01
+#define H4_ACL  0x02
+#define H4_SCO  0x03
+#define H4_EVT  0x04
+#define H4_ISO  0x05
+
+struct net_buf *bt_buf_get_rxx(uint8_t h4_peek[4])
+{
+	struct net_buf *buf = NULL;
+
+	uint8_t h4_type = h4_peek[0];
+	enum bt_buf_type type;
+
+	switch (h4_type) {
+	case H4_EVT:
+		buf = bt_buf_get_rx_evt(h4_peek[1]);
+		type = BT_BUF_EVT;
+		break;
+	case H4_ACL:
+		buf = net_buf_alloc(&acl_in_pool, K_FOREVER);
+		type = BT_BUF_ACL_IN;
+		break;
+	}
+
+	if (buf) {
+		net_buf_reserve(buf, BT_BUF_RESERVE);
+		bt_buf_set_type(buf, type);
+	}
+
+	return buf;
+}
+
 struct net_buf *bt_buf_get_rx(enum bt_buf_type type, k_timeout_t timeout)
 {
 	struct net_buf *buf;

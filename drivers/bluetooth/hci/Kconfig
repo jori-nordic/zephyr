@@ -8,7 +8,6 @@ comment "Bluetooth HCI Driver Options"
 config BT_UART
 	bool
 	select SERIAL
-	select UART_INTERRUPT_DRIVEN
 
 
 choice BT_HCI_BUS_TYPE

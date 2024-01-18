@@ -67,6 +67,7 @@ static int h4_read(const struct device *uart, uint8_t *buf, size_t len)
 	int rx = uart_fifo_read(uart, buf, len);
 
 	LOG_DBG("read %d req %d", rx, len);
+	LOG_HEXDUMP_DBG(buf, rx, "RX data");
 
 	return rx;
 }
