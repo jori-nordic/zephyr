@@ -85,11 +85,11 @@ void _uart_cb(const struct device *dev,
 		ctx->rxd = evt->data.rx.offset + evt->data.rx.len;
 
 		if (ctx->rxlen == ctx->rxd) {
-			LOG_ERR("RX done");
+			LOG_DBG("RX done");
 		}
 		return;
 	default:
-		LOG_ERR("unhandled uart evt: %x", evt->type);
+		LOG_WRN("unhandled uart evt: %x", evt->type);
 	}
 }
 
@@ -277,7 +277,6 @@ ssize_t pkt_next_rx_len(uint8_t *pp, ssize_t pp_len)
 /* --------------- Runner ------------------------------ */
 
 #define RXBUF_SIZE 64		/* TODO: kconfig */
-static uint8_t _rxbuf[RXBUF_SIZE];
 
 static K_SEM_DEFINE(rx_sem, 0, 1);
 static K_SEM_DEFINE(tx_sem, 0, 1);
@@ -330,7 +329,7 @@ int rx_blocking(uint8_t *dst, ssize_t len)
 		LOG_DBG("requested RX");
 		k_sem_take(&rx_sem, K_FOREVER);
 
-		LOG_ERR("finalizing RX");
+		LOG_DBG("finalizing RX");
 		EC(drv_finalize_rx(&h4_drv_ctx, &tlen));
 		LOG_DBG("rxd %d out of %d", tlen, len);
 		len -= tlen;
@@ -360,84 +359,102 @@ static struct net_buf *get_host_rx_buf(uint8_t *pp, ssize_t total_len)
 	return host_rxbuf;
 }
 
-void rx_packet(struct drv_ctx *ctx)
+NET_BUF_SIMPLE_DEFINE_STATIC(_rxbuf, RXBUF_SIZE);
+struct net_buf *host_rxbuf = NULL;
+struct net_buf_simple *rxbuf = &_rxbuf;;
+
+static void _reset_rx_state(void)
+{
+	net_buf_simple_reset(&_rxbuf);
+	host_rxbuf = NULL;
+	rxbuf = &_rxbuf;
+}
+
+void rx_packet_async(struct drv_ctx *ctx)
 {
 	int err;
-
-	LOG_DBG("start H4 RX packet");
 
 	/* RX loop */
 	ssize_t rxlen = 0;
 	ssize_t remaining = 0;
 	ssize_t next_rx = 0;
-	struct net_buf *host_rxbuf = NULL;
-	uint8_t *rxbuf = &_rxbuf[0];
 
-	/* TODO: make this full-async */
-	while (1) {
-		LOG_HEXDUMP_DBG(rxbuf, rxlen, "loop start");
-		next_rx = pkt_next_rx_len(rxbuf, rxlen);
-		LOG_DBG("next_rx_len: %d", next_rx);
+	rxlen = rxbuf->len;
 
-		/* Header might be invalid. Parsing has to be restarted. */
-		if (next_rx < 0) {
-			LOG_DBG("parsing error. bailing out.");
-			return;
-		}
+	LOG_HEXDUMP_DBG(rxbuf->data, rxlen, "loop start");
+	next_rx = pkt_next_rx_len(rxbuf->data, rxlen);
+	LOG_DBG("next_rx_len: %d", next_rx);
 
-		if (next_rx == 0 && host_rxbuf) {
-			/* Packet is finished. Pop H4 type and transmit to the
-			 * host.
-			 */
-			(void)net_buf_pull_u8(host_rxbuf);
+	/* Header might be invalid. Parsing has to be restarted. */
+	if (next_rx < 0) {
+		LOG_DBG("parsing error. bailing out.");
+		_reset_rx_state();
 
-			LOG_ERR("TX to host (len %d)", host_rxbuf->len);
-
-			LOG_HEXDUMP_DBG(host_rxbuf->data,
-					host_rxbuf->len,
-					"Final RX buffer");
-
-			bt_recv(host_rxbuf);
-			return;
-		}
-
-		remaining = next_rx;
-		/* clamp to scratch buffer size */
-		if (!host_rxbuf) next_rx = MIN(next_rx, RXBUF_SIZE - rxlen);
-
-		/* alloc host buf if scratch buffer is full. we also need to
-		 * alloc a buf in the case where scratch is not full but the
-		 * packet is complete.
-		 */
-		if (!host_rxbuf && (RXBUF_SIZE - rxlen <= 0 || next_rx == 0)) {
-			/* Need to allocate a buffer from the host */
-			/* Get a buf from the host & RX rest of the packet */
-			size_t total_len = rxlen + remaining - 1;
-			host_rxbuf = get_host_rx_buf(rxbuf, total_len);
-
-			/* Host shall always allocate a buffer, even for discarding */
-			__ASSERT_NO_MSG(host_rxbuf);
-
-			/* We need to push the H4 type too (even if host doesn't
-			 * care about it) as the next run of our parser will be
-			 * confused if not present.
-			 */
-			LOG_DBG("memcpy: %d bytes", rxlen);
-			net_buf_add_mem(host_rxbuf, &rxbuf[1], rxlen - 1);
-			net_buf_push_u8(host_rxbuf, rxbuf[0]);
-
-			/* FIXME: hack. use net_buf_simple for rxbuf instead */
-			/* Point the DMA to *the start* of the netbuf data */
-			rxbuf = host_rxbuf->__buf;
-		}
-
-		err = rx_blocking(&rxbuf[rxlen], next_rx);
-		__ASSERT(!err, "error receiving: %d", err);
-
-		rxlen += next_rx;
-		remaining -= next_rx;
-		LOG_DBG("loop end: rxlen %d rem %d", rxlen, remaining);
+		return;
 	}
+
+	if (next_rx == 0 && host_rxbuf) {
+		/* Packet is finished. Pop H4 type and transmit to the
+		 * host.
+		 */
+		(void)net_buf_pull_u8(host_rxbuf);
+
+		LOG_WRN("TX to host (len %d)", host_rxbuf->len);
+
+		LOG_HEXDUMP_DBG(host_rxbuf->data,
+				host_rxbuf->len,
+				"Final RX buffer");
+
+		bt_recv(host_rxbuf);
+		_reset_rx_state();
+
+		return;
+	}
+
+	remaining = next_rx;
+	/* clamp to scratch buffer size */
+	if (!host_rxbuf) {
+		next_rx = MIN(next_rx, RXBUF_SIZE - rxlen);
+		LOG_DBG("clamp %d to %d -> %d", remaining, RXBUF_SIZE, next_rx);
+	}
+
+	/* alloc host buf if:
+	 * - scratch buffer is full
+	 * - packet is bigger than scratch buffer
+	 * - scratch is not full but the packet is complete
+	 */
+	if (!host_rxbuf && (remaining != next_rx || remaining == 0)) {
+		/* Need to allocate a buffer from the host */
+		/* Get a buf from the host & RX rest of the packet */
+		size_t total_len = rxlen + remaining - 1;
+		host_rxbuf = get_host_rx_buf(rxbuf->data, total_len);
+
+		/* Host shall always allocate a buffer, even for discarding */
+		__ASSERT_NO_MSG(host_rxbuf);
+
+		/* We need to push the H4 type too (even if host doesn't
+		 * care about it) as the next run of our parser will be
+		 * confused if not present.
+		 */
+		LOG_DBG("memcpy: %d bytes", rxlen);
+		net_buf_add_mem(host_rxbuf, &rxbuf->data[1], rxlen - 1);
+		net_buf_push_u8(host_rxbuf, rxbuf->data[0]);
+
+		/* FIXME: hack. use net_buf_simple for rxbuf instead */
+		/* Point the DMA to *the start* of the netbuf data */
+		rxbuf = &host_rxbuf->b;
+		/* we now have enough buffer space to receive the rest
+		 * of the packet
+		 */
+		next_rx = remaining;
+	}
+
+	err = rx_blocking(net_buf_simple_add(rxbuf, next_rx), next_rx);
+	__ASSERT(!err, "error receiving: %d", err);
+
+	/* not needed anymore */
+	remaining -= next_rx;
+	LOG_DBG("loop end: rxlen %d rem %d", rxbuf->len, remaining);
 }
 
 int tx_blocking(uint8_t *dst, ssize_t len)
@@ -520,7 +537,7 @@ static void rx_thread(void *p1, void *p2, void *p3)
 	LOG_DBG("start H4 RX loop");
 
 	while (1) {
-		rx_packet(&h4_drv_ctx);
+		rx_packet_async(&h4_drv_ctx);
 	}
 }
 
