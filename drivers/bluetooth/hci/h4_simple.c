@@ -199,26 +199,49 @@ static ssize_t len_offset(uint8_t h4_type)
 static ssize_t get_payload_len(uint8_t *pp, ssize_t pp_len)
 {
 	uint8_t h4_type = pp[0];
-	ssize_t pos = len_offset(h4_type);
+	ssize_t offset = len_offset(h4_type);
+	ssize_t hdr_size;
+	ssize_t len;
 
-	if (pos < 0) {
-		return pos;
+	if (offset < 0) {
+		return offset;
 	}
 
 	switch(h4_type) {
 	case H4_PKT_ACL:
-		return sys_get_le16(&pp[pos]);
+		len = sys_get_le16(&pp[offset]);
+		hdr_size = 4;
+		break;
 	case H4_PKT_SCO:
-		return pp[pos];
+		len = pp[offset];
+		hdr_size = 3;
+		break;
 	case H4_PKT_EVT:
-		return pp[pos];
+		len = pp[offset];
+		hdr_size = 2;
+		break;
 	case H4_PKT_ISO:
 		/* 14 bits */
-		return sys_get_le16(&pp[pos]) & 0x3FFF;
+		len = sys_get_le16(&pp[offset]) & 0x3FFF;
+		hdr_size = 4;
+		break;
 	default:
 		LOG_ERR("invalid H4 type: 0x%x", h4_type);
 		return -1;
 	}
+
+	LOG_DBG("pp_len %d len %d", pp_len, len);
+
+	if (pp_len > hdr_size + 1) {
+		/* we already have the header and maybe even some of the
+		 * payload, we need to calculate the length of the rest of the
+		 * packet.
+		 */
+		__ASSERT(len + hdr_size + 1 >= pp_len, "pp %d payload %d", pp_len, len);
+		len -= pp_len - (hdr_size + 1);
+	}
+
+	return len;
 }
 
 ssize_t pkt_next_rx_len(uint8_t *pp, ssize_t pp_len)
@@ -248,18 +271,13 @@ ssize_t pkt_next_rx_len(uint8_t *pp, ssize_t pp_len)
 		return get_payload_len(pp, pp_len);
 	}
 
-	/* we should not get called again after this point */
-
-	/* LOG_DBG("don't know what to expect"); */
-	/* LOG_HEXDUMP_DBG(pp, pp_len, "packet dump"); */
-
 	return -1;
 }
 
 /* --------------- Runner ------------------------------ */
 
 #define RXBUF_SIZE 64		/* TODO: kconfig */
-static uint8_t rxbuf[RXBUF_SIZE];
+static uint8_t _rxbuf[RXBUF_SIZE];
 
 static K_SEM_DEFINE(rx_sem, 0, 1);
 static K_SEM_DEFINE(tx_sem, 0, 1);
@@ -324,23 +342,22 @@ int rx_blocking(uint8_t *dst, ssize_t len)
 }
 
 extern struct net_buf *bt_buf_get_rxx(uint8_t h4_peek[4]);
-static struct net_buf *get_host_rx_buf(uint8_t *pp, ssize_t pp_len)
+static struct net_buf *get_host_rx_buf(uint8_t *pp, ssize_t total_len)
 {
-	return bt_buf_get_rxx(pp);
-}
+	struct net_buf *host_rxbuf = bt_buf_get_rxx(pp);
 
-static int kill_dash_nine(uint8_t *scratch, ssize_t scratch_size, ssize_t len)
-{
-	while (len) {
-		int err;
-
-		ssize_t chonk = MIN(scratch_size, len);
-		EC(rx_blocking(scratch, chonk));
-
-		len -= chonk;
+	/* size sanity-check */
+	if (host_rxbuf) {
+		LOG_DBG("size sanity-check");
+		CHECKIF (net_buf_tailroom(host_rxbuf) < total_len) {
+			LOG_ERR("I like big bufs and I cannot lie (%d < %d)",
+				net_buf_tailroom(host_rxbuf), total_len);
+			net_buf_unref(host_rxbuf);
+			host_rxbuf = NULL;
+		}
 	}
 
-	return 0;
+	return host_rxbuf;
 }
 
 void rx_packet(struct drv_ctx *ctx)
@@ -353,92 +370,74 @@ void rx_packet(struct drv_ctx *ctx)
 	ssize_t rxlen = 0;
 	ssize_t remaining = 0;
 	ssize_t next_rx = 0;
-	struct net_buf *host_rxbuf;
+	struct net_buf *host_rxbuf = NULL;
+	uint8_t *rxbuf = &_rxbuf[0];
 
-	/* RX H4 type */
-	do {
-		LOG_DBG("RX H4 type");
-		next_rx = pkt_next_rx_len(rxbuf, rxlen);
-		LOG_DBG("next_rx_len: %d", next_rx);
-		__ASSERT(next_rx > 0, "invalid size: %d", next_rx);
-
-		err = rx_blocking(&rxbuf[rxlen], next_rx);
-		__ASSERT(!err, "error receiving: %d", err);
-
-		rxlen += next_rx;
-	} while(0);
-
-
-	/* RX header */
-	do {
-		LOG_DBG("RX header");
+	/* TODO: make this full-async */
+	while (1) {
+		LOG_HEXDUMP_DBG(rxbuf, rxlen, "loop start");
 		next_rx = pkt_next_rx_len(rxbuf, rxlen);
 		LOG_DBG("next_rx_len: %d", next_rx);
 
-		/* Header might be invalid. Start from the top. */
+		/* Header might be invalid. Parsing has to be restarted. */
 		if (next_rx < 0) {
-			LOG_DBG("start again");
+			LOG_DBG("parsing error. bailing out.");
 			return;
 		}
 
-		err = rx_blocking(&rxbuf[rxlen], next_rx);
-		__ASSERT(!err, "error receiving: %d", err);
+		if (next_rx == 0 && host_rxbuf) {
+			/* Packet is finished. Pop H4 type and transmit to the
+			 * host.
+			 */
+			(void)net_buf_pull_u8(host_rxbuf);
 
-		rxlen += next_rx;
-	} while(0);
+			LOG_ERR("TX to host (len %d)", host_rxbuf->len);
 
-	/* RX rest of the scratch buffer */
-	do {
-		LOG_DBG("RX scratchbuf");
-		next_rx = pkt_next_rx_len(rxbuf, rxlen);
-		LOG_DBG("next_rx_len: %d", next_rx);
-		__ASSERT(next_rx >= 0, "invalid size: %d", next_rx);
+			LOG_HEXDUMP_DBG(host_rxbuf->data,
+					host_rxbuf->len,
+					"Final RX buffer");
+
+			bt_recv(host_rxbuf);
+			return;
+		}
 
 		remaining = next_rx;
-		next_rx = MIN(next_rx, RXBUF_SIZE - rxlen);
+		/* clamp to scratch buffer size */
+		if (!host_rxbuf) next_rx = MIN(next_rx, RXBUF_SIZE - rxlen);
+
+		/* alloc host buf if scratch buffer is full. we also need to
+		 * alloc a buf in the case where scratch is not full but the
+		 * packet is complete.
+		 */
+		if (!host_rxbuf && (RXBUF_SIZE - rxlen <= 0 || next_rx == 0)) {
+			/* Need to allocate a buffer from the host */
+			/* Get a buf from the host & RX rest of the packet */
+			size_t total_len = rxlen + remaining - 1;
+			host_rxbuf = get_host_rx_buf(rxbuf, total_len);
+
+			/* Host shall always allocate a buffer, even for discarding */
+			__ASSERT_NO_MSG(host_rxbuf);
+
+			/* We need to push the H4 type too (even if host doesn't
+			 * care about it) as the next run of our parser will be
+			 * confused if not present.
+			 */
+			LOG_DBG("memcpy: %d bytes", rxlen);
+			net_buf_add_mem(host_rxbuf, &rxbuf[1], rxlen - 1);
+			net_buf_push_u8(host_rxbuf, rxbuf[0]);
+
+			/* FIXME: hack. use net_buf_simple for rxbuf instead */
+			/* Point the DMA to *the start* of the netbuf data */
+			rxbuf = host_rxbuf->__buf;
+		}
 
 		err = rx_blocking(&rxbuf[rxlen], next_rx);
 		__ASSERT(!err, "error receiving: %d", err);
 
 		rxlen += next_rx;
 		remaining -= next_rx;
-	} while(0);
-
-	/* Get a buf from the host & RX rest of the packet */
-	host_rxbuf = get_host_rx_buf(rxbuf, rxlen);
-
-	/* size sanity-check */
-	if (host_rxbuf) {
-		LOG_DBG("size sanity-check");
-		ssize_t packet_len = rxlen + remaining - 1;
-		CHECKIF (net_buf_tailroom(host_rxbuf) < packet_len) {
-			LOG_ERR("I like big bufs and I cannot lie (%d < %d)",
-				net_buf_tailroom(host_rxbuf), packet_len);
-			net_buf_unref(host_rxbuf);
-			host_rxbuf = NULL;
-		}
+		LOG_DBG("loop end: rxlen %d rem %d", rxlen, remaining);
 	}
-
-	if (host_rxbuf) {
-		LOG_DBG("memcpy & rx last");
-		net_buf_add_mem(host_rxbuf, &rxbuf[1], rxlen - 1);
-
-		/* /r/restoftheowl */
-		err = rx_blocking(net_buf_add(host_rxbuf, remaining), remaining);
-		__ASSERT(!err, "error receiving: %d", err);
-
-		LOG_HEXDUMP_DBG(host_rxbuf->data,
-				host_rxbuf->len,
-				"Final RX buffer");
-
-		bt_recv(host_rxbuf);
-	} else {
-		LOG_DBG("discard");
-		kill_dash_nine(rxbuf, RXBUF_SIZE, remaining);
-	}
-
-	/* get next packet */
-	rxlen = 0;
 }
 
 int tx_blocking(uint8_t *dst, ssize_t len)
