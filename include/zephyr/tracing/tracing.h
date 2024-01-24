@@ -1994,6 +1994,8 @@
 
 /** @} */ /* end of subsys_tracing_apis_pm_device_runtime */
 
+#define sys_port_trace_dropped_packets(num)
+
 #if defined(CONFIG_PERCEPIO_TRACERECORDER)
 #include "tracing_tracerecorder.h"
 #else

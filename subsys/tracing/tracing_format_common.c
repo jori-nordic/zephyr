@@ -48,6 +48,11 @@ bool tracing_format_raw_data_put(uint8_t *data, uint32_t size)
 {
 	uint32_t space = tracing_buffer_space_get();
 
+	/* This seems even more broken than I thought:
+	 * - if there's a big event, it will be dropped, increasing the drop count
+	 * - if there's a small event, it will still go through.
+	 * -> not a true desync. only big events are dropped in some cases.
+	 */
 	if (space >= size) {
 		tracing_buffer_put(data, size);
 		return true;

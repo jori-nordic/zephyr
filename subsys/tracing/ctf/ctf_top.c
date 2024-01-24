@@ -319,3 +319,8 @@ void sys_trace_k_timer_status_sync_exit(struct k_timer *timer, uint32_t result)
 		result
 		);
 }
+
+void sys_port_trace_dropped_packets(int num)
+{
+	ctf_top_trace_dropped_packets((uint32_t)num);
+}

@@ -149,8 +149,25 @@ void tracing_cmd_handle(uint8_t *buf, uint32_t length)
 	}
 }
 
+static void generate_dropped_packets(void)
+{
+	/* If we get there, that means a buffer was able to be transmitted. It
+	 * means that we are re-synchronized and can notify the sink that we
+	 * have dropped some packets.
+	 */
+	uint32_t dropped = atomic_get(&tracing_packet_drop_num);
+
+	if (dropped) {
+		/* Generate synthetic "dropped packets" event */
+		sys_port_trace_dropped_packets(dropped);
+		atomic_set(&tracing_packet_drop_num, 0);
+	}
+}
+
 void tracing_buffer_handle(uint8_t *data, uint32_t length)
 {
+	generate_dropped_packets();
+
 	tracing_backend_output(working_backend, data, length);
 }
 

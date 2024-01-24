@@ -102,7 +102,8 @@ typedef enum {
 	CTF_EVENT_TIMER_STOP = 0x30,
 	CTF_EVENT_TIMER_STATUS_SYNC_ENTER = 0x31,
 	CTF_EVENT_TIMER_STATUS_SYNC_BLOCKING = 0x32,
-	CTF_EVENT_TIMER_STATUS_SYNC_EXIT = 0x33
+	CTF_EVENT_TIMER_STATUS_SYNC_EXIT = 0x33,
+	CTF_EVENT_TRACE_DROPPED_PACKETS = 0x34
 
 } ctf_event_t;
 
@@ -326,6 +327,11 @@ static inline void ctf_top_timer_status_sync_blocking(uint32_t timer, uint32_t t
 static inline void ctf_top_timer_status_sync_exit(uint32_t timer, uint32_t result)
 {
 	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_TIMER_STATUS_SYNC_EXIT), timer, result);
+}
+
+static inline void ctf_top_trace_dropped_packets(uint32_t num)
+{
+	CTF_EVENT(CTF_LITERAL(uint8_t, CTF_EVENT_TRACE_DROPPED_PACKETS), num);
 }
 
 

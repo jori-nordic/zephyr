@@ -434,6 +434,8 @@ void sys_trace_k_timer_status_sync_exit(struct k_timer *timer, uint32_t result);
 
 void sys_trace_k_event_init(struct k_event *event);
 
+void sys_port_trace_dropped_packets(int num);
+
 #ifdef __cplusplus
 }
 #endif
