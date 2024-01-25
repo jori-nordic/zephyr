@@ -25,7 +25,7 @@
 #define PRIORITY 7
 
 /* delay between greetings (in ms) */
-#define SLEEPTIME 500
+#define SLEEPTIME 20
 
 
 /*
@@ -96,6 +96,8 @@ void threadA(void *dummy1, void *dummy2, void *dummy3)
 		return;
 	}
 #endif /* CONFIG_USB_DEVICE_STACK */
+
+	k_msleep(3000);
 
 	/* spawn threadB */
 	k_tid_t tid = k_thread_create(&threadB_data, threadB_stack_area,
