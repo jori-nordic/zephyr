@@ -6,3 +6,15 @@ config UART_POSIX_PIPE
 	default y
 	depends on DT_HAS_ZEPHYR_POSIX_PIPE_UART_ENABLED
 	select SERIAL_HAS_DRIVER
+	select SERIAL_SUPPORT_ASYNC
+	select SERIAL_SUPPORT_INTERRUPT
+
+config UART_POSIX_PIPE_INTERRUPT_DRIVEN
+	bool "Interrupt support on posix pipe uart"
+	depends on UART_INTERRUPT_DRIVEN
+	depends on UART_POSIX_PIPE
+	depends on UART_ASYNC_API
+	select UART_ASYNC_TO_INT_DRIVEN_API
+	default y
+	help
+	  This option enables UART interrupt support on posix uart

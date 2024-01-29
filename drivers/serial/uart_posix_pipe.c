@@ -29,11 +29,25 @@ LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_INF);
  * It communicates using UNIX named pipes (ie. FIFOs).
  */
 
+struct nu_async_ep {
+	uint8_t *buf;
+	size_t len;
+	struct k_timer expiry;
+};
+
 struct nu_state {
+	const struct device *dev;	/* pointer to parent */
 	char *tx_fifo_path;
 	char *rx_fifo_path;
 	int tx_fd;
 	int rx_fd;
+#ifdef CONFIG_UART_ASYNC_API
+	struct nu_async_ep tx;
+	struct nu_async_ep rx;
+	struct k_timer timer;
+	uart_callback_t cb;
+	void *ud;
+#endif
 };
 
 static int open_fifo(char *path, int flags)
@@ -99,10 +113,208 @@ static int nu_poll_in(const struct device *dev, unsigned char *c)
 	return 0;
 }
 
+#ifdef CONFIG_UART_ASYNC_API
+
+#define RETRY_DELAY K_MSEC(1)
+
+static void handle_rx_done(struct nu_state *s, bool complete)
+{
+	struct uart_event evt;
+	uint8_t *buf = s->rx.buf;
+	size_t len = s->rx.len;
+
+	/* allow rxing more from callback */
+	s->rx.buf = NULL;
+	s->rx.len = 0;
+	k_timer_stop(&s->rx.expiry);
+
+	memset(&evt, 0, sizeof(evt));
+
+	evt.type = UART_RX_RDY;
+	evt.data.rx.buf = buf;
+	evt.data.rx.offset = 0;
+	if (complete) {
+		evt.data.rx.len = len;
+	} else {
+		evt.data.rx.len = 0;
+	}
+	s->cb(s->dev, &evt, s->ud);
+
+	memset(&evt, 0, sizeof(evt));
+
+	evt.type = UART_RX_BUF_RELEASED;
+	evt.data.rx_buf.buf = buf;
+	s->cb(s->dev, &evt, s->ud);
+
+	memset(&evt, 0, sizeof(evt));
+
+	evt.type = UART_RX_DISABLED;
+	s->cb(s->dev, &evt, s->ud);
+}
+
+static void handle_tx_done(struct nu_state *s, bool complete)
+{
+	struct uart_event evt;
+
+	memset(&evt, 0, sizeof(evt));
+
+	if (complete) {
+		evt.type = UART_TX_DONE;
+		evt.data.tx.buf = s->tx.buf;
+		evt.data.tx.len = s->tx.len;
+	} else {
+		evt.type = UART_TX_ABORTED;
+		evt.data.tx.buf = s->tx.buf;
+		evt.data.tx.len = 0;
+	}
+
+	/* allow txing more from callback */
+	s->tx.buf = NULL;
+	s->tx.len = 0;
+	k_timer_stop(&s->tx.expiry);
+
+	s->cb(s->dev, &evt, s->ud);
+}
+
+static void nu_expiry_work(struct k_timer *timer)
+{
+	struct nu_state *s = (struct nu_state *)k_timer_user_data_get(timer);
+
+	__ASSERT_NO_MSG(s);
+
+	/* Figure out if we timed out on RX or TX */
+	if (timer == &s->rx.expiry) {
+		handle_rx_done(s, false);
+	} else if (timer == &s->tx.expiry) {
+		handle_tx_done(s, false);
+	} else {
+		__ASSERT(0, "Spanish inquisition timer");
+	}
+}
+
+static void nu_timer_work(struct k_timer *timer)
+{
+	struct nu_state *s = (struct nu_state *)k_timer_user_data_get(timer);
+	int ret;
+
+	__ASSERT_NO_MSG(s);
+
+	/* TODO: handle disconnect from pipe */
+
+	/* Try to RX first */
+	if (s->rx.buf) {
+		ret = read(s->rx_fd, s->rx.buf, s->rx.len);
+		if (ret == 0) {
+			handle_rx_done(s, true);
+		} else {
+			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
+		}
+	}
+
+	/* Then try to TX */
+	if (s->tx.buf) {
+		ret = write(s->tx_fd, s->tx.buf, s->tx.len);
+
+		if (ret == 0) {
+			handle_tx_done(s, true);
+		} else {
+			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
+		}
+	}
+}
+
+static int nu_callback_set(const struct device *dev, uart_callback_t callback, void *user_data)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	s->dev = dev;
+	s->cb = callback;
+	s->ud = user_data;
+
+	/* TODO: move this to DTS macro */
+	memset(&s->tx, 0, sizeof(struct nu_async_ep));
+	memset(&s->rx, 0, sizeof(struct nu_async_ep));
+
+	k_timer_init(&s->timer, nu_timer_work, NULL);
+	k_timer_user_data_set(&s->timer, s);
+
+	k_timer_init(&s->rx.expiry, nu_expiry_work, NULL);
+	k_timer_user_data_set(&s->rx.expiry, s);
+
+	k_timer_init(&s->tx.expiry, nu_expiry_work, NULL);
+	k_timer_user_data_set(&s->tx.expiry, s);
+
+	return 0;
+}
+
+static int nu_tx(const struct device *dev, const uint8_t *buf, size_t len, int32_t timeout)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	if (s->tx.buf) {
+		/* only one transaction supported at a time */
+		return -EALREADY;
+	}
+
+	s->tx.buf = (uint8_t *)buf;
+	s->tx.len = len;
+
+	/* Always TX from ISR context */
+	k_timer_start(&s->timer, K_NO_WAIT, K_NO_WAIT);
+	k_timer_start(&s->tx.expiry, K_USEC(timeout), K_NO_WAIT);
+
+	return 0;
+}
+
+static int nu_tx_abort(const struct device *dev)
+{
+	/* 'sup */
+	return -ENOTSUP;
+}
+
+static int nu_rx_enable(const struct device *dev, uint8_t *buf, size_t len, int32_t timeout)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	if (s->rx.buf) {
+		/* only one transaction supported at a time */
+		return -EALREADY;
+	}
+
+	s->rx.buf = buf;
+	s->rx.len = len;
+
+	/* Always RX from ISR context */
+	k_timer_start(&s->timer, K_NO_WAIT, K_NO_WAIT);
+	k_timer_start(&s->rx.expiry, K_USEC(timeout), K_NO_WAIT);
+
+	return 0;
+}
+
+static int nu_rx_buf_rsp(const struct device *dev, uint8_t *buf, size_t len)
+{
+	/* 'sup */
+	return -ENOTSUP;
+}
+
+static int nu_rx_disable(const struct device *dev)
+{
+	/* 'sup */
+	return -ENOTSUP;
+}
+#endif	/* CONFIG_UART_ASYNC_API */
+
 static struct uart_driver_api nu_api = {
 	.poll_out = nu_poll_out,
 	.poll_in = nu_poll_in,
-	/* TODO: add ASYNC api methods */
+#ifdef CONFIG_UART_ASYNC_API
+	.callback_set = nu_callback_set,
+	.tx = nu_tx,
+	.tx_abort = nu_tx_abort,
+	.rx_enable = nu_rx_enable,
+	.rx_buf_rsp = nu_rx_buf_rsp,
+	.rx_disable = nu_rx_disable,
+#endif	/* CONFIG_UART_ASYNC_API */
 };
 
 #define UART_NATIVE_CMDLINE_ADD(n)					\
