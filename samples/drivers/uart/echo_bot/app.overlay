@@ -1,0 +1,19 @@
+/ {
+	chosen {
+		zephyr,posix-uart = &puart0;
+	};
+
+	puart0: _puart_0 {
+		status = "okay";
+		compatible = "zephyr,posix-pipe-uart";
+		current-speed = <0>;
+	};
+
+	uart0: uart {
+		status = "disabled";
+	};
+
+	uart1: uart_1 {
+		status = "disabled";
+	};
+};
