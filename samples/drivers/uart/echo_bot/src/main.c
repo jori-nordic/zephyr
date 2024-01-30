@@ -53,6 +53,7 @@ void serial_cb(const struct device *dev, void *user_data)
 			rx_buf_pos = 0;
 		} else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {
 			rx_buf[rx_buf_pos++] = c;
+			printk("rx: %c\n", c);
 		}
 		/* else: characters beyond buffer size are dropped */
 	}

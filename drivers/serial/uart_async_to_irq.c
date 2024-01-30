@@ -27,16 +27,16 @@ LOG_MODULE_REGISTER(UART_ASYNC_TO_IRQ_LOG_NAME, CONFIG_UART_LOG_LEVEL);
 
 static struct uart_async_to_irq_data *get_data(const struct device *dev)
 {
-	struct uart_async_to_irq_data **data = dev->data;
+	struct uart_async_to_irq_data *data = dev->data;
 
-	return *data;
+	return data;
 }
 
 static const struct uart_async_to_irq_config *get_config(const struct device *dev)
 {
-	const struct uart_async_to_irq_config * const *config = dev->config;
+	const struct uart_async_to_irq_config * config = dev->config;
 
-	return *config;
+	return config;
 }
 
 /* Function calculates RX timeout based on baudrate. */
@@ -227,14 +227,18 @@ static void dir_disable(const struct device *dev, uint32_t flag)
 	atomic_and(&data->flags, ~flag);
 }
 
+#pragma GCC optimize("O0")
 static void dir_enable(const struct device *dev, uint32_t flag)
 {
 	struct uart_async_to_irq_data *data = get_data(dev);
+	const struct uart_async_to_irq_config *config = get_config(dev);
 
 	atomic_or(&data->flags, flag);
 
 	atomic_inc(&data->irq_req);
-	get_config(dev)->trampoline(dev);
+	uart_async_to_irq_trampoline cb = config->trampoline;
+
+	cb(dev);
 }
 
 /** Interrupt driven transfer enabling function */

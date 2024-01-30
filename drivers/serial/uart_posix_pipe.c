@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 #include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/serial/uart_async_to_irq.h>
 #include <zephyr/kernel.h>
 
 #include "cmdline.h" /* native_posix command line options header */
@@ -36,6 +37,11 @@ struct nu_async_ep {
 };
 
 struct nu_state {
+#ifdef CONFIG_UART_ASYNC_TO_INT_DRIVEN_API
+	struct uart_async_to_irq_data *a2i_data;
+	const struct uart_async_to_irq_config *a2i_config;
+	struct k_timer trampoline;
+#endif
 	const struct device *dev;	/* pointer to parent */
 	char *tx_fifo_path;
 	char *rx_fifo_path;
@@ -71,6 +77,28 @@ static int open_fifo(char *path, int flags)
 	return fd;
 }
 
+#ifdef CONFIG_UART_ASYNC_TO_INT_DRIVEN_API
+static void nu_trampoline_work(struct k_timer *timer)
+{
+	struct nu_state *s = (struct nu_state *)k_timer_user_data_get(timer);
+
+	__ASSERT_NO_MSG(s);
+
+	uart_async_to_irq_trampoline_cb(s->dev);
+}
+
+void nu_a2i_trampoline(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	__ASSERT_NO_MSG(s);
+
+	/* FIXME: call from ISR context */
+	uart_async_to_irq_trampoline_cb(s->dev);
+	/* k_timer_start(&s->trampoline, K_NO_WAIT, K_NO_WAIT); */
+}
+#endif
+
 static int nu_init(const struct device *dev)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
@@ -81,6 +109,24 @@ static int nu_init(const struct device *dev)
 	if (s->tx_fd < 0 || s->rx_fd < 0) {
 		return -1;
 	}
+
+#ifdef CONFIG_UART_ASYNC_TO_INT_DRIVEN_API
+	if (s->a2i_config) {
+		s->dev = dev;
+		/* memset(&s->trampoline, 0, sizeof(s->trampoline)); */
+		k_timer_init(&s->trampoline, nu_trampoline_work, NULL);
+		k_timer_user_data_set(&s->trampoline, s);
+
+		int err = uart_async_to_irq_init(s->a2i_data, s->a2i_config);
+		if (err < 0) {
+			return err;
+		}
+		err = uart_async_to_irq_rx_enable(dev);
+		if (err < 0) {
+			return err;
+		}
+	}
+#endif
 
 	return 0;
 }
@@ -201,12 +247,15 @@ static void nu_timer_work(struct k_timer *timer)
 
 	/* TODO: handle disconnect from pipe */
 
+	printk("timer-work\n");
+
 	/* Try to RX first */
 	if (s->rx.buf) {
 		ret = read(s->rx_fd, s->rx.buf, s->rx.len);
 		if (ret == 0) {
 			handle_rx_done(s, true);
 		} else {
+			printk("retry rx\n");
 			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
 		}
 	}
@@ -227,7 +276,6 @@ static int nu_callback_set(const struct device *dev, uart_callback_t callback, v
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
-	s->dev = dev;
 	s->cb = callback;
 	s->ud = user_data;
 
@@ -263,6 +311,8 @@ static int nu_tx(const struct device *dev, const uint8_t *buf, size_t len, int32
 	k_timer_start(&s->timer, K_NO_WAIT, K_NO_WAIT);
 	k_timer_start(&s->tx.expiry, K_USEC(timeout), K_NO_WAIT);
 
+	printk("tx_enable()\n");
+
 	return 0;
 }
 
@@ -287,6 +337,8 @@ static int nu_rx_enable(const struct device *dev, uint8_t *buf, size_t len, int3
 	/* Always RX from ISR context */
 	k_timer_start(&s->timer, K_NO_WAIT, K_NO_WAIT);
 	k_timer_start(&s->rx.expiry, K_USEC(timeout), K_NO_WAIT);
+
+	printk("rx_enable()\n");
 
 	return 0;
 }
@@ -315,7 +367,21 @@ static struct uart_driver_api nu_api = {
 	.rx_buf_rsp = nu_rx_buf_rsp,
 	.rx_disable = nu_rx_disable,
 #endif	/* CONFIG_UART_ASYNC_API */
+#ifdef CONFIG_UART_ASYNC_TO_INT_DRIVEN_API
+	UART_ASYNC_TO_IRQ_API_INIT(),
+#endif /* UARTE_ANY_INTERRUPT_DRIVEN */
 };
+
+#ifdef CONFIG_UART_ASYNC_TO_INT_DRIVEN_API
+static const struct uart_async_to_irq_async_api a2i_api = {
+	.callback_set		= nu_callback_set,
+	.tx			= nu_tx,
+	.tx_abort		= nu_tx_abort,
+	.rx_enable		= nu_rx_enable,
+	.rx_buf_rsp		= nu_rx_buf_rsp,
+	.rx_disable		= nu_rx_disable,
+};
+#endif
 
 #define UART_NATIVE_CMDLINE_ADD(n)					\
 	static void nu_##n##_extra_cmdline_opts(void)			\
@@ -351,17 +417,37 @@ static struct uart_driver_api nu_api = {
 	NATIVE_TASK(nu_##n##_cleanup, ON_EXIT, 99);			\
 
 
-#define UART_NATIVE_PIPE_DEFINE(n)				\
-								\
-	static struct nu_state nu_##n##_state;			\
-								\
-	UART_NATIVE_CMDLINE_ADD(n);				\
+#define UART_NATIVE_PIPE_DEFINE(n)					\
+									\
+	LOG_INSTANCE_REGISTER(uart_posix, n, CONFIG_UART_LOG_LEVEL); \
+	static uint8_t uarte##n##_tx_cache[32]	__aligned(4);		\
+	static uint8_t a2i_rx_buf##n[64];				\
+									\
+	static const struct uart_async_to_irq_config uarte_a2i_config_##n = \
+		UART_ASYNC_TO_IRQ_API_CONFIG_INITIALIZER(&a2i_api,	\
+							 nu_a2i_trampoline, \
+							 0, \
+							 uarte##n##_tx_cache, \
+							 sizeof(uarte##n##_tx_cache) - 1, \
+							 a2i_rx_buf##n, \
+							 sizeof(a2i_rx_buf##n), \
+							 8,		\
+							 LOG_INSTANCE_PTR(uart_posix, n)); \
+									\
+	static struct uart_async_to_irq_data uarte_a2i_data_##n;	\
+									\
+	static struct nu_state nu_##n##_state = {			\
+		.a2i_data = &uarte_a2i_data_##n,				\
+		.a2i_config = &uarte_a2i_config_##n,				\
+	};									\
+										\
+	UART_NATIVE_CMDLINE_ADD(n);					\
 								\
 	DEVICE_DT_INST_DEFINE(n,				\
 			      &nu_init,				\
 			      NULL,				\
 			      &nu_##n##_state,			\
-			      NULL,				\
+			      &uarte_a2i_config_##n,		\
 			      PRE_KERNEL_1,			\
 			      CONFIG_SERIAL_INIT_PRIORITY,	\
 			      &nu_api);
