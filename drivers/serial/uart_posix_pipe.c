@@ -35,6 +35,28 @@ struct nu_async_ep {
 	struct k_timer expiry;
 };
 
+struct nu_isr_ep {
+	bool enabled;
+	/* For TX:
+	 * - 1: driver has not yet sent `c`
+	 * - 0: driver is waiting for data
+	 *
+	 * For RX:
+	 * - 1: driver has not yet rx'd into c
+	 * - 0: driver is waiting for app to read c
+	 * */
+	bool pending;
+	uint8_t c;
+};
+
+struct nu_isr {
+	struct nu_isr_ep tx;
+	struct nu_isr_ep rx;
+	struct k_timer timer;
+	uart_irq_callback_user_data_t cb;
+	void *ud;
+};
+
 struct nu_state {
 	const struct device *dev;	/* pointer to parent */
 	char *tx_fifo_path;
@@ -48,7 +70,14 @@ struct nu_state {
 	uart_callback_t cb;
 	void *ud;
 #endif
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	struct nu_isr isr;
+#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 };
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+static void nu_isr_timer_work(struct k_timer *timer);
+#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
+
 
 static int open_fifo(char *path, int flags)
 {
@@ -82,6 +111,13 @@ static int nu_init(const struct device *dev)
 		return -1;
 	}
 
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	memset(&s->isr, 0, sizeof(struct nu_isr));
+
+	k_timer_init(&s->isr.timer, nu_isr_timer_work, NULL);
+	k_timer_user_data_set(&s->isr.timer, s);
+#endif	/* CONFIG_UART_INTERRUPT_DRIVEN */
+
 	return 0;
 }
 
@@ -113,9 +149,9 @@ static int nu_poll_in(const struct device *dev, unsigned char *c)
 	return 0;
 }
 
-#ifdef CONFIG_UART_ASYNC_API
+#define RETRY_DELAY K_MSEC(10)
 
-#define RETRY_DELAY K_MSEC(1)
+#ifdef CONFIG_UART_ASYNC_API
 
 static void handle_rx_done(struct nu_state *s, bool complete)
 {
@@ -310,6 +346,174 @@ static int nu_rx_disable(const struct device *dev)
 }
 #endif	/* CONFIG_UART_ASYNC_API */
 
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+static void nu_isr_timer_work(struct k_timer *timer)
+{
+	struct nu_state *s = (struct nu_state *)k_timer_user_data_get(timer);
+	int ret;
+
+	__ASSERT_NO_MSG(s);
+	__ASSERT_NO_MSG(s->isr.cb);
+
+	if (s->isr.rx.pending) {
+		ret = read(s->rx_fd, &s->isr.rx.c, 1);
+		if (ret == 1) {
+			s->isr.rx.pending = false;
+			s->isr.cb(s->dev, s->isr.ud);
+		} else {
+			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
+		}
+	}
+
+	if (s->isr.tx.pending) {
+		ret = write(s->tx_fd, &s->isr.tx.c, 1);
+		if (ret == 1) {
+			s->isr.tx.pending = false;
+			s->isr.cb(s->dev, s->isr.ud);
+		} else {
+			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
+		}
+	}
+
+	/* If none are pending, do nothing? Application should then call
+	 * irq_enable, which should trigger a callback into the app
+	 * immediately for getting/setting data.
+	 */
+}
+
+static void nu_irq_callback_set(const struct device *dev,
+				uart_irq_callback_user_data_t cb,
+				void *user_data)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	s->isr.cb = cb;
+	s->isr.ud = user_data;
+}
+
+static int nu_irq_fifo_read(const struct device *dev, uint8_t *rx_data, const int len)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	if (s->isr.rx.pending) {
+		/* We haven't yet RXd the last byte */
+		return 0;
+	}
+
+	__ASSERT_NO_MSG(len);
+	rx_data[0] = s->isr.rx.c;
+	s->isr.rx.pending = true;
+
+	/* trigger RX loop */
+	k_timer_start(&s->isr.timer, K_NO_WAIT, K_NO_WAIT);
+
+	return 1;
+}
+
+static int nu_irq_fifo_fill(const struct device *dev, const uint8_t *tx_data, int len)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	if (s->isr.tx.pending) {
+		/* We haven't yet TXd the last byte */
+		return 0;
+	}
+
+	__ASSERT_NO_MSG(len);
+	s->isr.tx.c = tx_data[0];
+	s->isr.tx.pending = true;
+
+	/* trigger TX loop */
+	k_timer_start(&s->isr.timer, K_NO_WAIT, K_NO_WAIT);
+
+	return 1;
+}
+
+static void nu_irq_tx_enable(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	s->isr.tx.enabled = true;
+
+	bool want_data = !s->isr.tx.pending;
+	if (want_data) {
+		s->isr.cb(dev, s->isr.ud);
+	}
+}
+
+static void nu_irq_tx_disable(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	s->isr.tx.enabled = false;
+}
+
+static int nu_irq_tx_ready(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	/* will this result in a dummy byte on start? */
+
+	return !s->isr.tx.pending;
+}
+
+static int nu_irq_tx_complete(const struct device *dev)
+{
+	return -ENOSYS;
+}
+
+static void nu_irq_rx_enable(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	s->isr.rx.enabled = true;
+
+	bool have_data = !s->isr.rx.pending;
+	if (have_data) {
+		s->isr.cb(dev, s->isr.ud);
+	}
+}
+
+static void nu_irq_rx_disable(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	s->isr.rx.enabled = false;
+}
+
+static int nu_irq_rx_ready(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	/* will this result in a dummy byte on start? */
+
+	return !s->isr.rx.pending;
+}
+
+static void nu_irq_err_enable(const struct device *dev)
+{
+	/* no errors here */
+}
+
+static void nu_irq_err_disable(const struct device *dev)
+{
+	/* no errors here */
+}
+
+static int nu_irq_is_pending(const struct device *dev)
+{
+	struct nu_state *s = (struct nu_state *)dev->data;
+
+	return !s->isr.tx.pending || !s->isr.rx.pending;
+}
+
+static int nu_irq_update(const struct device *dev)
+{
+	/* clear the isr flags in fifo fns */
+	return 1;
+}
+#endif	/* CONFIG_UART_INTERRUPT_DRIVEN */
+
 static struct uart_driver_api nu_api = {
 	.poll_out = nu_poll_out,
 	.poll_in = nu_poll_in,
@@ -321,6 +525,25 @@ static struct uart_driver_api nu_api = {
 	.rx_buf_rsp = nu_rx_buf_rsp,
 	.rx_disable = nu_rx_disable,
 #endif	/* CONFIG_UART_ASYNC_API */
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	.fifo_fill = nu_irq_fifo_fill,
+	.irq_tx_enable = nu_irq_tx_enable,
+	.irq_tx_disable = nu_irq_tx_disable,
+	.irq_tx_ready = nu_irq_tx_ready,
+	.irq_tx_complete = nu_irq_tx_complete,
+
+	.fifo_read = nu_irq_fifo_read,
+	.irq_rx_enable = nu_irq_rx_enable,
+	.irq_rx_disable = nu_irq_rx_disable,
+	.irq_rx_ready = nu_irq_rx_ready,
+
+	.irq_err_enable = nu_irq_err_enable,
+	.irq_err_disable = nu_irq_err_disable,
+
+	.irq_is_pending = nu_irq_is_pending,
+	.irq_update = nu_irq_update,
+	.irq_callback_set = nu_irq_callback_set,
+#endif	/* CONFIG_UART_INTERRUPT_DRIVEN */
 };
 
 #define UART_NATIVE_CMDLINE_ADD(n)					\
