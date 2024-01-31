@@ -36,14 +36,9 @@ static struct bt_conn *dconn;
 #define NUM_NOTIFICATIONS 200
 #define P1_START_DELAY K_SECONDS(1)
 
-struct peer {
+struct dut_state {
 	struct bt_conn *conn;
 	int rx;
-};
-
-struct dut_state {
-	struct peer p0;
-	struct peer p1;
 };
 
 static struct dut_state g_dut_state;
@@ -107,12 +102,11 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 	}
 }
 
-/* In your area */
 #define ADV_PARAM_SINGLE BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_ONE_TIME, \
 					 BT_GAP_ADV_FAST_INT_MIN_2,	\
 					 BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
-staticc strucc bt_conn *connecc(void)
+static struct bt_conn *connect_as_peripheral(void)
 {
 	int err;
 	struct bt_conn *conn;
@@ -189,17 +183,12 @@ static uint8_t notified(struct bt_conn *conn,
 {
 	struct dut_state *s = &g_dut_state;
 
-	if (conn == s->p0.conn) {
-		s->p0.rx++;
-		LOG_DBG("p0 RX: %d", s->p0.rx);
+	if (length) {
+		s->rx++;
+		LOG_DBG("p1 RX: %d", s->rx);
 	}
 
-	if (conn == s->p1.conn) {
-		s->p1.rx++;
-		LOG_DBG("p1 RX: %d", s->p1.rx);
-
-		k_msleep(100);
-	}
+	k_msleep(100);
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -303,23 +292,20 @@ void entrypoint_dut(void)
 {
 	/* Test purpose:
 	 *
-	 * Verifies that there is no host RX buffer leak.
+	 * Verifies that there is no host RX buffer leak due to disconnections.
 	 *
-	 * That is, not actual host buffer objects but rather the number of buffers
-	 * that the controller thinks the host has.
+	 * That is, not actual host buffers (ie memory) but rather the number of
+	 * free buffers that the controller thinks the host has.
 	 *
-	 * If there is a desynchronization between those two, the result would be that
+	 * If there is a desynchronization between those two, the result is that
 	 * the controller stops forwarding ACL data to the host, leading to an
 	 * eventual application timeout.
 	 *
-	 * To do this, the application on the DUT will be connected to two
-	 * peers:
-	 *
-	 * - peer 0: sends notifications continuously
-	 * - peer 1: sends a few ATT notifications then disconnects in a loop
+	 * To do this, the DUT is connected to a peer that loops through sending
+	 * a few ATT notifications then disconnecting.
 	 *
 	 * The test stops after an arbitrary number of notifications have been
-	 * received from both peers.
+	 * received.
 	 *
 	 * [verdict]
 	 * - no buffer allocation failures, timeouts or stalls.
@@ -329,36 +315,33 @@ void entrypoint_dut(void)
 
 	LOG_DBG("Test start: DUT");
 
-	s->p0.rx = 0;
-	s->p1.rx = 0;
+	s->rx = 0;
 
 	err = bt_enable(NULL);
 	ASSERT(err == 0, "Can't enable Bluetooth (err %d)\n", err);
 	LOG_DBG("Central: Bluetooth initialized.");
 
-	s->p0.conn = connect_and_subscribe(); /* "thanks for watching, remember to.." */
-	s->p1.conn = connect_and_subscribe();
+	s->conn = connect_and_subscribe();
 
 	LOG_DBG("Central: Connected and subscribed to both peers");
 
 	/* Wait until we got all notifications from both peers */
-	while ((s->p0.rx < NUM_NOTIFICATIONS) ||
-	       (s->p1.rx < NUM_NOTIFICATIONS)) {
+	while (s->rx < NUM_NOTIFICATIONS) {
+		LOG_DBG("%d packets left, waiting..",
+			NUM_NOTIFICATIONS - s->rx);
 		k_msleep(100);
-		LOG_DBG("wait: p0 %d p1 %d", s->p0.rx, s->p1.rx);
-		if ((s->p1.rx < NUM_NOTIFICATIONS) && is_disconnected(s->p1.conn)) {
+		if ((s->rx < NUM_NOTIFICATIONS) && is_disconnected(s->conn)) {
 			LOG_INF("reconnecting..");
 			/* FIXME: why do I need two unrefs? */
-			bt_conn_unref(s->p1.conn);
-			bt_conn_unref(s->p1.conn);
-			s->p1.conn = NULL;
-			s->p1.conn = connect_and_subscribe();
+			bt_conn_unref(s->conn);
+			bt_conn_unref(s->conn);
+			s->conn = NULL;
+			s->conn = connect_and_subscribe();
 		}
 	}
 
 	/* linux will "unref" the conn :p */
-	disconnect(s->p0.conn);
-	disconnect(s->p1.conn);
+	disconnect(s->conn);
 
 	PASS("DUT done\n");
 }
@@ -366,6 +349,7 @@ void entrypoint_dut(void)
 void entrypoint_peer_0(void)
 {
 	int err;
+	int tx;
 	struct bt_conn *conn;
 	const struct bt_gatt_attr *attr;
 	uint8_t data[10];
@@ -376,53 +360,16 @@ void entrypoint_peer_0(void)
 	ASSERT(err == 0, "Can't enable Bluetooth (err %d)\n", err);
 	LOG_DBG("Bluetooth initialized.");
 
-	conn = connecc();
-
-	/* prepare data for notifications */
-	attr = &test_gatt_service.attrs[2];
-	memset(data, 0xfe, sizeof(data));
-
-	LOG_WRN("wait for sub");
-	WAIT_FOR_FLAG(is_subscribed);
-
-	for (int tx = 0; tx < NUM_NOTIFICATIONS + 1; tx++) {
-		err = 1;
-		while (err) {
-			LOG_DBG("p0: TX %d", tx);
-			err = bt_gatt_notify(conn, attr, data, sizeof(data));
-			k_msleep(50);
-		}
-	}
-
-	PASS("Peer 0 done\n");
-}
-
-void entrypoint_peer_1(void)
-{
-	int err;
-	int tx;
-	struct bt_conn *conn;
-	const struct bt_gatt_attr *attr;
-	uint8_t data[10];
-
-	k_sleep(P1_START_DELAY);
-
-	LOG_DBG("Test start: peer 1");
-
-	err = bt_enable(NULL);
-	ASSERT(err == 0, "Can't enable Bluetooth (err %d)\n", err);
-	LOG_DBG("Bluetooth initialized.");
-
 	/* prepare data for notifications */
 	attr = &test_gatt_service.attrs[2];
 	memset(data, 0xfe, sizeof(data));
 
 	/* Pass unless something else errors out later */
-	PASS("peer 1 done\n");
+	PASS("peer 0 done\n");
 
 	tx = 0;
 	while (true) {
-		conn = connecc();
+		conn = connect_as_peripheral();
 
 		LOG_INF("wait until DUT subscribes");
 		UNSET_FLAG(is_subscribed);
@@ -432,7 +379,7 @@ void entrypoint_peer_1(void)
 		for (int ltx = 0; ltx < 10; ltx++) {
 			err = 1;
 			while (err) {
-				LOG_DBG("p1: TX %d", tx);
+				LOG_DBG("p0: TX %d", tx);
 				err = bt_gatt_notify(conn, attr, data, sizeof(data));
 			}
 			tx++;
@@ -475,12 +422,6 @@ static const struct bst_test_instance test_to_add[] = {
 		.test_pre_init_f = test_init,
 		.test_tick_f = test_tick,
 		.test_main_f = entrypoint_peer_0,
-	},
-	{
-		.test_id = "peer_1",
-		.test_pre_init_f = test_init,
-		.test_tick_f = test_tick,
-		.test_main_f = entrypoint_peer_1,
 	},
 	BSTEST_END_MARKER,
 };
