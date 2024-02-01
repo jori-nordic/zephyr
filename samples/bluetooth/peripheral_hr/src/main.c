@@ -107,13 +107,20 @@ int main(void)
 {
 	int err;
 
-	err = bt_enable(NULL);
-	if (err) {
-		printk("Bluetooth init failed (err %d)\n", err);
-		return 0;
-	}
+	while (1) {
+		printk("enabling BT\n");
+		err = bt_enable(NULL);
+		if (err) {
+			printk("Bluetooth init failed (err %d)\n", err);
+			k_panic();
+			return 0;
+		}
 
-	bt_ready();
+		bt_ready();
+
+		printk("disabling BT\n");
+		bt_disable();
+	}
 
 	bt_conn_auth_cb_register(&auth_cb_display);
 
