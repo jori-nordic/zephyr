@@ -20,6 +20,7 @@
 
 #include <argparse.h>		/* For get_device_nbr() */
 #include "utils.h"
+#include "sync.h"
 #include "bstests.h"
 
 #define strucc struct
@@ -112,6 +113,8 @@ static struct bt_conn *connect_as_peripheral(void)
 	struct bt_conn *conn;
 
 	UNSET_FLAG(is_connected);
+
+	backchannel_sync_wait();
 
 	err = bt_le_adv_start(ADV_PARAM_SINGLE, NULL, 0, NULL, 0);
 	ASSERT(!err, "Adving failed to start (err %d)\n", err);
@@ -251,6 +254,8 @@ static struct bt_conn *connect_and_subscribe(void)
 	uint16_t handle;
 	struct bt_conn *conn;
 
+	backchannel_sync_send();
+
 	LOG_DBG("Central: Connect to peer");
 	conn = connect_as_central();
 
@@ -315,6 +320,8 @@ void entrypoint_dut(void)
 
 	LOG_DBG("Test start: DUT");
 
+	backchannel_init();
+
 	s->rx = 0;
 
 	err = bt_enable(NULL);
@@ -358,6 +365,8 @@ void entrypoint_peer_0(void)
 	uint8_t data[10];
 
 	LOG_DBG("Test start: peer 0");
+
+	backchannel_init();
 
 	err = bt_enable(NULL);
 	ASSERT(err == 0, "Can't enable Bluetooth (err %d)\n", err);

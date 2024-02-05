@@ -9,7 +9,8 @@ project(bsim_test_hfc)
 add_subdirectory(${ZEPHYR_BASE}/tests/bluetooth/common/testlib testlib)
 
 target_sources(app PRIVATE
-  src/main.c)
+  src/main.c
+  src/sync.c)
 
 zephyr_include_directories(
   ${BSIM_COMPONENTS_PATH}/libUtilv1/src/
