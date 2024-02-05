@@ -45,6 +45,21 @@ void backchannel_sync_send(void)
 	bs_bc_send_msg(CHANNEL_ID, sync_msg, ARRAY_SIZE(sync_msg));
 }
 
+bool backchannel_sync_received(void)
+{
+	uint8_t sync_msg[MSG_SIZE];
+
+	if (bs_bc_is_msg_received(CHANNEL_ID) > 0) {
+		bs_bc_receive_msg(CHANNEL_ID, sync_msg, ARRAY_SIZE(sync_msg));
+		if (sync_msg[0] != get_device_nbr()) {
+			/* Received a message from another device, exit */
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void backchannel_sync_wait(void)
 {
 	uint8_t sync_msg[MSG_SIZE];

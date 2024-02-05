@@ -114,14 +114,20 @@ static struct bt_conn *connect_as_peripheral(void)
 
 	UNSET_FLAG(is_connected);
 
-	backchannel_sync_wait();
-
 	err = bt_le_adv_start(ADV_PARAM_SINGLE, NULL, 0, NULL, 0);
 	ASSERT(!err, "Adving failed to start (err %d)\n", err);
 
 	LOG_DBG(" wait connecc...");
 
-	WAIT_FOR_FLAG(is_connected);
+	while (!FLAG_IS_SET(is_connected)) {
+		if (backchannel_sync_received()) {
+			/* FIXME: clean-exit */
+			FAIL("end of test\n");
+		}
+
+		k_msleep(10);
+	}
+
 	LOG_DBG("connected as peripheral");
 
 	conn = dconn;
@@ -254,8 +260,6 @@ static struct bt_conn *connect_and_subscribe(void)
 	uint16_t handle;
 	struct bt_conn *conn;
 
-	backchannel_sync_send();
-
 	LOG_DBG("Central: Connect to peer");
 	conn = connect_as_central();
 
@@ -352,6 +356,8 @@ void entrypoint_dut(void)
 
 	/* linux will "unref" the conn :p */
 	disconnect(s->conn);
+
+	backchannel_sync_send();
 
 	PASS("DUT done\n");
 }
