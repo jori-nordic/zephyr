@@ -887,7 +887,7 @@ static struct net_buf *l2cap_chan_le_get_tx_buf(struct bt_l2cap_le_chan *ch)
 }
 
 static int l2cap_chan_le_send_sdu(struct bt_l2cap_le_chan *ch,
-				  struct net_buf **buf);
+				  struct net_buf *buf);
 
 static void l2cap_chan_tx_process(struct k_work *work)
 {
@@ -905,10 +905,11 @@ static void l2cap_chan_tx_process(struct k_work *work)
 		 */
 		LOG_DBG("chan %p buf %p", ch, buf);
 
-		ret = l2cap_chan_le_send_sdu(ch, &buf);
+		ret = l2cap_chan_le_send_sdu(ch, buf);
 		if (ret < 0) {
 			if (ret == -EAGAIN) {
 				ch->tx_buf = buf;
+
 				/* If we don't reschedule, and the app doesn't nudge l2cap (e.g. by
 				 * sending another SDU), the channel will be stuck in limbo. To
 				 * prevent this, we reschedule with a configurable delay.
@@ -1934,14 +1935,11 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 	LOG_DBG("ch %p cid 0x%04x len %u credits %lu", ch, ch->tx.cid, seg->len,
 		atomic_get(&ch->tx.credits));
 
-	len = seg->len - sdu_hdr_len;
-
 	/* SDU will be considered sent when there is no data left in the
 	 * buffers, or if there will be no data left, if we are sending `buf`
 	 * directly.
 	 */
-	if (net_buf_frags_len(buf) == 0 ||
-	    (buf == seg && net_buf_frags_len(buf) == len)) {
+	if (buf->len == 0 || buf == seg) {
 		cb = l2cap_chan_sdu_sent;
 	} else {
 		cb = l2cap_chan_seg_sent;
@@ -1992,44 +1990,33 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 
 /* return next netbuf fragment if present, also assign metadata */
 static int l2cap_chan_le_send_sdu(struct bt_l2cap_le_chan *ch,
-				  struct net_buf **buf)
+				  struct net_buf *buf)
 {
 	int ret;
-	size_t sent, rem_len, frag_len;
-	struct net_buf *frag;
+	size_t sent, rem_len;
 
-	frag = *buf;
-	if (!frag->len && frag->frags) {
-		frag = frag->frags;
-	}
-
-	rem_len = net_buf_frags_len(frag);
+	rem_len = buf->len;
 	sent = 0;
-	while (frag && sent != rem_len) {
-		LOG_DBG("send frag %p (orig buf %p)", frag, *buf);
 
-		frag_len = frag->len;
-		ret = l2cap_chan_le_send(ch, frag, 0);
+	/* Try to send SDUs in a series of PDUs */
+	while (sent != rem_len) {
+		LOG_DBG("send buf %p", buf);
+
+		ret = l2cap_chan_le_send(ch, buf, 0);
 		if (ret < 0) {
-			*buf = frag;
-
-			LOG_DBG("failed to send frag (ch %p cid 0x%04x sent %d)",
+			LOG_DBG("failed to send buf (ch %p cid 0x%04x sent %d)",
 				ch, ch->tx.cid, sent);
 
 			return ret;
 		}
 
 		sent += ret;
-
-		/* If the current buffer has been fully consumed, destroy it and
-		 * proceed to the next fragment of the netbuf chain.
-		 */
-		if (ret == frag_len) {
-			frag = net_buf_frag_del(NULL, frag);
-		}
 	}
 
 	LOG_DBG("ch %p cid 0x%04x sent %u", ch, ch->tx.cid, sent);
+
+	/* Release the ref taken in `l2cap_chan_le_send` */
+	net_buf_unref(buf);
 
 	return sent;
 }
@@ -3061,6 +3048,12 @@ static int bt_l2cap_dyn_chan_send(struct bt_l2cap_le_chan *le_chan, struct net_b
 		 * when allocating buffers intended for bt_l2cap_chan_send().
 		 */
 		LOG_DBG("Not enough headroom in buf %p", buf);
+		return -EINVAL;
+	}
+
+	if (buf->frags) {
+		/* non! */
+		LOG_DBG("Frags are not allowed");
 		return -EINVAL;
 	}
 
