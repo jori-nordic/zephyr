@@ -38,6 +38,8 @@ LOG_MODULE_REGISTER(net_pkt, CONFIG_NET_PKT_LOG_LEVEL);
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/udp.h>
 
+#include <zephyr/bluetooth/l2cap.h>
+
 #include "net_private.h"
 #include "tcp_internal.h"
 
@@ -122,9 +124,36 @@ K_MEM_SLAB_DEFINE(tx_pkts, sizeof(struct net_pkt), CONFIG_NET_PKT_TX_COUNT, 4);
 
 #if defined(CONFIG_NET_BUF_FIXED_DATA_SIZE)
 
+#if defined(CONFIG_NET_L2_BT)
+/* Such wastage, very unoptimize wow!
+░░░░░░░░▄░░░░░░░░░░
+░░░░░░░▌▒█░░░░░░▄▀▌
+░░░░░░░▌▒▒█░░░░▄▀▒▐
+░░░░░░▐▄▀▒▒▀▀▀▄▒▒▒▐
+░░░░▄▄▀▒░▒▒▒▒▒▒▌▄█▐
+░░▄▀▒▒▒░░░▒▒░░░▀██▀▌
+░▐▒▒▄▄▄▒▒▒▒░░▒▒▒▀▄▒▌
+░▌░░▌█▀▒▒▒▒▄▀█▄▒▒█▒▐
+▐░░░▒▒▒▒▒▒▒▌██▀░▒▒▀▌
+▌░▒▄██▄▒▒▒▒▒▒▒▒░▒▒▒▌
+▌▀▐▄█▄█▌▄░▀▒░░░░▒▒▒▐
+▌▒▐▀▐▀▒░▄▄▒▒▒▒░▒▒▒▒▌
+▌▒▒▀▀▄▄▒▒▒▄▒▒▒▒░░▒▒▐
+▐▒▒▒▒▒▒▀▀▀▒▒▒▒░▒▒▒▒▌
+░▀▄▒▒▒▒▒▒▒▒▒▒▄▄▒▒▄▀
+░░░▀▄▄▄▄▄▄▄▀▀▀▒▄▀
+░░░░░░░░▒▒▒▒▒▀
+ */
+#define PKT_HEADROOM(size) BT_L2CAP_SDU_BUF_SIZE(size)
+#else
+#define PKT_HEADROOM(size) (size)
+#endif
+
 NET_BUF_POOL_FIXED_DEFINE(rx_bufs, CONFIG_NET_BUF_RX_COUNT, CONFIG_NET_BUF_DATA_SIZE,
 			  CONFIG_NET_PKT_BUF_USER_DATA_SIZE, NULL);
-NET_BUF_POOL_FIXED_DEFINE(tx_bufs, CONFIG_NET_BUF_TX_COUNT, CONFIG_NET_BUF_DATA_SIZE,
+
+NET_BUF_POOL_FIXED_DEFINE(tx_bufs, CONFIG_NET_BUF_TX_COUNT,
+			  PKT_HEADROOM(CONFIG_NET_BUF_DATA_SIZE),
 			  CONFIG_NET_PKT_BUF_USER_DATA_SIZE, NULL);
 
 #else /* !CONFIG_NET_BUF_FIXED_DATA_SIZE */
