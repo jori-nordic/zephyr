@@ -2877,14 +2877,14 @@ int bt_l2cap_update_conn_param(struct bt_conn *conn,
 
 static void l2cap_connected(struct bt_l2cap_chan *chan)
 {
-	LOG_DBG("ch %p cid 0x%04x", BT_L2CAP_LE_CHAN(chan), BT_L2CAP_LE_CHAN(chan)->rx.cid);
+	LOG_INF("connected: ch %p cid 0x%04x", BT_L2CAP_LE_CHAN(chan), BT_L2CAP_LE_CHAN(chan)->rx.cid);
 }
 
 static void l2cap_disconnected(struct bt_l2cap_chan *chan)
 {
 	struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
 
-	LOG_DBG("ch %p cid 0x%04x", le_chan, le_chan->rx.cid);
+	LOG_INF("disconnected ch %p cid 0x%04x", le_chan, le_chan->rx.cid);
 
 #if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
 	/* Cancel RTX work on signal channel.
