@@ -138,7 +138,9 @@ static struct net_buf *get_seg(struct net_buf *sdu,
 	__ASSERT_NO_MSG(!bt_buf_has_view(sdu));
 
 	/* optimization: don't allocate if we know `make_view` will return `sdu` */
-	if (seg_size >= sdu->len) {
+	if ((seg_size >= sdu->len) &&
+	    (net_buf_headroom(sdu) >= BT_L2CAP_BUF_SIZE(0))) {
+
 		LOG_INF("view >= bufsize, returning it");
 
 		return sdu;
@@ -147,6 +149,8 @@ static struct net_buf *get_seg(struct net_buf *sdu,
 	/* Keeping a ref is the caller's responsibility */
 	view = net_buf_alloc(&seg_pool, K_NO_WAIT);
 	if (!view) {
+		/* This should never happen? If pool properly configured. */
+		__ASSERT_NO_MSG(view);
 		return NULL;
 	}
 
@@ -972,6 +976,7 @@ static void l2cap_chan_tx_process(struct k_work *work)
 	ch = CONTAINER_OF(k_work_delayable_from_work(work), struct bt_l2cap_le_chan, tx_work);
 
 	LOG_INF("%s: %p", __func__, ch);
+
 	/* Resume tx in case there are buffers in the queue */
 	while ((buf = l2cap_chan_le_get_tx_buf(ch))) {
 		/* Here buf is either:
@@ -983,71 +988,27 @@ static void l2cap_chan_tx_process(struct k_work *work)
 		ret = l2cap_chan_le_send_sdu(ch, &buf);
 		if (ret < 0) {
 			if (ret == -EAGAIN) {
+				/* Out of credits or buffer already locked. Work
+				 * will be restarted upon receving credits and
+				 * when a segment buffer is freed.
+				 */
+				LOG_INF("out of credits/windows");
+
 				ch->tx_buf = buf;
+
 				/* If we don't reschedule, and the app doesn't nudge l2cap (e.g. by
 				 * sending another SDU), the channel will be stuck in limbo. To
 				 * prevent this, we reschedule with a configurable delay.
+				 * FIXME: is this still necessary?
 				 */
 				k_work_schedule(&ch->tx_work, K_MSEC(CONFIG_BT_L2CAP_RESCHED_MS));
 			} else {
 				LOG_WRN("Failed to send (err %d), dropping buf %p", ret, buf);
 				l2cap_tx_buf_destroy(ch->chan.conn, buf, ret);
-			}
-			break;
-
-		int err = l2cap_chan_le_send_sdu(ch, &buf);
-
-		if (buf) {
-			ch->tx_buf = buf;
-
-			if (err == -EAGAIN) {
-				/* Out of credits or buffer already locked. Work
-				 * will be restarted upon receving credits.
-				 */
-				LOG_INF("out of credits/windows");
-				return;
-			}
-
-			/* FIXME:
-			 *
-			 * fix the infinite-segmenting l2 coc by re-using the
-			 * SDU buffer all the way thru.
-			 */
-			if (err == -ENOBUFS) {
 				k_oops();
-				/* Out of segment buffers. Delay work
-				 * until buffers may be available.
-				 *
-				 * Also: Limp mode: Retry after a
-				 * second, in case this logic is broken.
-				 *
-				 * FIXME: can this logic ever be triggered?
-				 */
-				/* EBIGHACK */
-				LOG_INF("poll on view bufs for %p", ch);
-				k_poll_event_init(
-					&ch->tx_work_event, K_POLL_TYPE_FIFO_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &seg_pool.free);
-				k_work_poll_submit(&ch->tx_work, &ch->tx_work_event, 1,
-						   K_SECONDS(1));
-				return;
 			}
 
-			if (err < 0) {
-				LOG_WRN("Failed to send (err %d), dropping buf %p", ret, buf);
-				l2cap_tx_buf_destroy(ch->chan.conn, buf, ret);
-			}
-
-			__ASSERT_NO_MSG(!err);
-
-			/* Frag was sent successfully. Schedule next frag for immediate sending.
-			 * FIXME: this maybe doesn't leave time for the HCI driver to process the
-			 * window buffer. So the next l2cap_chan_le_send_frag() is guaranteed to
-			 * return -EWOULDBLOCK
-			 */
-			k_work_poll_submit(&ch->tx_work, &ch->tx_work_event, 0, K_NO_WAIT);
-		} else {
-			__ASSERT_NO_MSG(!err);
+			return;
 		}
 	}
 }
@@ -2002,7 +1963,7 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 	int len, err;
 	bt_conn_tx_cb_t cb;
 
-	if (bt_buf_has_view(*buf)) {
+	if (bt_buf_has_view(buf)) {
 		LOG_DBG("Already have TX inflight");
 		return -EAGAIN;
 	}
@@ -2015,10 +1976,25 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 	/* Save state so it can be restored if we failed to send */
 	net_buf_simple_save(&buf->b, &state);
 
-	seg_len = ch->tx.mps;
-	seg = get_seg(*buf, seg_len, ch);
+	/* FIXME: this doesn't work for frags that don't have the necessary
+	 * headroom. E.g. IPSP frags will not have headroom at all.
+	 * We somehow need to do something nasty and:
+	 * - make `conn.c` accept frags
+	 * - make a "shadow" buffer that has:
+	 *   | header-buf | current segment |
+	 *
+	 * - should somehow make sure that `current segment` does NOT link to
+         *   next frag segments.
+         *
+         * Could go something like this:
+         * - `get_seg` makes a view.
+         * - VM records the `frags` pointer
+	 */
+	seg = get_seg(buf, ch->tx.mps, ch);
 
 	if (!seg) {
+		LOG_ERR("The impossible happened..");
+		k_oops();
 		/* Future work: Give the channel a tx state
 		 * machine, so that we remember that we took a
 		 * credit and don't need to give it back here.
@@ -2028,13 +2004,19 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 		return -ENOBUFS;
 	}
 
-	/* Set a callback if there is no data left in the buffer */
-	if (*buf == seg) {
+	len = seg->len - sdu_hdr_len;
+
+	/* Mark SDU as sent if either:
+	 * - the current `buf` is empty
+	 * - we will sent `seg` instead of `buf` as optimization, and it is the
+         *   last fragment.
+	 */
+	if ((net_buf_frags_len(buf) == 0) ||
+	    (buf == seg && !buf->frags)) {
 		LOG_INF("last PDU");
 		cb = l2cap_chan_sdu_sent;
-		*buf = NULL;
 	} else {
-		LOG_INF("send PDU left %u", (*buf)->len);
+		LOG_INF("send PDU left %u", buf->len);
 		cb = l2cap_chan_seg_sent;
 	}
 
@@ -2063,6 +2045,9 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch,
 		net_buf_unref(seg);
 
 		if (err == -ENOBUFS) {
+			LOG_ERR("but.. but..");
+			k_oops();
+			/* FIXME: can this ever happen now? */
 			/* Restore state since segment could not be sent */
 			net_buf_simple_restore(&buf->b, &state);
 			return -EAGAIN;
