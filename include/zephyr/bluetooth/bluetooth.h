@@ -2637,6 +2637,35 @@ int bt_le_per_adv_set_response_data(struct bt_le_per_adv_sync *per_adv_sync,
 				    const struct bt_le_per_adv_response_params *params,
 				    const struct net_buf_simple *data);
 
+#if defined(CONFIG_BT_CTLR_VS_SCAN_REQ_RX)
+
+struct bt_le_vs_cb {
+	/**
+	 * @brief Vendor-specific Scan Request Received callback.
+	 *
+	 * This callback notifies the application that a Vendor-specific
+	 * Scan Request Received Event has been received.
+	 *
+	 * @param info Information about the scanned event.
+	 * @param rssi Received Signal Strength Indicator
+	 */
+	void (*scanned)(struct bt_le_ext_adv_scanned_info *info, int8_t rssi);
+};
+
+/**
+ * @brief Add Vendor-specific Scan Request Received callback
+ *
+ * Set callback structure for Vendor-specific Scan Request Received.
+ *
+ * @param cb Callback struct to notify about Vendor-specific Scan Request.
+ *           Can be NULL.
+ *
+ * @return Zero on success or (negative) error code otherwise.
+ */
+int bt_le_vs_scan_req_cb(const struct bt_le_vs_cb *cb);
+
+#endif /* CONFIG_BT_CTLR_VS_SCAN_REQ_RX */
+
 /**
  * @}
  */

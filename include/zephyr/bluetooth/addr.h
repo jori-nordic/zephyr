@@ -288,6 +288,12 @@ int bt_addr_from_str(const char *str, bt_addr_t *addr);
  */
 int bt_addr_le_from_str(const char *str, const char *type, bt_addr_le_t *addr);
 
+void bt_addr_le_copy_resolved(bt_addr_le_t *dst, const bt_addr_le_t *src);
+
+bool bt_addr_le_is_resolved(const bt_addr_le_t *addr);
+
+const bt_addr_le_t *bt_lookup_id_addr(uint8_t id, const bt_addr_le_t *addr);
+
 /**
  * @}
  */

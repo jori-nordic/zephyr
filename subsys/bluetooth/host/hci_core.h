@@ -443,7 +443,6 @@ int bt_le_create_conn_synced(const struct bt_conn *conn, const struct bt_le_ext_
 			     uint8_t subevent);
 
 bool bt_addr_le_is_bonded(uint8_t id, const bt_addr_le_t *addr);
-const bt_addr_le_t *bt_lookup_id_addr(uint8_t id, const bt_addr_le_t *addr);
 
 int bt_send(struct net_buf *buf);
 
@@ -498,6 +497,7 @@ void bt_hci_le_past_received_v2(struct net_buf *buf);
 /* Adv HCI event handlers */
 void bt_hci_le_adv_set_terminated(struct net_buf *buf);
 void bt_hci_le_scan_req_received(struct net_buf *buf);
+void bt_hci_le_vs_scan_req_received(struct net_buf *buf);
 
 /* BR/EDR HCI event handlers */
 void bt_hci_conn_req(struct net_buf *buf);

@@ -10,6 +10,7 @@
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/hci_vs.h>
 #include <zephyr/bluetooth/buf.h>
 
 #include "addr_internal.h"
@@ -2283,3 +2284,47 @@ void bt_hci_le_scan_req_received(struct net_buf *buf)
 }
 #endif /* defined(CONFIG_BT_BROADCASTER) */
 #endif /* defined(CONFIG_BT_EXT_ADV) */
+
+#if defined(CONFIG_BT_CTLR_VS_SCAN_REQ_RX)
+#if defined(CONFIG_BT_BROADCASTER)
+
+static const struct bt_le_vs_cb *vs_cb;
+
+int bt_le_vs_scan_req_cb(const struct bt_le_vs_cb *cb)
+{
+	vs_cb = cb;
+	return 0;
+}
+
+void bt_hci_le_vs_scan_req_received(struct net_buf *buf)
+{
+	struct bt_hci_evt_vs_scan_req_rx *evt;
+	struct bt_le_ext_adv *adv;
+
+	evt = (void *)buf->data;
+	adv = adv_get_legacy();
+
+	LOG_DBG("%s peer %s rssi %d", __func__, bt_addr_le_str(&evt->addr), evt->rssi);
+
+	if (!adv) {
+		LOG_ERR("No valid adv");
+		return;
+	}
+
+	if (vs_cb && vs_cb->scanned) {
+		struct bt_le_ext_adv_scanned_info info;
+		bt_addr_le_t id_addr;
+
+		if (bt_addr_le_is_resolved(&evt->addr)) {
+			bt_addr_le_copy_resolved(&id_addr, &evt->addr);
+		} else {
+			bt_addr_le_copy(&id_addr,
+					bt_lookup_id_addr(adv->id, &evt->addr));
+		}
+		info.addr = &id_addr;
+		vs_cb->scanned(&info, evt->rssi);
+	}
+}
+
+#endif /* CONFIG_BT_BROADCASTER */
+#endif /* CONFIG_BT_CTLR_VS_SCAN_REQ_RX */
