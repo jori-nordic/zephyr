@@ -32,6 +32,7 @@ LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_INF);
 struct nu_async_ep {
 	uint8_t *buf;
 	size_t len;
+	size_t pos;
 	struct k_timer expiry;
 };
 
@@ -162,6 +163,7 @@ static void handle_rx_done(struct nu_state *s, bool complete)
 	/* allow rxing more from callback */
 	s->rx.buf = NULL;
 	s->rx.len = 0;
+	s->rx.pos = 0;
 	k_timer_stop(&s->rx.expiry);
 
 	memset(&evt, 0, sizeof(evt));
@@ -207,6 +209,7 @@ static void handle_tx_done(struct nu_state *s, bool complete)
 	/* allow txing more from callback */
 	s->tx.buf = NULL;
 	s->tx.len = 0;
+	s->tx.pos = 0;
 	k_timer_stop(&s->tx.expiry);
 
 	s->cb(s->dev, &evt, s->ud);
@@ -235,27 +238,45 @@ static void nu_timer_work(struct k_timer *timer)
 
 	__ASSERT_NO_MSG(s);
 
+	LOG_DBG("rx %p %d tx %p %d",
+		s->rx.buf, s->rx.len, s->tx.buf, s->tx.len);
+
 	/* TODO: handle disconnect from pipe */
 
 	/* Try to RX first */
 	if (s->rx.buf) {
-		ret = read(s->rx_fd, s->rx.buf, s->rx.len);
-		if (ret > 0) {
-			__ASSERT(ret == s->rx.len, "get a better os");
+		ret = read(s->rx_fd,
+			   s->rx.buf + s->rx.pos,
+			   s->rx.len - s->rx.pos);
+
+		if (ret >= 0) {
+			s->rx.pos += ret;
+			LOG_DBG("read %d out of %d", s->rx.pos, s->rx.len);
+		}
+
+		if (s->rx.pos == s->rx.len) {
 			handle_rx_done(s, true);
 		} else {
+			LOG_DBG("rx buf %p len %d ret %d", s->rx.buf, s->rx.len, ret);
 			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
 		}
 	}
 
 	/* Then try to TX */
 	if (s->tx.buf) {
-		ret = write(s->tx_fd, s->tx.buf, s->tx.len);
+		ret = write(s->tx_fd,
+			    s->tx.buf + s->tx.pos,
+			    s->tx.len - s->tx.pos);
 
-		if (ret > 0) {
-			__ASSERT(ret == s->tx.len, "get a better os");
+		if (ret >= 0) {
+			s->tx.pos += ret;
+			LOG_DBG("wrote %d out of %d", s->tx.pos, s->tx.len);
+		}
+
+		if (s->tx.pos == s->tx.len) {
 			handle_tx_done(s, true);
 		} else {
+			LOG_DBG("tx buf %p len %d ret %d", s->tx.buf, s->tx.len, ret);
 			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
 		}
 	}
@@ -296,6 +317,7 @@ static int nu_tx(const struct device *dev, const uint8_t *buf, size_t len, int32
 
 	s->tx.buf = (uint8_t *)buf;
 	s->tx.len = len;
+	s->tx.pos = 0;
 
 	/* Always TX from ISR context */
 	k_timer_start(&s->timer, K_NO_WAIT, K_NO_WAIT);
@@ -323,6 +345,7 @@ static int nu_rx_enable(const struct device *dev, uint8_t *buf, size_t len, int3
 
 	s->rx.buf = buf;
 	s->rx.len = len;
+	s->rx.pos = 0;
 
 	/* Always RX from ISR context */
 	k_timer_start(&s->timer, K_NO_WAIT, K_NO_WAIT);
