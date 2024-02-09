@@ -28,24 +28,24 @@ mkdir -p ${UART_DIR}
 mkfifo ${UART_DIR}/peripheral.tx
 mkfifo ${UART_DIR}/peripheral.rx
 
+Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} \
+  -D=3 -sim_length=20e6 $@
+
 # Central app + host
 Execute ./bs_${BOARD}_tests_bsim_bluetooth_ll_conn_prj_split_conf\
   -v=${verbosity_level} -s=${simulation_id} -d=1 -RealEncryption=0 \
-  -testid=central -rs=6 > /dev/null
-
-Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} \
-  -D=2 -sim_length=20e6 $@
+  -testid=central -rs=6
 
 # Peripheral controller:
 Execute ./bs_${BOARD}_samples_bluetooth_hci_uart_async_prj_conf \
   -v=${verbosity_level} -s=${simulation_id} -d=0 -RealEncryption=0 \
-  -rs=23 \
+  -rs=70 \
   -fifo_0_rx=${UART_PER}.tx \
   -fifo_0_tx=${UART_PER}.rx
 
 # Peripheral app + host :
 Execute ./bs_${BOARD}_tests_bsim_bluetooth_ll_conn_prj_split_uart_conf \
-  -v=${verbosity_level} -s=${simulation_id} -d=10 -nosim -RealEncryption=0 \
+  -v=${verbosity_level} -s=${simulation_id} -d=2 -RealEncryption=0 \
   -testid=peripheral -rs=23 \
   -fifo_0_rx=${UART_PER}.rx \
   -fifo_0_tx=${UART_PER}.tx
