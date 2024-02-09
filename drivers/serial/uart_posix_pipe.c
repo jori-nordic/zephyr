@@ -41,6 +41,7 @@ struct nu_async_ep {
 
 struct nu_isr_ep {
 	bool enabled;
+	/* FIXME: this is _really_ confusing. Use a proper state machine dammit. */
 	/* For TX:
 	 * - 1: driver has not yet sent `c`
 	 * - 0: driver is waiting for data
@@ -430,8 +431,14 @@ static void nu_isr_timer_work(struct k_timer *timer)
 		ret = read(s->rx_fd, &s->isr.rx.c, 1);
 		if (ret == 1) {
 			s->isr.rx.pending = false;
-			s->isr.cb(s->dev, s->isr.ud);
+			/* FIXME: that probably drops data */
+			if (s->isr.rx.enabled) {
+				s->isr.cb(s->dev, s->isr.ud);
+			} else {
+				s->isr.rx.pending = true;
+			}
 		} else {
+			LOG_DBG("restart RX timer");
 			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
 		}
 	}
@@ -441,8 +448,12 @@ static void nu_isr_timer_work(struct k_timer *timer)
 		ret = write(s->tx_fd, &s->isr.tx.c, 1);
 		if (ret == 1) {
 			s->isr.tx.pending = false;
-			s->isr.cb(s->dev, s->isr.ud);
+			if (s->isr.tx.enabled) {
+				s->isr.cb(s->dev, s->isr.ud);
+				s->isr.tx.pending = true;
+			}
 		} else {
+			LOG_DBG("restart RX timer");
 			k_timer_start(timer, RETRY_DELAY, K_FOREVER);
 		}
 	}
@@ -538,9 +549,9 @@ static int nu_irq_tx_ready(const struct device *dev)
 
 	/* will this result in a dummy byte on start? */
 
-	LOG_DBG("%d", !s->isr.tx.pending);
+	LOG_DBG("pending %d enabled %d", !s->isr.tx.pending, s->isr.tx.enabled);
 
-	return !s->isr.tx.pending;
+	return !s->isr.tx.pending && s->isr.tx.enabled;
 }
 
 static int nu_irq_tx_complete(const struct device *dev)
@@ -579,9 +590,9 @@ static int nu_irq_rx_ready(const struct device *dev)
 
 	/* will this result in a dummy byte on start? */
 
-	LOG_DBG("%d", !s->isr.rx.pending);
+	LOG_DBG("pending %d enabled %d", !s->isr.rx.pending, s->isr.rx.enabled);
 
-	return !s->isr.rx.pending;
+	return !s->isr.rx.pending && s->isr.rx.enabled;
 }
 
 static void nu_irq_err_enable(const struct device *dev)
@@ -604,7 +615,7 @@ static int nu_irq_is_pending(const struct device *dev)
 
 	LOG_DBG("%d", !s->isr.tx.pending || !s->isr.rx.pending);
 
-	return !s->isr.tx.pending || !s->isr.rx.pending;
+	return (!s->isr.tx.pending && s->isr.tx.enabled) || (!s->isr.rx.pending && s->isr.rx.enabled);
 }
 
 static int nu_irq_update(const struct device *dev)
