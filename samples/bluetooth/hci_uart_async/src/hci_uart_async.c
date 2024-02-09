@@ -257,9 +257,12 @@ static void h2c_h4_transport(void)
 		if (payload_size <= net_buf_tailroom(buf)) {
 			uint8_t *payload_dst = net_buf_add(buf, payload_size);
 
+			LOG_WRN("rx rest: %d", payload_size);
 			err = uart_h2c_rx(payload_dst, payload_size);
 			if (err) {
+				LOG_ERR("err: %d", err);
 				net_buf_unref(buf);
+				k_oops();
 				return;
 			}
 			LOG_HEXDUMP_DBG(payload_dst, payload_size, "h2c: hci payload");
@@ -292,10 +295,11 @@ static void h2c_h4_transport(void)
 			buf = NULL;
 		}
 
-		LOG_DBG("h2c: packet done");
+		LOG_WRN("h2c: packet done");
 
 		/* Route buf to Controller. */
 		if (buf) {
+			LOG_HEXDUMP_WRN(buf->data, buf->len, "bt-send");
 			err = bt_send(buf);
 			if (err) {
 				/* This is not a transport error. */

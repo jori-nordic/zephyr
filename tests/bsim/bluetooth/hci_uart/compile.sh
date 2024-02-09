@@ -19,7 +19,8 @@ mkdir -p ${WORK_DIR}
 source ${ZEPHYR_BASE}/tests/bsim/compile.source
 
 app=tests/bsim/bluetooth/ll/conn conf_file=prj_split_uart.conf compile
-app=samples/bluetooth/hci_uart compile
+app=tests/bsim/bluetooth/ll/conn conf_file=prj_split.conf compile
 app=samples/bluetooth/hci_uart_async compile
+# app=samples/bluetooth/hci_uart compile
 
 wait_for_background_jobs

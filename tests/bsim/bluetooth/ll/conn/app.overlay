@@ -1,7 +1,6 @@
 / {
 	chosen {
 		zephyr,bt-uart = &puart0;
-		zephyr,bt-c2h-uart = &puart0;
 	};
 
 	puart0: _puart_0 {
