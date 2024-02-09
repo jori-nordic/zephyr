@@ -24,7 +24,7 @@
 #include <stdlib.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_DBG);
 
 /*
  * UART driver for POSIX ARCH based boards.
@@ -140,6 +140,8 @@ static int nu_init(const struct device *dev)
 	k_timer_user_data_set(&s->isr.timer, s);
 #endif	/* CONFIG_UART_INTERRUPT_DRIVEN */
 
+	LOG_DBG("Initialized FIFO UART\n");
+
 	return 0;
 }
 
@@ -148,6 +150,8 @@ static void nu_poll_out(const struct device *dev, unsigned char c)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 	int ret = -1;
+
+	LOG_DBG("%c", c);
 
 	while (ret < 0) {
 		ret = write(s->tx_fd, (uint8_t *)&c, sizeof(c));
@@ -162,6 +166,8 @@ static int nu_poll_in(const struct device *dev, unsigned char *c)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 	int ret = -1;
+
+	LOG_DBG("");
 
 	ret = read(s->rx_fd, (uint8_t *)c, sizeof(*c));
 	if (ret < 0) {
@@ -180,6 +186,8 @@ static void handle_rx_done(struct nu_state *s, bool complete)
 	struct uart_event evt;
 	uint8_t *buf = s->rx.buf;
 	size_t len = s->rx.len;
+
+	LOG_DBG("%s", complete ? "complete" : "not-complete");
 
 	/* allow rxing more from callback */
 	s->rx.buf = NULL;
@@ -215,6 +223,8 @@ static void handle_tx_done(struct nu_state *s, bool complete)
 {
 	struct uart_event evt;
 
+	LOG_DBG("%s", complete ? "complete" : "not-complete");
+
 	memset(&evt, 0, sizeof(evt));
 
 	if (complete) {
@@ -241,6 +251,8 @@ static void nu_expiry_work(struct k_timer *timer)
 	struct nu_state *s = (struct nu_state *)k_timer_user_data_get(timer);
 
 	__ASSERT_NO_MSG(s);
+
+	LOG_DBG("");
 
 	/* Figure out if we timed out on RX or TX */
 	if (timer == &s->rx.expiry) {
@@ -311,6 +323,8 @@ static int nu_callback_set(const struct device *dev, uart_callback_t callback, v
 	s->cb = callback;
 	s->ud = user_data;
 
+	LOG_DBG("cb %p ud %p", callback, user_data);
+
 	/* TODO: move this to DTS macro */
 	memset(&s->tx, 0, sizeof(struct nu_async_ep));
 	memset(&s->rx, 0, sizeof(struct nu_async_ep));
@@ -331,7 +345,13 @@ static int nu_tx(const struct device *dev, const uint8_t *buf, size_t len, int32
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("buf %p len %p to %dus", buf, len, timeout);
+
+	LOG_HEXDUMP_WRN(buf, len, "---------->");
+
 	if (s->tx.buf) {
+		LOG_DBG("already: buf %p len %d", s->tx.buf, s->tx.len);
+
 		/* only one transaction supported at a time */
 		return -EALREADY;
 	}
@@ -359,7 +379,11 @@ static int nu_rx_enable(const struct device *dev, uint8_t *buf, size_t len, int3
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("buf %p len %p to %dus", buf, len, timeout);
+
 	if (s->rx.buf) {
+		LOG_DBG("already: buf %p len %d", s->rx.buf, s->rx.len);
+
 		/* only one transaction supported at a time */
 		return -EALREADY;
 	}
@@ -396,10 +420,13 @@ static void nu_isr_timer_work(struct k_timer *timer)
 	struct nu_state *s = (struct nu_state *)k_timer_user_data_get(timer);
 	int ret;
 
+	LOG_DBG("");
+
 	__ASSERT_NO_MSG(s);
 	__ASSERT_NO_MSG(s->isr.cb);
 
 	if (s->isr.rx.pending) {
+		LOG_DBG("rx-pending");
 		ret = read(s->rx_fd, &s->isr.rx.c, 1);
 		if (ret == 1) {
 			s->isr.rx.pending = false;
@@ -410,6 +437,7 @@ static void nu_isr_timer_work(struct k_timer *timer)
 	}
 
 	if (s->isr.tx.pending) {
+		LOG_DBG("tx-pending");
 		ret = write(s->tx_fd, &s->isr.tx.c, 1);
 		if (ret == 1) {
 			s->isr.tx.pending = false;
@@ -431,6 +459,8 @@ static void nu_irq_callback_set(const struct device *dev,
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("cb %p ud %p", cb, user_data);
+
 	s->isr.cb = cb;
 	s->isr.ud = user_data;
 }
@@ -439,7 +469,10 @@ static int nu_irq_fifo_read(const struct device *dev, uint8_t *rx_data, const in
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("data %p len %d", rx_data, len);
+
 	if (s->isr.rx.pending) {
+		LOG_DBG("pending");
 		/* We haven't yet RXd the last byte */
 		return 0;
 	}
@@ -458,7 +491,10 @@ static int nu_irq_fifo_fill(const struct device *dev, const uint8_t *tx_data, in
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_HEXDUMP_DBG(tx_data, len, "");
+
 	if (s->isr.tx.pending) {
+		LOG_DBG("pending");
 		/* We haven't yet TXd the last byte */
 		return 0;
 	}
@@ -477,6 +513,8 @@ static void nu_irq_tx_enable(const struct device *dev)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("");
+
 	s->isr.tx.enabled = true;
 
 	bool want_data = !s->isr.tx.pending;
@@ -489,6 +527,8 @@ static void nu_irq_tx_disable(const struct device *dev)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("");
+
 	s->isr.tx.enabled = false;
 }
 
@@ -498,17 +538,23 @@ static int nu_irq_tx_ready(const struct device *dev)
 
 	/* will this result in a dummy byte on start? */
 
+	LOG_DBG("%d", !s->isr.tx.pending);
+
 	return !s->isr.tx.pending;
 }
 
 static int nu_irq_tx_complete(const struct device *dev)
 {
+	LOG_DBG("");
+
 	return -ENOSYS;
 }
 
 static void nu_irq_rx_enable(const struct device *dev)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
+
+	LOG_DBG("");
 
 	s->isr.rx.enabled = true;
 
@@ -522,6 +568,8 @@ static void nu_irq_rx_disable(const struct device *dev)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("");
+
 	s->isr.rx.enabled = false;
 }
 
@@ -531,16 +579,22 @@ static int nu_irq_rx_ready(const struct device *dev)
 
 	/* will this result in a dummy byte on start? */
 
+	LOG_DBG("%d", !s->isr.rx.pending);
+
 	return !s->isr.rx.pending;
 }
 
 static void nu_irq_err_enable(const struct device *dev)
 {
+	LOG_DBG("");
+
 	/* no errors here */
 }
 
 static void nu_irq_err_disable(const struct device *dev)
 {
+	LOG_DBG("");
+
 	/* no errors here */
 }
 
@@ -548,12 +602,16 @@ static int nu_irq_is_pending(const struct device *dev)
 {
 	struct nu_state *s = (struct nu_state *)dev->data;
 
+	LOG_DBG("%d", !s->isr.tx.pending || !s->isr.rx.pending);
+
 	return !s->isr.tx.pending || !s->isr.rx.pending;
 }
 
 static int nu_irq_update(const struct device *dev)
 {
 	/* clear the isr flags in fifo fns */
+	LOG_DBG("");
+
 	return 1;
 }
 #endif	/* CONFIG_UART_INTERRUPT_DRIVEN */
