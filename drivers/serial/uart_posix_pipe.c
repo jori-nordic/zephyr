@@ -20,6 +20,9 @@
 #include <sys/types.h>
 #include <errno.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_INF);
 
@@ -79,11 +82,29 @@ struct nu_state {
 static void nu_isr_timer_work(struct k_timer *timer);
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
+static int myopen(char *path, int flags)
+{
+	int ret = -1;
+	while (ret < 0) {
+		ret = open(path, flags);
+		if (ret < 0) {
+			printf("w\n");
+			k_busy_wait(1);
+		}
+	}
+
+	return ret;
+}
 
 static int open_fifo(char *path, int flags)
 {
+	printf("##########################################################\n");
+
 	/* Wait for other side to connect */
-	int fd = open(path, flags);
+	int fd = myopen(path, flags | O_NONBLOCK);
+	/* int fd = open(path, flags); */
+
+	printf("----------------------------------------------------------\n");
 
 	if (fd < 0) {
 		LOG_ERR("Failed to open pipe %s: err %d",
@@ -614,7 +635,7 @@ static struct uart_driver_api nu_api = {
 			      NULL,				\
 			      &nu_##n##_state,			\
 			      NULL,				\
-			      PRE_KERNEL_1,			\
+			      POST_KERNEL,			\
 			      CONFIG_SERIAL_INIT_PRIORITY,	\
 			      &nu_api);
 
