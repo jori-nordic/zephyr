@@ -29,7 +29,7 @@ mkfifo ${UART_DIR}/peripheral.tx
 mkfifo ${UART_DIR}/peripheral.rx
 
 Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} \
-  -D=3 -sim_length=20e6 $@
+  -D=3 -sim_length=200e6 $@
 
 # Central app + host
 Execute ./bs_${BOARD}_tests_bsim_bluetooth_ll_conn_prj_split_conf\

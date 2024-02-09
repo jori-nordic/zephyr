@@ -395,6 +395,7 @@ static inline void process_tx(void)
 		tx.buf = net_buf_get(&tx.fifo, K_NO_WAIT);
 		if (!tx.buf) {
 			LOG_ERR("TX interrupt but no pending buffer!");
+			k_oops();
 			uart_irq_tx_disable(h4_dev);
 			return;
 		}

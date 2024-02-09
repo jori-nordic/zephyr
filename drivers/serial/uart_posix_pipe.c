@@ -178,7 +178,7 @@ static int nu_poll_in(const struct device *dev, unsigned char *c)
 	return 0;
 }
 
-#define RETRY_DELAY K_MSEC(10)
+#define RETRY_DELAY K_MSEC(1)
 
 #ifdef CONFIG_UART_ASYNC_API
 

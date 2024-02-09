@@ -35,7 +35,7 @@ static struct bt_conn *default_conn;
  *   The thread code is mostly a copy of the peripheral_hr sample device
  */
 
-#define WAIT_TIME 5 /*seconds*/
+#define WAIT_TIME 15 /*seconds*/
 #define WAIT_TIME_REPEAT 22 /*seconds*/
 extern enum bst_result_t bst_result;
 static uint8_t repeat_connect;

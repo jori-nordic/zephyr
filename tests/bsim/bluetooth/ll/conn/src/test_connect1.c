@@ -59,7 +59,7 @@ static uint8_t connected_signal;
  *   The thread code is mostly a copy of the central_hr sample device
  */
 
-#define WAIT_TIME 6 /*seconds*/
+#define WAIT_TIME 16 /*seconds*/
 #define WAIT_TIME_REPEAT 22 /*seconds*/
 extern enum bst_result_t bst_result;
 
