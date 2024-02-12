@@ -23,6 +23,7 @@
 #define ADV_SET_INDEX_ONE   0x00
 #define ADV_SET_INDEX_TWO   0x01
 #define ADV_SET_INDEX_THREE 0x02
+#define ADV_SET_INDEX_FOUR  0x03
 
 static struct bt_le_ext_adv *adv_set[CONFIG_BT_EXT_ADV_MAX_ADV_SET];
 
@@ -110,11 +111,10 @@ void start_advertising(void)
 
 	for (int i = 0; i < CONFIG_BT_EXT_ADV_MAX_ADV_SET; i++) {
 
-		if (i != ADV_SET_INDEX_THREE) {
-			/* Create advertising set 1 and 2 with same id */
+		/* Create first 2 advertising sets with one id and remaining with another id */
+		if (i < 2) {
 			create_adv(&adv_set[i], ID_A_INDEX);
 		} else {
-			/* Create advertising set 3 with different id */
 			create_adv(&adv_set[i], ID_B_INDEX);
 		}
 

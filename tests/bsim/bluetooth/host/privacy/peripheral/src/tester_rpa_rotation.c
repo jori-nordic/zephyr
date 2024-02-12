@@ -56,15 +56,16 @@ static void validate_rpa_addr_generated_for_adv_sets(void)
 			FAIL("RPA not same for adv sets with same id and RPA sharing enabled\n");
 		}
 	}
-	if (bt_addr_le_eq(&adv_set_data[0].old_addr, &adv_set_data[3].old_addr)) {
+	if (bt_addr_le_eq(&adv_set_data[0].old_addr, &adv_set_data[2].old_addr)) {
 		FAIL("RPA same for adv sets with different id's\n");
 	}
 	if (bt_addr_le_eq(&adv_set_data[1].old_addr, &adv_set_data[3].old_addr)) {
 		FAIL("RPA same for adv sets with different id's\n");
 	}
-	adv_set_data[0].addr_set	= false;
-	adv_set_data[1].addr_set	= false;
-	adv_set_data[2].addr_set	= false;
+
+	for (int i = 0; i < CONFIG_BT_EXT_ADV_MAX_ADV_SET; i++) {
+		adv_set_data[i].addr_set	= false;
+	}
 }
 
 static void test_address(bt_addr_le_t *addr)
@@ -150,6 +151,5 @@ void tester_procedure(void)
 	}
 
 	start_scanning();
-
 	/* The rest of the test is driven by the callback */
 }
