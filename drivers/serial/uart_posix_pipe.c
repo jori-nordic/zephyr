@@ -24,7 +24,7 @@
 #include <stdlib.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(uart_pipe, LOG_LEVEL_INF);
 
 /*
  * UART driver for POSIX ARCH based boards.
@@ -89,7 +89,7 @@ static int myopen(char *path, int flags)
 	while (ret < 0) {
 		ret = open(path, flags);
 		if (ret < 0) {
-			printf("w\n");
+			/* printf("w\n"); */
 			k_busy_wait(1);
 		}
 	}
