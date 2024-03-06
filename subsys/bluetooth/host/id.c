@@ -806,11 +806,6 @@ bool bt_id_adv_random_addr_check(const struct bt_le_adv_param *param)
 	return true;
 }
 
-void bt_id_adv_limited_stopped(struct bt_le_ext_adv *adv)
-{
-	adv_rpa_expired(adv, NULL);
-}
-
 #if defined(CONFIG_BT_SMP)
 static int le_set_privacy_mode(const bt_addr_le_t *addr, uint8_t mode)
 {
