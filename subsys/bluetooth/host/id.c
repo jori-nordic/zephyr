@@ -200,7 +200,16 @@ int bt_id_set_adv_random_addr(struct bt_le_ext_adv *adv,
 
 static void adv_rpa_expired(struct bt_le_ext_adv *adv, void *data)
 {
+	/* RPA of Advertisers limited by timeot or number of packets only expire
+	 * when they are stopped.
+	 */
+	if (atomic_test_bit(adv->flags, BT_ADV_LIMITED) ||
+	    atomic_test_bit(adv->flags, BT_ADV_USE_IDENTITY)) {
+		return;
+	}
+
 	bool rpa_invalid = true;
+
 #if defined(CONFIG_BT_EXT_ADV) && defined(CONFIG_BT_PRIVACY)
 	/* Notify the user about the RPA timeout and set the RPA validity. */
 	if (atomic_test_bit(adv->flags, BT_ADV_RPA_VALID) &&
@@ -210,14 +219,14 @@ static void adv_rpa_expired(struct bt_le_ext_adv *adv, void *data)
 #endif
 
 	if (IS_ENABLED(CONFIG_BT_RPA_SHARING)) {
-
 		if (adv->id >= bt_dev.id_count) {
 			return;
 		}
-		bool *rpa_invalid_set_ptr = data;
+
+		bool *ids_ok_to_rotate = data;
 
 		if (!rpa_invalid) {
-			rpa_invalid_set_ptr[adv->id] = false;
+			ids_ok_to_rotate[adv->id] = false;
 		}
 	} else {
 		if (rpa_invalid) {
@@ -226,20 +235,9 @@ static void adv_rpa_expired(struct bt_le_ext_adv *adv, void *data)
 	}
 }
 
-static void adv_rpa_invalidate(struct bt_le_ext_adv *adv, void *data)
-{
-	/* RPA of Advertisers limited by timeot or number of packets only expire
-	 * when they are stopped.
-	 */
-	if (!atomic_test_bit(adv->flags, BT_ADV_LIMITED) &&
-	    !atomic_test_bit(adv->flags, BT_ADV_USE_IDENTITY)) {
-		adv_rpa_expired(adv, data);
-	}
-}
-
-#if defined(CONFIG_BT_RPA_SHARING)
 static void adv_rpa_clear_data(struct bt_le_ext_adv *adv, void *data)
 {
+#if defined(CONFIG_BT_RPA_SHARING)
 	if (adv->id >= bt_dev.id_count) {
 		return;
 	}
@@ -251,8 +249,8 @@ static void adv_rpa_clear_data(struct bt_le_ext_adv *adv, void *data)
 	} else {
 		LOG_WRN("Adv sets rpa expired cb with id %d returns false\n", adv->id);
 	}
-}
 #endif
+}
 
 static void le_rpa_invalidate(void)
 {
@@ -269,11 +267,17 @@ static void le_rpa_invalidate(void)
 		}
 		bool rpa_expired_data[bt_dev.id_count];
 
-		bt_le_ext_adv_foreach(adv_rpa_invalidate, &rpa_expired_data);
-#if defined(CONFIG_BT_RPA_SHARING)
-		/* rpa_expired data collected. now clear data based on data collected. */
-		bt_le_ext_adv_foreach(adv_rpa_clear_data, &rpa_expired_data);
-#endif
+		for (struct bt_le_ext_adv *it = bt_le_ext_adv_iter_begin();
+		     it != NULL;
+		     it = bt_le_ext_adv_iter_next(it)) {
+			adv_rpa_expired(it, &rpa_expired_data);
+		}
+
+		for (struct bt_le_ext_adv *it = bt_le_ext_adv_iter_begin();
+		     it != NULL;
+		     it = bt_le_ext_adv_iter_next(it)) {
+			adv_rpa_clear_data(it, &rpa_expired_data);
+		}
 	}
 }
 

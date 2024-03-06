@@ -258,6 +258,40 @@ static struct bt_le_ext_adv *bt_adv_lookup_handle(uint8_t handle)
 #endif /* CONFIG_BT_BROADCASTER */
 #endif /* defined(CONFIG_BT_EXT_ADV) */
 
+struct bt_le_ext_adv *bt_le_ext_adv_iter_begin(void)
+{
+#if defined(CONFIG_BT_EXT_ADV)
+	for (size_t i = 0; i < ARRAY_SIZE(adv_pool); i++) {
+		if (atomic_test_bit(adv_pool[i].flags, BT_ADV_CREATED)) {
+			return &adv_pool[i];
+		}
+	}
+	return NULL;
+#else
+	return &bt_dev.adv;
+#endif /* defined(CONFIG_BT_EXT_ADV) */
+}
+
+struct bt_le_ext_adv *bt_le_ext_adv_iter_next(struct bt_le_ext_adv *it)
+{
+#if defined(CONFIG_BT_EXT_ADV)
+	while (true) {
+		it++;
+
+		if (!IS_ARRAY_ELEMENT(adv_pool, it)) {
+			return NULL;
+		}
+
+		if (atomic_test_bit(it->flags, BT_ADV_CREATED)) {
+			return it;
+		}
+	}
+#else
+	return NULL;
+#endif /* defined(CONFIG_BT_EXT_ADV) */
+}
+
+
 void bt_le_ext_adv_foreach(void (*func)(struct bt_le_ext_adv *adv, void *data),
 			   void *data)
 {
