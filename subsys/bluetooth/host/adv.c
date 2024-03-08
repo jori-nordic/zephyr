@@ -2304,7 +2304,7 @@ void bt_hci_le_vs_scan_req_received(struct net_buf *buf)
 	evt = (void *)buf->data;
 	adv = adv_get_legacy();
 
-	LOG_DBG("%s peer %s rssi %d", __func__, bt_addr_le_str(&evt->addr), evt->rssi);
+	LOG_ERR("%s peer %s rssi %d", __func__, bt_addr_le_str(&evt->addr), evt->rssi);
 
 	if (!adv) {
 		LOG_ERR("No valid adv");

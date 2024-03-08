@@ -38,7 +38,7 @@
 #endif
 
 /* Lower the value, closer the scanner. */
-#define ADV_TX_POWER RADIO_TXPOWER_TXPOWER_Neg8dBm
+/* #define ADV_TX_POWER RADIO_TXPOWER_TXPOWER_Neg8dBm */
 
 static const struct bt_le_adv_param parameters = {
 	.options = ADV_OPTIONS,
@@ -195,7 +195,12 @@ static bool vs_scanned(struct net_buf_simple *buf)
 	struct bt_hci_evt_vs_scan_req_rx *evt;
 	struct bt_le_ext_adv *adv;
 
-	evt = (void *)buf->data;
+	struct bt_hci_evt_vs *vs;
+
+	vs = net_buf_simple_pull_mem(buf, sizeof(*vs));
+
+	evt = (struct bt_hci_evt_vs_scan_req_rx *)buf->data;
+
 	adv = bt_le_adv_lookup_legacy();
 
 	printk("%s peer %s rssi %d\n", __func__, bt_addr_le_str(&evt->addr), evt->rssi);
@@ -336,16 +341,18 @@ int main(void)
 		printk("Bluetooth init failed (err %d)\n", err);
 	}
 
-	printk("Set Tx power level to %ld\n", ADV_TX_POWER);
-	set_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0, ADV_TX_POWER);
+	/* printk("Set Tx power level to %ld\n", ADV_TX_POWER); */
+	/* set_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0, ADV_TX_POWER); */
 
 	/* Wait for 5 seconds to give a chance users/testers
 	 * to check that default Tx power is indeed the one
 	 * selected in Kconfig.
 	 */
+	printk("Wait for scan\n");
 	k_sleep(K_SECONDS(5));
 
 	while (1) {
+		printk("Periodic check..\n");
 		periodic_checks();
 		k_sleep(K_SECONDS(5));
 	}
