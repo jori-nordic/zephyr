@@ -27,7 +27,7 @@
 #define BT_AD_DATA_FORMAT_LEN_MAX 255U
 
 /* Device name length, size minus one null character */
-#define BT_DEVICE_NAME_LEN (sizeof(CONFIG_BT_DEVICE_NAME) - 1U)
+#define BT_DEVICE_NAME_LEN (5U - 1U)
 
 /* Device name length in AD data format, 2 bytes for length and type overhead */
 #define BT_DEVICE_NAME_AD_DATA_LEN (BT_AD_DATA_FORMAT_LEN_SIZE + \
@@ -54,7 +54,9 @@
  */
 static uint8_t mfg_data[BT_MFG_DATA_LEN] = { 0xFF, 0xFF, };
 
+static uint8_t named[] = { 0xf0, 0x9f, 0x90, 0x9a };
 static const struct bt_data ad[] = {
+        BT_DATA(BT_DATA_NAME_COMPLETE, named, sizeof(named)),
 	BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
 #if CONFIG_BT_CTLR_ADV_DATA_LEN_MAX > 255
 	BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
@@ -69,7 +71,7 @@ int broadcaster_multiple(void)
 		.id = BT_ID_DEFAULT,
 		.sid = 0U, /* Supply unique SID when creating advertising set */
 		.secondary_max_skip = 0U,
-		.options = (BT_LE_ADV_OPT_EXT_ADV | BT_LE_ADV_OPT_USE_NAME),
+		.options = (BT_LE_ADV_OPT_EXT_ADV),
 		.interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
 		.interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
 		.peer = NULL,

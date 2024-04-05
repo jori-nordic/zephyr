@@ -11,6 +11,13 @@
 
 #define NAME_LEN 30
 
+#define LOG_LEVEL CONFIG_BT_HCI_CORE_LOG_LEVEL
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(brrrrr);
+
+
+
+
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
 {
@@ -66,7 +73,7 @@ static void scan_recv(const struct bt_le_scan_recv_info *info,
 	data_status = BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS(info->adv_props);
 
 	bt_addr_le_to_str(info->addr, le_addr, sizeof(le_addr));
-	printk("[DEVICE]: %s, AD evt type %u, Tx Pwr: %i, RSSI %i "
+	LOG_INF("[DEVICE]: %s, AD evt type %u, Tx Pwr: %i, RSSI %i "
 	       "Data status: %u, AD data len: %u Name: %s "
 	       "C:%u S:%u D:%u SR:%u E:%u Pri PHY: %s, Sec PHY: %s, "
 	       "Interval: 0x%04x (%u ms), SID: %u\n",
