@@ -79,7 +79,7 @@
 #define PDU_AC_LL_SIZE_MAX     (PDU_AC_LL_HEADER_SIZE + PDU_AC_PAYLOAD_SIZE_MAX)
 
 /* Advertisement channel Access Address */
-#define PDU_AC_ACCESS_ADDR     0x8e89bed6
+#define PDU_AC_ACCESS_ADDR     0x8e891337
 
 /* Advertisement channel CRC init value */
 #define PDU_AC_CRC_IV          0x555555
