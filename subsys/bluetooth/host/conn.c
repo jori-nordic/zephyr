@@ -565,6 +565,9 @@ static int send_iso(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 
 	bt_buf_set_type(buf, BT_BUF_ISO_OUT);
 
+	/* LOG_ERR("bt-send-iso"); */
+	LOG_HEXDUMP_ERR(buf->data, buf->len, "bt-send-iso");
+
 	return bt_send(buf);
 }
 
@@ -674,6 +677,8 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf,
 
 		return 0;
 	}
+
+	k_oops();
 
 	/* Note: this codepath doesn't seem to be covered by tests. */
 	LOG_ERR("Unable to send to driver (err %d)", err);
