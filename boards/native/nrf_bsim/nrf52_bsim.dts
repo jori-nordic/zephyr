@@ -63,6 +63,24 @@
 	};
 
 	/delete-node/ sw-pwm;
+
+	uart0: uart {
+		status = "okay";
+		compatible = "zephyr,native-posix-uart";
+		/* Dummy current-speed entry to comply with serial
+		 * DTS binding
+		 */
+		current-speed = <0>;
+	};
+
+	uart1: uart_1 {
+		status = "okay";
+		compatible = "zephyr,native-posix-uart";
+		/* Dummy current-speed entry to comply with serial
+		 * DTS binding
+		 */
+		current-speed = <0>;
+	};
 };
 
 &radio {

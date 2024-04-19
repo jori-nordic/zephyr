@@ -1,0 +1,5 @@
+/ {
+        chosen {
+                zephyr,bt-mon-uart = &uart1;
+        };
+};

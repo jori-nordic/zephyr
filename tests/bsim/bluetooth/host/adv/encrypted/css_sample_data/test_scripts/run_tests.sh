@@ -25,7 +25,7 @@ Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s="${simulation_id}_${data_set}" 
 
 wait_for_background_jobs
 
-data_set=2
+# data_set=2
 
 Execute ./"$test_exe" \
     -v=${verbosity_level} -s="${simulation_id}_${data_set}" -d=0 -testid=central \
@@ -35,7 +35,7 @@ Execute ./"$test_exe" \
     -v=${verbosity_level} -s="${simulation_id}_${data_set}" -d=1 -testid=peripheral \
     -RealEncryption=1 -argstest data-set="${data_set}"
 
-Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s="${simulation_id}_${data_set}" \
-    -D=2 -sim_length=60e6 $@
+# Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s="${simulation_id}_${data_set}" \
+    # -D=2 -sim_length=60e6 $@
 
 wait_for_background_jobs

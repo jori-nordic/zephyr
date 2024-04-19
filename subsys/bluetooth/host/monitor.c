@@ -10,6 +10,9 @@
 
 #include <zephyr/types.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <stdio.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -39,7 +42,7 @@
 #define BT_LOG_INFO     6
 #define BT_LOG_DBG      7
 
-/* TS resolution is 1/10th of a millisecond */
+/* TS unit is a 1/10th of a millisecond. I.e. 1 ts_unit == 0.1ms */
 #define MONITOR_TS_FREQ 10000
 
 /* Maximum (string) length of a log message */
@@ -157,7 +160,42 @@ static void monitor_send(const void *data, size_t len)
 		poll_out(*buf++);
 	}
 }
-#endif /* CONFIG_BT_DEBUG_MONITOR_UART */
+// #endif /* CONFIG_BT_DEBUG_MONITOR_UART */
+#elif defined(CONFIG_BT_DEBUG_MONITOR_POSIX_FILE)
+
+#define BT_MONITOR_POSIX_FILE_LEN 18
+
+static int posix_file_fd;
+
+static void monitor_init()
+{
+	pid_t pid = getpid();
+	char filename[BT_MONITOR_POSIX_FILE_LEN]; // log.PID.btsnoop
+
+	snprintk(filename, BT_MONITOR_POSIX_FILE_LEN, "log.%d.btsnoop", pid);
+	printk("filename: %s\n", filename);
+
+	int posix_file_fd = open(filename, O_WRONLY | O_APPEND | O_CREAT, (mode_t)0666);
+	if (fd == -1) {
+		k_oops();
+		return;
+	}
+}
+
+static void monitor_send(const void *data, size_t len)
+{
+	if (write(posix_file_fd, data, len) == -1) {
+		close(posix_file_fd);
+		return;
+	}
+}
+
+static void poll_out(char c)
+{
+	monitor_send(&c, sizeof(c));
+}
+
+#endif
 
 static void encode_drops(struct bt_monitor_hdr *hdr, uint8_t type,
 			 atomic_t *val)
@@ -368,6 +406,9 @@ LOG_BACKEND_DEFINE(bt_monitor, monitor_log_api, true);
 
 static int bt_monitor_init(void)
 {
+	IF_ENABLED(CONFIG_BT_DEBUG_MONITOR_POSIX_FILE, ({
+		monitor_init();
+	})
 
 #if defined(CONFIG_BT_DEBUG_MONITOR_RTT)
 	static uint8_t rtt_up_buf[RTT_BUF_SIZE];

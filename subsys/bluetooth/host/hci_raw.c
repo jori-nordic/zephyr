@@ -187,6 +187,7 @@ int bt_recv(struct net_buf *buf)
 	LOG_DBG("buf %p len %u", buf, buf->len);
 
 	bt_monitor_send(bt_monitor_opcode(buf), buf->data, buf->len);
+	btsnoop_write();
 
 	if (IS_ENABLED(CONFIG_BT_HCI_RAW_H4) &&
 	    raw_mode == BT_HCI_RAW_MODE_H4) {

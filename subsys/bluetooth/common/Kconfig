@@ -269,6 +269,9 @@ config BT_MONITOR
 	bool
 	select LOG_OUTPUT
 
+config BT_BTSNOOP
+	bool "Use BT Snoop format to log HCI traffic in a file"
+
 choice BT_DEBUG_TYPE
 	prompt "Bluetooth debug type"
 	default BT_DEBUG_NONE
@@ -344,5 +347,12 @@ config BT_DEBUG_MONITOR_RTT_BUFFER_SIZE
 	  Specify reserved size of up-buffer used for custom logger output.
 
 endif # BT_DEBUG_MONITOR_RTT
+
+config BT_DEBUG_MONITOR_POSIX_FILE
+	bool "Monitor protocol over Posix file"
+	select LOG
+	select BT_MONITOR
+	help
+	  Do things
 
 endchoice # Bluetooth debug type
