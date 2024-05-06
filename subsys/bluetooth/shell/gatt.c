@@ -488,65 +488,32 @@ static void write_without_rsp_cb(struct bt_conn *conn, void *user_data)
 static int cmd_write_without_rsp(const struct shell *sh,
 				 size_t argc, char *argv[])
 {
-	uint16_t handle;
-	uint16_t repeat;
 	int err;
-	uint16_t len;
-	bool sign;
-	bt_gatt_complete_func_t func = NULL;
+	uint16_t handle;
 
 	if (!default_conn) {
 		shell_error(sh, "Not connected");
 		return -ENOEXEC;
 	}
 
-	sign = !strcmp(argv[0], "signed-write");
-	if (!sign) {
-		if (!strcmp(argv[0], "write-without-response-cb")) {
-			func = write_without_rsp_cb;
-			reset_write_stats();
-		}
-	}
-
 	handle = strtoul(argv[1], NULL, 16);
-	gatt_write_buf[0] = strtoul(argv[2], NULL, 16);
-	len = 1U;
 
-	if (argc > 3) {
-		int i;
-
-		len = MIN(strtoul(argv[3], NULL, 16), sizeof(gatt_write_buf));
-
-		for (i = 1; i < len; i++) {
-			gatt_write_buf[i] = gatt_write_buf[0];
-		}
+	uint16_t length = hex2bin(argv[2], strlen(argv[2]),
+				  gatt_write_buf, sizeof(gatt_write_buf));
+	if (length == 0) {
+		shell_error(sh, "No data set");
+		return -ENOEXEC;
 	}
 
-	repeat = 0U;
-	err = 0;
-
-	if (argc > 4) {
-		repeat = strtoul(argv[4], NULL, 16);
+	err = bt_gatt_write_without_response(default_conn, handle,
+					     gatt_write_buf, length,
+					     false);
+	if (err) {
+		shell_error(sh, "Write failed (err %d)", err);
+	} else {
+		shell_print(sh, "Write pending");
 	}
 
-	if (!repeat) {
-		repeat = 1U;
-	}
-
-	while (repeat--) {
-		err = bt_gatt_write_without_response_cb(default_conn, handle,
-							gatt_write_buf, len,
-							sign, func,
-							UINT_TO_POINTER(len));
-		if (err) {
-			break;
-		}
-
-		k_yield();
-
-	}
-
-	shell_print(sh, "Write Complete (err %d)", err);
 	return err;
 }
 

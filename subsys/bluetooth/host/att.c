@@ -278,6 +278,7 @@ static int chan_send(struct bt_att_chan *chan, struct net_buf *buf)
 	hdr = (void *)buf->data;
 
 	LOG_DBG("code 0x%02x", hdr->code);
+	LOG_HEXDUMP_DBG(buf->data, buf->len, "packet");
 
 	if (!atomic_test_bit(chan->flags, ATT_CONNECTED)) {
 		LOG_ERR("ATT channel not connected");
