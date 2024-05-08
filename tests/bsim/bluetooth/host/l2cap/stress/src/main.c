@@ -11,7 +11,7 @@
 
 #define LOG_MODULE_NAME main
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(LOG_MODULE_NAME, LOG_LEVEL_DBG);
 
 CREATE_FLAG(is_connected);
 CREATE_FLAG(flag_l2cap_connected);
@@ -21,6 +21,8 @@ CREATE_FLAG(flag_l2cap_connected);
 #define SDU_NUM         20
 #define SDU_LEN         3000
 #define RESCHEDULE_DELAY K_MSEC(100)
+
+extern void start_holding(void);
 
 static void sdu_destroy(struct net_buf *buf)
 {
@@ -450,6 +452,9 @@ static void test_central_main(void)
 		for (int i = 0; i < L2CAP_CHANS; i++) {
 			remaining_tx_total += contexts[i].tx_left;
 		}
+
+		start_holding();
+
 	} while (remaining_tx_total);
 
 	LOG_DBG("Waiting until all peripherals are disconnected..");

@@ -822,6 +822,38 @@ static bool cannot_send_to_controller(struct bt_conn *conn)
 	return k_sem_count_get(bt_conn_get_pkts(conn)) == 0;
 }
 
+void back_of_the_bus(struct bt_conn *c, sys_snode_t *node)
+{
+	sys_snode_t *s = sys_slist_get(&bt_dev.le.conn_ready);
+
+	__ASSERT_NO_MSG(s == node);
+	(void)s;
+
+	atomic_t old = atomic_set(&c->_conn_ready_lock, 0);
+	/* Note: we can't assert `old` is non-NULL here, as the
+	 * connection might have been marked ready by an l2cap channel
+	 * that cancelled its request to send.
+	 */
+
+	(void)old;
+
+	/* Append connection to list if it still has data */
+	if (conn_has_data(c)) {
+		LOG_ERR("still have data");
+		/* TODO: don't raise IRQ if only one connection */
+		/* The TX processor will call the `pull_cb` to get the buf */
+		if (!atomic_set(&c->_conn_ready_lock, 1)) {
+			sys_slist_append(&bt_dev.le.conn_ready,
+					 &c->_conn_ready);
+			LOG_DBG("raised");
+		} else {
+			LOG_DBG("already in list");
+		}
+	} else {
+		LOG_ERR("no more data");
+	}
+}
+
 struct bt_conn *get_conn_ready(void)
 {
 	/* Here we only peek: we pop the conn (and insert it at the back if it
@@ -838,6 +870,9 @@ struct bt_conn *get_conn_ready(void)
 	if (cannot_send_to_controller(c)) {
 		/* We will get scheduled again when the buffers are freed. */
 		LOG_DBG("no LL bufs for %p", c);
+
+		back_of_the_bus(c, node);
+
 		return NULL;
 	}
 
@@ -849,26 +884,8 @@ struct bt_conn *get_conn_ready(void)
 
 	/* this also works for ISO */
 	if (bt_data_should_stop(c)) {
-		sys_snode_t *s = sys_slist_get(&bt_dev.le.conn_ready);
-
-		__ASSERT_NO_MSG(s == node);
-		(void)s;
-
-		atomic_t old = atomic_set(&c->_conn_ready_lock, 0);
-		/* Note: we can't assert `old` is non-NULL here, as the
-		 * connection might have been marked ready by an l2cap channel
-		 * that cancelled its request to send.
-		 */
-
-		(void)old;
-
-		/* Append connection to list if it still has data */
-		if (conn_has_data(c)) {
-			LOG_DBG("still have data");
-			bt_conn_data_ready(c);
-		} else {
-			LOG_DBG("no more data");
-		}
+		back_of_the_bus(c, node);
+		bt_tx_irq_raise();
 	}
 
 	return c;
