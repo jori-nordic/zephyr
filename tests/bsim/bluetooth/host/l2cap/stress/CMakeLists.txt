@@ -12,3 +12,7 @@ zephyr_include_directories(
   ${BSIM_COMPONENTS_PATH}/libUtilv1/src/
   ${BSIM_COMPONENTS_PATH}/libPhyComv1/src/
   )
+
+# [Hacker voice] "I'm in.."
+target_link_options(app PUBLIC -Wl,--wrap=bt_send)
+target_link_options(app PUBLIC -Wl,--wrap=bt_recv)
