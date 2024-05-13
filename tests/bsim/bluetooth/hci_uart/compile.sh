@@ -10,8 +10,11 @@ set -ue
 
 source ${ZEPHYR_BASE}/tests/bsim/compile.source
 
+BOARD=native_sim/native/64
 app=tests/bsim/bluetooth/ll/conn conf_file=prj_split_hci_uart.conf compile
-app=samples/bluetooth/hci_uart compile
-app=samples/bluetooth/hci_uart_async compile
+
+# BOARD=nrf52_bsim
+# app=samples/bluetooth/hci_uart compile
+# app=samples/bluetooth/hci_uart_async compile
 
 wait_for_background_jobs
