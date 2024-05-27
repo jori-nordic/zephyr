@@ -349,10 +349,9 @@ int bt_hci_cmd_send_sync(uint16_t opcode, struct net_buf *buf,
 			cmd = k_fifo_peek_head(&bt_dev.cmd_tx_queue);
 			LOG_DBG("process cmd %p want %p", cmd, buf);
 
-			bool success = process_pending_cmd(HCI_CMD_TIMEOUT);
+			__maybe_unused bool success = process_pending_cmd(HCI_CMD_TIMEOUT);
 
 			BT_ASSERT_MSG(success, "command opcode 0x%04x timeout", opcode);
-			(void)success; /* cmon zephyr fix your assert macros */
 		} while (buf != cmd);
 	}
 
