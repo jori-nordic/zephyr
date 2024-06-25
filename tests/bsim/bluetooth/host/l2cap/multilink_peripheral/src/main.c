@@ -17,19 +17,9 @@ extern enum bst_result_t bst_result;
 
 static void test_end_cb(void)
 {
-	/* This callback will fire right before the executable returns
-	 *
-	 * You can use it to print test or system state that would be of use for
-	 * debugging why the test fails.
-	 * Here we just print a dummy string for demonstration purposes.
-	 *
-	 * Can also be used to trigger a `k_oops` which will halt the image if
-	 * running under a debugger, if `CONFIG_ARCH_POSIX_TRAP_ON_FATAL=y`.
-	 */
-	static const char demo_state[] = "My interesting state";
-
+	/* This callback will fire right before the executable returns */
 	if (bst_result != Passed) {
-		TEST_PRINT("Test has not passed. State: %s", demo_state);
+		TEST_PRINT("Test has not passed.");
 	}
 }
 
