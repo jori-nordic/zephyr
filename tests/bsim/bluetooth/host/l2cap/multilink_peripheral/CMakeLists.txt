@@ -21,5 +21,5 @@ zephyr_include_directories(
 target_sources(app PRIVATE
   src/main.c
   src/dut.c
-  src/peer.c
+  src/central.c
 )

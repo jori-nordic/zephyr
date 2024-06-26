@@ -11,7 +11,7 @@
 #include "babblekit/testcase.h"
 
 extern void entrypoint_dut(void);
-extern void entrypoint_peer(void);
+extern void entrypoint_central(void);
 extern enum bst_result_t bst_result;
 
 
@@ -30,9 +30,9 @@ static const struct bst_test_instance entrypoints[] = {
 		.test_main_f = entrypoint_dut,
 	},
 	{
-		.test_id = "peer",
+		.test_id = "central",
 		.test_delete_f = test_end_cb,
-		.test_main_f = entrypoint_peer,
+		.test_main_f = entrypoint_central,
 	},
 	BSTEST_END_MARKER,
 };

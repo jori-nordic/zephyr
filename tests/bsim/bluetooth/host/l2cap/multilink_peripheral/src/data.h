@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_MISC_SAMPLE_TEST_SRC_DATA_H_
-#define ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_MISC_SAMPLE_TEST_SRC_DATA_H_
+#ifndef ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_L2CAP_MULTILINK_PERIPHERAL_SRC_DATA_H_
+#define ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_L2CAP_MULTILINK_PERIPHERAL_SRC_DATA_H_
 
-#include <zephyr/bluetooth/uuid.h>
+#define SDU_NUM 200		/* Number of SDU (L2CAP buffers) to send  */
+#define SDU_LEN 20		/* Length in bytes of said SDUs */
+#define DUT_NAME "dee-yu-tee"	/* name to advertise with */
 
-/* TODO: add common data here */
-
-#endif /* ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_MISC_SAMPLE_TEST_SRC_DATA_H_ */
+#endif /* ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_L2CAP_MULTILINK_PERIPHERAL_SRC_DATA_H_ */

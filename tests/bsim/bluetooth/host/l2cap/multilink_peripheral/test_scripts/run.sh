@@ -11,15 +11,16 @@ test_name="$(guess_test_long_name)"
 
 simulation_id=${test_name}
 
-SIM_LEN_US=$((2 * 1000 * 1000))
+SIM_LEN_US=$((10 * 1000 * 1000))
 
 test_exe="${BSIM_OUT_PATH}/bin/bs_${BOARD_TS}_${test_name}_prj_conf"
 
 cd ${BSIM_OUT_PATH}/bin
 
-Execute "${test_exe}" -v=${verbosity_level} -s=${simulation_id} -d=0 -rs=420 -testid=dut
-Execute "${test_exe}" -v=${verbosity_level} -s=${simulation_id} -d=1 -rs=69  -testid=peer
+Execute "${test_exe}" -s=${simulation_id} -d=0 -rs=420 -testid=dut
+Execute "${test_exe}" -s=${simulation_id} -d=1 -rs=69  -testid=central
+Execute "${test_exe}" -s=${simulation_id} -d=2 -rs=69  -testid=central
 
-Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=${simulation_id} -D=2 -sim_length=${SIM_LEN_US} $@
+Execute ./bs_2G4_phy_v1 -s=${simulation_id} -D=3 -sim_length=${SIM_LEN_US} $@
 
 wait_for_background_jobs

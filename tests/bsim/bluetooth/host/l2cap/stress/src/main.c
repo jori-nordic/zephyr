@@ -51,9 +51,9 @@ static uint16_t rx_cnt;
 static uint8_t disconnect_counter;
 
 struct test_ctx {
-	struct k_work_delayable work_item;
+	struct bt_addr_le_t peer;
 	struct bt_l2cap_le_chan le_chan;
-	size_t tx_left;
+	size_t transfers_left;
 };
 
 static struct test_ctx contexts[L2CAP_CHANS];
