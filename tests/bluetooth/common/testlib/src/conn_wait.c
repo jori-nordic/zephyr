@@ -43,7 +43,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.recycled = on_conn_recycled,
 };
 
-static enum bt_conn_state bt_conn_state(struct bt_conn *conn)
+enum bt_conn_state bt_conn_state(struct bt_conn *conn)
 {
 	int err;
 	struct bt_conn_info info;

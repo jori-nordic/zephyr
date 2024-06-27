@@ -4022,6 +4022,8 @@ static int bt_recv_unsafe(struct net_buf *buf)
 	switch (bt_buf_get_type(buf)) {
 #if defined(CONFIG_BT_CONN)
 	case BT_BUF_ACL_IN:
+		LOG_HEXDUMP_WRN(buf->data, buf->len, "RX %d");
+
 		rx_queue_put(buf);
 		return 0;
 #endif /* BT_CONN */

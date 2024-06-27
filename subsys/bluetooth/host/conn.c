@@ -773,6 +773,10 @@ static bool should_stop_tx(struct bt_conn *conn)
 {
 	LOG_DBG("%p", conn);
 
+	if (conn->state != BT_CONN_CONNECTED) {
+		return true;
+	}
+
 	/* TODO: This function should be overridable by the application: they
 	 * should be able to provide their own heuristic.
 	 */
@@ -982,7 +986,12 @@ void bt_conn_tx_processor(void)
 		return;
 	}
 
-	LOG_DBG("processing conn %p", conn);
+	LOG_INF("processing conn %p", conn);
+
+	/* FIXME: do we need to hold a ref to `conn` when we queue something?
+	 * At least until we have drained the queue.
+	 */
+	__ASSERT_NO_MSG(conn->ref > 0);
 
 	if (conn->state != BT_CONN_CONNECTED) {
 		LOG_ERR("conn %p: not connected", conn);
@@ -990,10 +999,13 @@ void bt_conn_tx_processor(void)
 		 * we were supposed to send.
 		 */
 		buf = conn->tx_data_pull(conn, SIZE_MAX, &buf_len);
+		LOG_ERR("enter loop? (buf %p)", buf);
 		while (buf) {
+			LOG_ERR("pull more");
 			destroy_and_callback(conn, buf, cb, ud);
 			buf = conn->tx_data_pull(conn, SIZE_MAX, &buf_len);
 		}
+		bt_conn_unref(conn);
 		return;
 	}
 
@@ -1202,6 +1214,8 @@ void bt_conn_set_state(struct bt_conn *conn, bt_conn_state_t state)
 
 			LOG_DBG("trigger disconnect work");
 			k_work_reschedule(&conn->deferred_work, K_NO_WAIT);
+			bt_conn_ref(conn);
+			bt_conn_data_ready(conn);
 
 			/* The last ref will be dropped during cleanup */
 			break;

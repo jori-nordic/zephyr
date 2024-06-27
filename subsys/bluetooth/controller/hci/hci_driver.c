@@ -770,6 +770,8 @@ static int acl_handle(const struct device *dev, struct net_buf *buf)
 	struct net_buf *evt;
 	int err;
 
+	LOG_HEXDUMP_WRN(buf->data, buf->len, "TX");
+
 	err = hci_acl_handle(buf, &evt);
 	if (evt) {
 		LOG_DBG("Replying with event of %u bytes", evt->len);
