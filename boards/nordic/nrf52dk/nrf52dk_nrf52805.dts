@@ -46,25 +46,16 @@
 
 	buttons {
 		compatible = "gpio-keys";
+		status = "okay";
 		button0: button_0 {
-			label = "Push button switch 0";
-			gpios = <&gpio0 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Left";
+			gpios = <&gpio0 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 			zephyr,code = <INPUT_KEY_0>;
 		};
 		button1: button_1 {
-			label = "Push button switch 1";
-			gpios = <&gpio0 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Right";
+			gpios = <&gpio0 5 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 			zephyr,code = <INPUT_KEY_1>;
-		};
-		button2: button_2 {
-			label = "Push button switch 2";
-			gpios = <&gpio0 15 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_2>;
-		};
-		button3: button_3 {
-			label = "Push button switch 3";
-			gpios = <&gpio0 16 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_3>;
 		};
 	};
 
@@ -76,8 +67,6 @@
 		led3 = &led3;
 		sw0 = &button0;
 		sw1 = &button1;
-		sw2 = &button2;
-		sw3 = &button3;
 		bootloader-led0 = &led0;
 		mcuboot-button0 = &button0;
 		mcuboot-led0 = &led0;
@@ -89,10 +78,6 @@
 	status = "okay";
 };
 
-&uicr {
-	gpio-as-nreset;
-};
-
 &gpio0 {
 	status = "okay";
 };
@@ -101,29 +86,12 @@
 	status = "okay";
 };
 
-&i2c0 {
-	compatible = "nordic,nrf-twi";
-	status = "okay";
-	pinctrl-0 = <&i2c0_default>;
-	pinctrl-1 = <&i2c0_sleep>;
-	pinctrl-names = "default", "sleep";
-};
-
-&spi0 {
-	compatible = "nordic,nrf-spi";
-	status = "okay";
-	pinctrl-0 = <&spi0_default>;
-	pinctrl-1 = <&spi0_sleep>;
-	pinctrl-names = "default", "sleep";
-};
-
 &uart0 {
 	compatible = "nordic,nrf-uarte";
-	status = "okay";
+	status = "disabled";
 	current-speed = <115200>;
 	pinctrl-0 = <&uart0_default>;
-	pinctrl-1 = <&uart0_sleep>;
-	pinctrl-names = "default", "sleep";
+	pinctrl-names = "default";
 };
 
 &flash0 {
