@@ -339,10 +339,12 @@ void bt_conn_reset_rx_state(struct bt_conn *conn)
 	conn->rx = NULL;
 }
 
-static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
-			uint8_t flags)
+static void bt_acl_recv_(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
 {
 	uint16_t acl_total_len;
+	enum acl_data_flags *buf_flags = bt_get_acl_buf_flags(buf);
+
+	*buf_flags = 0;
 
 	/* Check packet boundary flags */
 	switch (flags) {
@@ -402,6 +404,9 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 		/* Still not enough data received to retrieve the L2CAP header
 		 * length field.
 		 */
+		bt_send_one_host_num_completed_packets(conn->handle);
+		*buf_flags = ACL_DATA_HOST_NUM_COMPLETE_SENT;
+
 		return;
 	}
 
@@ -409,6 +414,9 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 
 	if (conn->rx->len < acl_total_len) {
 		/* L2CAP frame not complete. */
+		bt_send_one_host_num_completed_packets(conn->handle);
+		*buf_flags = ACL_DATA_HOST_NUM_COMPLETE_SENT;
+
 		return;
 	}
 
@@ -424,6 +432,16 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf,
 
 	LOG_DBG("Successfully parsed %u byte L2CAP packet", buf->len);
 	bt_l2cap_recv(conn, buf, true);
+}
+
+static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags)
+{
+	struct net_buf *buffer = net_buf_ref(buf);
+
+	/* Elegant 🎁 solution, bound to impress any Haskell'ør */
+	bt_acl_recv_(conn, buf, flags);
+
+	net_buf_unref(buffer);
 }
 
 static void wait_for_tx_work(struct bt_conn *conn)

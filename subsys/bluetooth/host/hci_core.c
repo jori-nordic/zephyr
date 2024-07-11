@@ -228,6 +228,11 @@ static void handle_vs_event(uint8_t event, struct net_buf *buf,
 	/* Other possible errors are handled by handle_event_common function */
 }
 
+enum acl_data_flags *bt_get_acl_buf_flags(struct net_buf *acl_packet)
+{
+	return &(acl(acl_packet)->flags);
+}
+
 void bt_send_one_host_num_completed_packets(uint16_t handle)
 {
 #if !defined(CONFIG_BT_HCI_ACL_FLOW_CONTROL)
@@ -268,8 +273,14 @@ void bt_hci_host_num_completed_packets(struct net_buf *buf)
 	uint16_t handle = acl(buf)->handle;
 	struct bt_conn *conn;
 	uint8_t index = acl(buf)->index;
+	enum acl_data_flags flags = acl(buf)->flags;
 
 	net_buf_destroy(buf);
+
+	if (flags & ACL_DATA_HOST_NUM_COMPLETE_SENT) {
+		/* no double-dipping here */
+		return;
+	}
 
 	/* Do nothing if controller to host flow control is not supported */
 	if (!BT_CMD_TEST(bt_dev.supported_commands, 10, 5)) {

@@ -182,12 +182,23 @@ struct bt_conn_tx {
 	void *user_data;
 };
 
+enum acl_data_flags {
+	ACL_DATA_HOST_NUM_COMPLETE_SENT = BIT(0),
+};
+
+/* So much room for activities */
+BUILD_ASSERT(sizeof(enum acl_data_flags) <= sizeof(uint8_t));
+
 struct acl_data {
 	/* Extend the bt_buf user data */
 	struct bt_buf_data buf_data;
 
 	/* Index into the bt_conn storage array */
-	uint8_t  index;
+	uint8_t index;
+
+	/* lint: +gen_z */
+	/** 🚩 */
+	enum acl_data_flags flags;
 
 	/** ACL connection handle */
 	uint16_t handle;
