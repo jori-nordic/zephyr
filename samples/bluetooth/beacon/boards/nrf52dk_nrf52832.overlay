@@ -1,5 +1,7 @@
 
 
+/delete-node/ &radio;
+
 &pinctrl {
 	spi1_alt: spi1_alt {
 		group1 {
@@ -32,16 +34,4 @@
 		spi-max-frequency = <2000000>;
 		reset-assert-duration-ms = <6>;
 	};
-};
-
-/{
-	coex_gpio: coex {
-		compatible = "gpio-radio-coex";
-		grant-gpios = <&gpio1 0 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
-		grant-delay-us = <150>;
-	};
-};
-
-&radio {
-	coex = <&coex_gpio>;
 };
