@@ -160,7 +160,7 @@ int main(void)
 		return 0;
 	}
 
-	bt_ready();
+	t_ready();
 	bt_conn_auth_info_cb_register(&bt_conn_auth_info);
 
 	while (1) {

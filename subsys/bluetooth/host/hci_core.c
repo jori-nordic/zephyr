@@ -4035,6 +4035,8 @@ void hci_event_prio(struct net_buf *buf)
 
 static void rx_queue_put(struct net_buf *buf)
 {
+	__ASSERT_NO_MSG(buf->data);
+	__ASSERT_NO_MSG(buf->len);
 	net_buf_slist_put(&bt_dev.rx_queue, buf);
 
 #if defined(CONFIG_BT_RECV_WORKQ_SYS)
@@ -4095,6 +4097,10 @@ int bt_recv(struct net_buf *buf)
 {
 #endif
 	int err;
+
+	__ASSERT_NO_MSG(buf);
+	__ASSERT_NO_MSG(buf->data);
+	__ASSERT_NO_MSG(buf->len);
 
 	k_sched_lock();
 	err = bt_recv_unsafe(buf);
@@ -4194,6 +4200,9 @@ static void rx_work_handler(struct k_work *work)
 	if (!buf) {
 		return;
 	}
+
+	__ASSERT_NO_MSG(buf->data);
+	__ASSERT_NO_MSG(buf->len);
 
 	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf), buf->len);
 

@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "zephyr/net/buf.h"
 #include <zephyr/kernel.h>
 #include <string.h>
 #include <errno.h>
@@ -2427,11 +2428,13 @@ static void l2cap_chan_le_recv_sdu(struct bt_l2cap_le_chan *chan,
 			bt_l2cap_chan_disconnect(&chan->chan);
 			net_buf_unref(buf);
 		}
+		/* What happened to the reference here? Did we move it into `recv`? */
 		return;
 	} else if (bt_l2cap_chan_get_state(&chan->chan) == BT_L2CAP_CONNECTED) {
 		l2cap_chan_send_credits(chan, 1);
 	}
 
+	/* We at least sometimes move the reference. */
 	net_buf_unref(buf);
 }
 
@@ -2611,12 +2614,20 @@ static void l2cap_chan_le_recv(struct bt_l2cap_le_chan *chan,
 		return;
 	}
 
-	err = chan->chan.ops->recv(&chan->chan, buf);
+	struct net_buf *owned_ref = net_buf_ref(buf);
+	err = chan->chan.ops->recv(&chan->chan, owned_ref);
+	if (err == -EINPROGRESS) {
+		/* The buffer reference is now owned by the
+		application, and may already be invalid btw.
+		Don't think you can ref it here. */
+		return;
+	} else {
+		net_buf_unref(owned_ref);
+	}
+
 	if (err < 0) {
-		if (err != -EINPROGRESS) {
-			LOG_ERR("err %d", err);
-			bt_l2cap_chan_disconnect(&chan->chan);
-		}
+		LOG_ERR("err %d", err);
+		bt_l2cap_chan_disconnect(&chan->chan);
 		return;
 	}
 

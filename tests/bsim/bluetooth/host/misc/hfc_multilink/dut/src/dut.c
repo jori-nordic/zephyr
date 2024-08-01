@@ -18,6 +18,7 @@
 
 /* local includes */
 #include "data.h"
+#include "zephyr/sys/atomic_types.h"
 
 LOG_MODULE_REGISTER(dut, CONFIG_APP_LOG_LEVEL);
 
@@ -30,6 +31,7 @@ struct tester {
 	size_t sdu_count;
 	struct bt_conn *conn;
 	struct bt_l2cap_le_chan le_chan;
+	struct k_fifo ack_todo;
 };
 
 static struct tester testers[NUM_TESTERS];
@@ -61,7 +63,10 @@ static int recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf)
 
 	LOG_INF("Received SDU %d / %d from (%s)", tester->sdu_count, SDU_NUM, addr);
 
-	return 0;
+	__ASSERT_NO_MSG(*(void**)buf == NULL);
+	net_buf_put(&tester->ack_todo, buf);
+
+	return -EINPROGRESS;
 }
 
 static void l2cap_chan_connected_cb(struct bt_l2cap_chan *chan)
@@ -87,6 +92,7 @@ static int server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *server
 	struct tester *tester = get_tester(conn);
 	struct bt_l2cap_le_chan *le_chan = &tester->le_chan;
 
+	k_fifo_init(&tester->ack_todo);
 	memset(le_chan, 0, sizeof(*le_chan));
 	le_chan->chan.ops = &ops;
 	*chan = &le_chan->chan;
@@ -204,8 +210,35 @@ void entrypoint_dut(void)
 	LOG_DBG("Connected all testers");
 
 	while (!all_data_transferred()) {
+		struct net_buf *cmd[CONFIG_BT_BUF_CMD_TX_COUNT];
+
+		/* Allocate all the CMD buffers to starve the command pipeline. */
+		for (size_t i = 0; i < ARRAY_SIZE(cmd); i++) {
+			cmd[i] = bt_hci_cmd_create(BT_HCI_OP_READ_LOCAL_VERSION_INFO, 0);
+			if (!cmd[i]) {
+				k_oops();
+			}
+		}
+
 		/* Wait until we have received all expected data. */
 		k_sleep(K_MSEC(100));
+
+		for (size_t i = 0; i < ARRAY_SIZE(testers); i++) {
+			struct net_buf *ack_buf = net_buf_get(&testers[i].ack_todo, K_NO_WAIT);
+			if (ack_buf) {
+				err = bt_l2cap_chan_recv_complete(&testers[i].le_chan.chan, ack_buf);
+				if (err) {
+					k_oops();
+				}
+			}
+		}
+
+		for (size_t i = 0; i < ARRAY_SIZE(cmd); i++) {
+			int err = bt_hci_cmd_send(BT_HCI_OP_READ_LOCAL_VERSION_INFO, cmd[i]);
+			if (err) {
+				k_oops();
+			}
+		}
 	}
 
 	TEST_PASS_AND_EXIT("dut");
