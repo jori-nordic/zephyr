@@ -405,7 +405,9 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags
 		 * length field.
 		 */
 		bt_send_one_host_num_completed_packets(conn->handle);
-		bt_acl_set_ncp_sent(buf, true);
+		if (buf != conn->rx) {
+			bt_acl_set_ncp_sent(buf, true);
+		}
 		net_buf_unref(buf);
 
 		return;
@@ -416,12 +418,17 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags
 	if (conn->rx->len < acl_total_len) {
 		/* L2CAP frame not complete. */
 		bt_send_one_host_num_completed_packets(conn->handle);
-		bt_acl_set_ncp_sent(buf, true);
+		if (buf != conn->rx) {
+			bt_acl_set_ncp_sent(buf, true);
+		}
 		net_buf_unref(buf);
 
 		return;
 	}
 
+	if (buf != conn->rx) {
+		bt_acl_set_ncp_sent(buf, true);
+	}
 	net_buf_unref(buf);
 	buf = NULL;
 
