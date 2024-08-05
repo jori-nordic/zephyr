@@ -345,6 +345,8 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags
 
 	bt_acl_set_ncp_sent(buf, false);
 
+	LOG_WRN("frag %p [%p]", buf, conn->rx);
+
 	/* Check packet boundary flags */
 	switch (flags) {
 	case BT_ACL_START:

@@ -2376,8 +2376,9 @@ int bt_l2cap_chan_recv_complete(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	__ASSERT_NO_MSG(chan);
 	__ASSERT_NO_MSG(buf);
 
-	net_buf_unref(buf);
 	__ASSERT_NO_MSG(buf->ref == 1);
+	LOG_ERR("destroy %p", buf);
+	net_buf_unref(buf);
 
 	if (!conn) {
 		return -ENOTCONN;

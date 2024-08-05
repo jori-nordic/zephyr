@@ -270,12 +270,15 @@ void bt_hci_host_num_completed_packets(struct net_buf *buf)
 	uint16_t handle = acl(buf)->handle;
 	struct bt_conn *conn;
 	uint8_t index = acl(buf)->index;
+	bool ncp_already_sent = acl(buf)->host_ncp_sent;
 
 	net_buf_destroy(buf);
 
-	if (acl(buf)->host_ncp_sent) {
+	if (ncp_already_sent) {
+		LOG_WRN("already %p", buf);
 		return;
 	}
+	LOG_WRN("NCP %p", buf);
 
 	/* Do nothing if controller to host flow control is not supported */
 	if (!BT_CMD_TEST(bt_dev.supported_commands, 10, 5)) {
