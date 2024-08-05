@@ -260,6 +260,8 @@ void bt_send_one_host_num_completed_packets(uint16_t handle)
 
 	err = bt_hci_cmd_send(BT_HCI_OP_HOST_NUM_COMPLETED_PACKETS, buf);
 	BT_ASSERT_MSG(err == 0, "Unable to send Host NCP (err %d)", err);
+
+	LOG_ERR("Host NCP sent for handle %u", handle);
 }
 
 #if defined(CONFIG_BT_HCI_ACL_FLOW_CONTROL)
@@ -313,6 +315,7 @@ struct net_buf *bt_hci_cmd_create(uint16_t opcode, uint8_t param_len)
 		return NULL;
 	}
 
+	__ASSERT_NO_MSG(buf);
 	LOG_DBG("buf %p", buf);
 
 	net_buf_reserve(buf, BT_BUF_RESERVE);

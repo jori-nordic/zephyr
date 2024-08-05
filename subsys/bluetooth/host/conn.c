@@ -421,6 +421,7 @@ static void bt_acl_recv(struct bt_conn *conn, struct net_buf *buf, uint8_t flags
 	}
 
 	net_buf_unref(buf);
+	buf = NULL;
 
 	if (conn->rx->len > acl_total_len) {
 		LOG_ERR("ACL len mismatch (%u > %u)", conn->rx->len, acl_total_len);

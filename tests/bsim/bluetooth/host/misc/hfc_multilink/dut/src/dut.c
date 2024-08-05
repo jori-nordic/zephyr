@@ -18,6 +18,7 @@
 
 /* local includes */
 #include "data.h"
+#include "zephyr/net/buf.h"
 #include "zephyr/sys/atomic_types.h"
 
 LOG_MODULE_REGISTER(dut, CONFIG_APP_LOG_LEVEL);
@@ -214,14 +215,18 @@ void entrypoint_dut(void)
 
 		/* Allocate all the CMD buffers to starve the command pipeline. */
 		for (size_t i = 0; i < ARRAY_SIZE(cmd); i++) {
+			cmd[i] = NULL;
 			cmd[i] = bt_hci_cmd_create(BT_HCI_OP_READ_LOCAL_VERSION_INFO, 0);
 			if (!cmd[i]) {
 				k_oops();
 			}
 		}
+		LOG_WRN("allocated");
 
 		/* Wait until we have received all expected data. */
 		k_sleep(K_MSEC(100));
+		struct net_buf_pool *pool = net_buf_pool_get(cmd[0]->pool_id);
+		(void)pool;
 
 		for (size_t i = 0; i < ARRAY_SIZE(testers); i++) {
 			struct net_buf *ack_buf = net_buf_get(&testers[i].ack_todo, K_NO_WAIT);
@@ -233,11 +238,14 @@ void entrypoint_dut(void)
 			}
 		}
 
+		LOG_WRN("deallocating");
 		for (size_t i = 0; i < ARRAY_SIZE(cmd); i++) {
+			LOG_WRN("delet %p", cmd[i]);
 			int err = bt_hci_cmd_send(BT_HCI_OP_READ_LOCAL_VERSION_INFO, cmd[i]);
 			if (err) {
 				k_oops();
 			}
+			cmd[i] = NULL;
 		}
 	}
 

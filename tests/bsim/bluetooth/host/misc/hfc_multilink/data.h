@@ -8,7 +8,7 @@
 #define ZEPHYR_TESTS_BSIM_BLUETOOTH_HOST_MISC_HFC_MULTILINK_SRC_DATA_H_
 
 #define TESTER_NAME "tester"
-#define SDU_NUM 3
+#define SDU_NUM 30
 #define L2CAP_TEST_PSM 0x0080
 /* use the first dynamic channel ID */
 #define L2CAP_TEST_CID 0x0040
