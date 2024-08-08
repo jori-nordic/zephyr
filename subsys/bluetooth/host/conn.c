@@ -636,7 +636,7 @@ static int send_buf(struct bt_conn *conn, struct net_buf *buf,
 		return -EIO;
 	}
 
-	LOG_DBG("conn %p buf %p len %u buf->len %u cb %p ud %p",
+	LOG_INF("conn %p buf %p len %u buf->len %u cb %p ud %p",
 		conn, buf, len, buf->len, cb, ud);
 
 	/* Acquire the right to send 1 packet to the controller */
