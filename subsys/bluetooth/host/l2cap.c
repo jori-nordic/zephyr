@@ -257,14 +257,29 @@ void bt_l2cap_chan_del(struct bt_l2cap_chan *chan)
 
 	cancel_data_ready(le_chan);
 
+	LOG_ERR("pdu-rem: %d", le_chan->_pdu_remaining);
+
 	/* Remove buffers on the PDU TX queue. We can't do that in
 	 * `l2cap_chan_destroy()` as it is not called for fixed channels.
 	 */
 	while (chan_has_data(le_chan)) {
+		/* FIXME: in rubin's test this seems be called _before_
+		 * l2cap_data_pull() manages to pull all the data and reset the
+		 * buffers.
+		 * That's the only way I can see _pdu_remaining being non-zero.
+		 *
+		 * That is not the case for us, for some reason.
+		 *
+		 * Fix the scheduling instead.
+		 */
 		struct net_buf *buf = net_buf_get(&le_chan->tx_queue, K_NO_WAIT);
 
 		net_buf_unref(buf);
 	}
+
+	__ASSERT_NO_MSG(le_chan->_pdu_remaining == 0);
+	/* Reset the TX fragmentation state */
+	le_chan->_pdu_remaining = 0;
 
 	if (ops->disconnected) {
 		ops->disconnected(chan);
@@ -877,6 +892,8 @@ struct net_buf *l2cap_data_pull(struct bt_conn *conn,
 		return NULL;
 	}
 
+	LOG_INF("pull: chan %p amount %d pdu-rem: %d", lechan, amount, lechan->_pdu_remaining);
+
 	/* Leave the PDU buffer in the queue until we have sent all its
 	 * fragments.
 	 *
@@ -977,6 +994,7 @@ struct net_buf *l2cap_data_pull(struct bt_conn *conn,
 	if (lechan->_pdu_remaining > amount) {
 		lechan->_pdu_remaining -= amount;
 	} else {
+		LOG_WRN("sz");
 		lechan->_pdu_remaining = 0;
 	}
 

@@ -892,19 +892,19 @@ struct bt_conn *get_conn_ready(void)
 		/* We will get scheduled again when the (view) buffers are freed. If you
 		 * hit this a lot, try increasing `CONFIG_BT_CONN_FRAG_COUNT`
 		 */
-		LOG_DBG("no view bufs");
+		LOG_INF("no view bufs");
 		return NULL;
 	}
 
 	if (cannot_send_to_controller(conn)) {
 		/* We will get scheduled again when the buffers are freed. */
-		LOG_DBG("no LL bufs for %p", conn);
+		LOG_INF("no LL bufs for %p", conn);
 		return NULL;
 	}
 
 	if (dont_have_tx_context(conn)) {
 		/* We will get scheduled again when TX contexts are available. */
-		LOG_DBG("no TX contexts");
+		LOG_INF("no TX contexts");
 		return NULL;
 	}
 
@@ -929,7 +929,7 @@ struct bt_conn *get_conn_ready(void)
 
 		/* Append connection to list if it still has data */
 		if (conn->has_data(conn)) {
-			LOG_DBG("appending %p to back of TX queue", conn);
+			LOG_INF("appending %p to back of TX queue", conn);
 			bt_conn_data_ready(conn);
 		}
 
@@ -1010,11 +1010,11 @@ void bt_conn_tx_processor(void)
 	conn = get_conn_ready();
 
 	if (!conn) {
-		LOG_DBG("no connection wants to do stuff");
+		LOG_INF("no connection wants to do stuff");
 		return;
 	}
 
-	LOG_DBG("processing conn %p", conn);
+	LOG_INF("processing conn %p", conn);
 
 	if (conn->state != BT_CONN_CONNECTED) {
 		LOG_WRN("conn %p: not connected", conn);
@@ -1146,7 +1146,7 @@ void bt_conn_set_state(struct bt_conn *conn, bt_conn_state_t state)
 {
 	bt_conn_state_t old_state;
 
-	LOG_DBG("%s -> %s", state2str(conn->state), state2str(state));
+	LOG_WRN("%s -> %s", state2str(conn->state), state2str(state));
 
 	if (conn->state == state) {
 		LOG_WRN("no transition %s", state2str(state));
