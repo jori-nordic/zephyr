@@ -4,6 +4,8 @@
 
 set -eu
 
+BOARD=nrf5340bsim/nrf5340/cpuapp
+
 source ${ZEPHYR_BASE}/tests/bsim/sh_common.source
 
 test_name="$(guess_test_long_name)"
