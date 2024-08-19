@@ -4,18 +4,25 @@ set -eu
 
 echo "Setting up environment"
 
-git config --global user.email "bot@zephyrproject.org"
-git config --global user.name "Zephyr Bot"
-git log  --pretty=oneline | head -n 10
-
-# TODO: skip if west already initialized
-sudo chown -R user:user /workspaces
-west init -l --mf west-bsim.yml || true
-west config manifest.group-filter -- +ci
-west config --global update.narrow true
-
-west update --path-cache /repo-cache/zephyrproject 2>&1 1> west.update.log || west update --path-cache /repo-cache/zephyrproject 2>&1 1> west.update.log || ( rm -rf ../modules ../bootloader ../tools && west update --path-cache /repo-cache/zephyrproject)
-# FIXME: don't do that for local dev. Actually, a different env-setup should be used.
-west forall -c 'git reset --hard HEAD'
-
 export ZEPHYR_SDK_INSTALL_DIR="/opt/toolchains/zephyr-sdk-$( cat SDK_VERSION )"
+
+# Skip if a workspace already exists
+config_path="/workspaces/.west/config"
+if [ -f "$config_path" ]; then
+    echo "West .config exists, skipping init and update."
+    exit 0
+fi
+
+# Can that have bad consequences if host UID != 1000?
+sudo chown user:user /workspaces
+
+# Fetch all the projects we need
+west init -l --mf west-bsim.yml
+west config --global update.narrow true
+west update --path-cache /repo-cache/zephyrproject
+
+# Reset every project except the main zephyr repo.
+#
+# I can't "just" use $(pwd) or shell expansion as it will be expanded _before_
+# the command is executed in every west project.
+west forall -c 'pwd | xargs basename | xargs test "zephyr" != && git reset --hard HEAD' || true
