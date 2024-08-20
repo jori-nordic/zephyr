@@ -1,5 +1,5 @@
 {
-    "name": "bsim",
+    "name": "Bluetooth development using babblesim",
     "build": {"dockerfile": "Dockerfile"},
 
     "containerEnv": {
@@ -10,12 +10,6 @@
         "EDTT_PATH": "../tools/edtt"
     },
 
-    // TODO: add SSH agent for git operations
-
     "onCreateCommand": "git config --global --add safe.directory '*'",
-    "updateContentCommand": "${ZEPHYR_BASE}/setup-env.sh && ${ZEPHYR_BASE}/bsim-update.sh",
-
-    // "mounts": [
-    //     "source=${localWorkspaceFolder}/../,target=/workspaces,type=bind,consistency=cached"
-    // ]
+    "updateContentCommand": "${ZEPHYR_BASE}/setup-env.sh && ${ZEPHYR_BASE}/bsim-update.sh"
 }

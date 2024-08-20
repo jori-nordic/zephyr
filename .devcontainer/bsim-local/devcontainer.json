@@ -1,0 +1,19 @@
+{
+    "name": "Bluetooth development using babblesim (also mount west workspace)",
+    "build": {"dockerfile": "../bsim/Dockerfile"},
+
+    "containerEnv": {
+        "ZEPHYR_BASE": "/workspaces/zephyr",
+        "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr",
+        "BSIM_OUT_PATH": "/opt/bsim/",
+        "BSIM_COMPONENTS_PATH": "/opt/bsim/components",
+        "EDTT_PATH": "../tools/edtt"
+    },
+
+    "onCreateCommand": "git config --global --add safe.directory '*'",
+    "updateContentCommand": "${ZEPHYR_BASE}/setup-env.sh && ${ZEPHYR_BASE}/bsim-update.sh",
+
+    "mounts": [
+        "source=${localWorkspaceFolder}/../,target=/workspaces,type=bind,consistency=cached"
+    ]
+}
