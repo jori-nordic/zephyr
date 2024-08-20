@@ -3,6 +3,7 @@
     "build": {"dockerfile": "../bsim/Dockerfile"},
 
     "containerEnv": {
+        "HISTCONTROL=ignoredups:erasedups",
         "ZEPHYR_BASE": "/workspaces/zephyr",
         "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr",
         "BSIM_OUT_PATH": "/opt/bsim/",
@@ -10,10 +11,12 @@
         "EDTT_PATH": "../tools/edtt"
     },
 
+    "initializeCommand": "mkdir -p ${localWorkspaceFolder}/.cache && touch ${localWorkspaceFolder}/.cache/.bash_history",
     "onCreateCommand": "git config --global --add safe.directory '*'",
     "updateContentCommand": "${ZEPHYR_BASE}/setup-env.sh && ${ZEPHYR_BASE}/bsim-update.sh",
 
     "mounts": [
+        "source=${localWorkspaceFolder}/.cache/.bash_history,target=/home/user/.bash_history,type=bind,consistency=cached",
         "source=${localWorkspaceFolder}/../,target=/workspaces,type=bind,consistency=cached"
     ]
 }
