@@ -1,9 +1,13 @@
 FROM ghcr.io/zephyrproject-rtos/ci-repo-cache:v0.26.13.20240601
 
-# RUN addgroup --gid 1000 localuser && adduser --uid 1000 --ingroup localuser localuser
+RUN apt-get -y update && \
+	apt-get -y upgrade && \
+	apt-get install --no-install-recommends -y \
+	gdbserver
+
 RUN usermod -s /usr/bin/bash user
 
-# Such meaning, wow
+# 🐕 such wow
 USER user
 
-ENTRYPOINT /usr/bin/bash
+CMD /usr/bin/bash
