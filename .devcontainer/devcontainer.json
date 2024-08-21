@@ -1,0 +1,18 @@
+{
+    "name": "Basic zephyr devcontainer",
+    "build": {"dockerfile": "../bsim/Dockerfile"},
+
+    "containerEnv": {
+        "HISTCONTROL=ignoredups:erasedups",
+        "ZEPHYR_BASE": "/workspaces/zephyr",
+        "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr"
+    },
+
+    "initializeCommand": "mkdir -p ${localWorkspaceFolder}/.cache && touch ${localWorkspaceFolder}/.cache/.bash_history",
+    "onCreateCommand": "git config --global --add safe.directory '*'",
+
+    "mounts": [
+        "source=${localWorkspaceFolder}/.cache/.bash_history,target=/home/user/.bash_history,type=bind,consistency=cached",
+        "source=${localWorkspaceFolder}/../,target=/workspaces,type=bind,consistency=cached"
+    ]
+}
