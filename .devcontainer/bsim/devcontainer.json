@@ -15,13 +15,12 @@
         "vscode": {
             "extensions": [
                 "ms-vscode.cpptools"
-            ]
-        }
-    },
-
-    "settings": {
-        "files.watcherExclude": {
-            "${localWorkspaceFolder}/bsim_out/*/**": true
+            ],
+            "settings": {
+                "files.watcherExclude": {
+                    "${localWorkspaceFolder}/bsim_out/*/**": true
+                }
+            }
         }
     },
 
