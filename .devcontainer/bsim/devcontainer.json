@@ -11,6 +11,14 @@
         "EDTT_PATH": "../tools/edtt"
     },
 
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools"
+            ]
+        }
+    },
+
     "initializeCommand": "mkdir -p ${localWorkspaceFolder}/.cache && touch ${localWorkspaceFolder}/.cache/.bash_history",
     "onCreateCommand": "git config --global --add safe.directory '*'",
     "updateContentCommand": "${ZEPHYR_BASE}/setup-env.sh && ${ZEPHYR_BASE}/bsim-update.sh",
