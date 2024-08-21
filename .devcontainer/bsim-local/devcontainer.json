@@ -3,7 +3,7 @@
     "build": {"dockerfile": "../bsim/Dockerfile"},
 
     "containerEnv": {
-        "HISTCONTROL=ignoredups:erasedups",
+        "HISTCONTROL": "ignoredups:erasedups",
         "ZEPHYR_BASE": "/workspaces/zephyr",
         "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr",
         "BSIM_OUT_PATH": "/opt/bsim/",
