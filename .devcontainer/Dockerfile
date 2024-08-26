@@ -1,4 +1,6 @@
-FROM ghcr.io/zephyrproject-rtos/ci:v0.26.13
+FROM ghcr.io/zephyrproject-rtos/zephyr-build:v0.26.14
+
+USER root
 
 # Install gdbserver for enabling GUI debugging in VSCode
 RUN apt-get -y update && \
