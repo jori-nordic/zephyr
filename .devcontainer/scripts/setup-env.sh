@@ -34,7 +34,7 @@ else
     west init -l --mf .devcontainer/bsim/west-bsim.yml
 fi
 west config --global update.narrow true
-west update --path-cache /repo-cache/zephyrproject
+west update
 
 # Reset every project except the main zephyr repo.
 #
