@@ -113,12 +113,16 @@ static void *setup(void)
 	static struct shell_backend_uart_fixture fixture = {
 		.dev = DEVICE_DT_GET(DT_NODELABEL(euart0)),
 	};
+	uint8_t tx_content[SAMPLE_DATA_SIZE] = {0};
 
 	zassert_not_null(fixture.dev);
 	enable_shell_euart0(fixture.dev, &shell_euart0);
 
 	/* Let the shell backend initialize. */
 	k_usleep(10);
+
+	uart_emul_get_tx_data(fixture.dev, tx_content, SAMPLE_DATA_SIZE);
+	zassert_mem_equal(tx_content, "\r\n", strlen("\r\n"));
 
 	return &fixture;
 }
