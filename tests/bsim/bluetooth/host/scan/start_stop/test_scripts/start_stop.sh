@@ -11,12 +11,12 @@ verbosity_level=2
 cd ${BSIM_OUT_PATH}/bin
 
 Execute "./${test_exe}" \
-  -v=${verbosity_level} -s="${simulation_id}" -d=0 -testid=scanner
-
-Execute "./${test_exe}" \
   -v=${verbosity_level} -s="${simulation_id}" -d=1 -testid=periodic_adv
 
 Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s="${simulation_id}" \
-  -D=2 -sim_length=5e6
+  -D=2 -sim_length=100e6
+
+gdb -ex 'set confirm off' -ex 'run' -ex 'bt' -ex 'quit' --args "./${test_exe}" \
+  -v=${verbosity_level} -s="${simulation_id}" -d=0 -testid=scanner
 
 wait_for_background_jobs
