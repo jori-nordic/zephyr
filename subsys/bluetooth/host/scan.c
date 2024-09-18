@@ -57,7 +57,63 @@ static struct scanner_state scan_state;
 
 #if defined(CONFIG_BT_EXT_ADV)
 
-NET_BUF_POOL_FIXED_DEFINE(reassembly_pool, 1, CONFIG_BT_EXT_SCAN_BUF_SIZE, sizeof(struct bt_buf_data), NULL);
+#define REPORT_MAGIC 0xbf
+#define REPORT_HEADER_SIZE (sizeof(uint8_t) + sizeof(bt_addr_le_t) + sizeof(struct bt_le_scan_recv_info))
+
+NET_BUF_POOL_DEFINE(reassembly_pool, 1, CONFIG_BT_EXT_SCAN_BUF_SIZE + REPORT_HEADER_SIZE,
+		    sizeof(struct bt_buf_data), NULL);
+static K_FIFO_DEFINE(adv_reports);
+
+static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const *const evt,
+				struct bt_le_scan_recv_info *const scan_info);
+
+static void le_adv_recv(bt_addr_le_t *addr, struct bt_le_scan_recv_info *info,
+			struct net_buf_simple *buf, uint16_t len);
+
+static void reset_reassembling_advertiser(void);
+
+static void adv_report_work_handler(struct k_work *work)
+{
+	/* TODO: also schedule async scan-terminated event */
+	struct net_buf *report = k_fifo_get(&adv_reports, K_NO_WAIT);
+
+	if (!report) {
+		return;
+	}
+
+	LOG_DBG("report %p", report);
+
+	k_work_submit(work);
+
+	uint8_t magic = net_buf_pull_u8(report);
+	if (magic != REPORT_MAGIC) {
+		__ASSERT(0, "no fun without magic");
+		return;
+	}
+
+	bt_addr_le_t *addr = net_buf_pull_mem(report, sizeof(*addr));
+
+	struct bt_le_scan_recv_info *scan_info =
+		net_buf_pull_mem(report, sizeof(*scan_info));
+
+	le_adv_recv(addr, scan_info, &report->b, report->len);
+
+	net_buf_unref(report);
+}
+
+static K_WORK_DEFINE(adv_report_work, adv_report_work_handler);
+
+static void process_report_async(struct net_buf *report,
+				 struct bt_le_scan_recv_info *info,
+				 bt_addr_le_t *addr)
+{
+	net_buf_push_mem(report, info, sizeof(*info));
+	net_buf_push_mem(report, addr, sizeof(*addr));
+	net_buf_push_u8(report, REPORT_MAGIC);
+
+	k_fifo_put(&adv_reports, report);
+	k_work_submit(&adv_report_work);
+}
 
 static struct net_buf *ext_scan_buf;
 
@@ -83,8 +139,15 @@ static bool fragmented_advertisers_equal(const struct fragmented_advertiser *a,
 /* Sets the address and sid of the advertiser to be reassembled. */
 static void init_reassembling_advertiser(const bt_addr_le_t *addr, uint8_t sid)
 {
+	LOG_DBG("");
+	__ASSERT_NO_MSG(ext_scan_buf == NULL);
+
 	ext_scan_buf = net_buf_alloc(&reassembly_pool, K_NO_WAIT);
-	__ASSERT_NO_MSG(ext_scan_buf);
+	if (ext_scan_buf) {
+		net_buf_reserve(ext_scan_buf, REPORT_HEADER_SIZE);
+	}
+
+	LOG_DBG("reassembly buf: %p", ext_scan_buf);
 
 	bt_addr_le_copy(&reassembling_advertiser.addr, addr);
 	reassembling_advertiser.sid = sid;
@@ -93,11 +156,7 @@ static void init_reassembling_advertiser(const bt_addr_le_t *addr, uint8_t sid)
 
 static void reset_reassembling_advertiser(void)
 {
-	if (ext_scan_buf) {
-		net_buf_unref(ext_scan_buf);
-		ext_scan_buf = NULL;
-		net_buf_simple_reset(&ext_scan_buf->b);
-	}
+	LOG_DBG("");
 
 	reassembling_advertiser.state = FRAG_ADV_INACTIVE;
 }
@@ -775,6 +834,16 @@ static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const 
 	scan_info->adv_props = get_adv_props_extended(sys_le16_to_cpu(evt->evt_type));
 }
 
+static void start_discarding(void)
+{
+	if (ext_scan_buf) {
+		net_buf_unref(ext_scan_buf);
+		ext_scan_buf = NULL;
+	}
+
+	reassembling_advertiser.state = FRAG_ADV_DISCARDING;
+}
+
 void bt_hci_le_adv_ext_report(struct net_buf *buf)
 {
 	uint8_t num_reports = net_buf_pull_u8(buf);
@@ -800,6 +869,9 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 
 			if (reassembling_advertiser.state != FRAG_ADV_INACTIVE) {
 				reset_reassembling_advertiser();
+				if (ext_scan_buf == NULL) {
+					start_discarding();
+				}
 			}
 
 			break;
@@ -829,7 +901,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 			 * assume we may have lost a partial adv report in the truncated
 			 * data.
 			 */
-			reassembling_advertiser.state = FRAG_ADV_DISCARDING;
+			start_discarding();
 
 			return;
 		}
@@ -874,16 +946,24 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 			/* We are not reassembling reports from an advertiser and
 			 * this is the first report from the new advertiser.
 			 * Initialize the new advertiser.
+			 *
+			 * It is OK to not get a reassembly buffer. In that case we switch gears to
+			 * DISCARDING immediately.
 			 */
-			__ASSERT_NO_MSG(reassembling_advertiser.state == FRAG_ADV_INACTIVE);
 			init_reassembling_advertiser(&evt->addr, evt->sid);
+		}
+
+		if (ext_scan_buf == NULL) {
+			LOG_DBG("no reassembly buffer, discarding..");
+			start_discarding();
+			goto cont;
 		}
 
 		if (evt->length + ext_scan_buf->b.len > ext_scan_buf->b.size) {
 			/* The report does not fit in the reassemby buffer
 			 * Discard this and future reports from the advertiser.
 			 */
-			reassembling_advertiser.state = FRAG_ADV_DISCARDING;
+			start_discarding();
 		}
 
 		if (reassembling_advertiser.state == FRAG_ADV_DISCARDING) {
@@ -907,12 +987,11 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 		 */
 		__ASSERT_NO_MSG(is_report_complete);
 		create_ext_adv_info(evt, &scan_info);
-		/* TODO: move out to syswq */
-		le_adv_recv(&evt->addr, &scan_info, &ext_scan_buf->b, ext_scan_buf->b.len);
 
-		/* We do no longer need to keep track of this advertiser. */
+		process_report_async(ext_scan_buf, &scan_info, &evt->addr);
+		ext_scan_buf = NULL;
+
 		reset_reassembling_advertiser();
-
 cont:
 		net_buf_pull(buf, evt->length);
 	}
