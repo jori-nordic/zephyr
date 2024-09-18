@@ -254,6 +254,25 @@ struct net_buf *bt_hci_cmd_complete_create(uint16_t op, uint8_t plen);
  */
 struct net_buf *bt_hci_cmd_status_create(uint16_t op, uint8_t status);
 
+/** Allocate an HCI Command Status event buffer.
+ *
+ * This API inspects the event buffer to determine if it can safely be dropped
+ * without causing issues in the Bluetooth host.
+ *
+ * The output of the function can be used as indication that the event can be
+ * discarded. It does not mean that the event _should_ be discarded.
+ *
+ * @warning This API is experimental an subject to change or be removed without
+ * notice.
+ *
+ * @param partial_evt Byte array containing partial event.
+ * @param size        Size of the partial_evt byte array
+ *
+ * @return true if event is discardable
+ * @return false if event is not discardable
+ */
+bool bt_hci_is_event_discardable(uint8_t *partial_evt, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
