@@ -847,15 +847,6 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 				    !fragmented_advertisers_equal(&reassembling_advertiser,
 								  &evt->addr, evt->sid);
 
-		if (is_new_advertiser && is_report_complete) {
-			/* Only advertising report from this advertiser.
-			 * Create event immediately.
-			 */
-			create_ext_adv_info(evt, &scan_info);
-			le_adv_recv(&evt->addr, &scan_info, &buf->b, evt->length);
-			goto cont;
-		}
-
 		if (is_new_advertiser && reassembling_advertiser.state == FRAG_ADV_REASSEMBLING) {
 			LOG_WRN("Received an incomplete advertising report while reassembling "
 				"advertising reports from a different advertiser. The advertising "
