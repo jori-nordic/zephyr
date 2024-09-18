@@ -56,8 +56,10 @@ static sys_slist_t scan_cbs = SYS_SLIST_STATIC_INIT(&scan_cbs);
 static struct scanner_state scan_state;
 
 #if defined(CONFIG_BT_EXT_ADV)
-/* A buffer used to reassemble advertisement data from the controller. */
-NET_BUF_SIMPLE_DEFINE(ext_scan_buf, CONFIG_BT_EXT_SCAN_BUF_SIZE);
+
+NET_BUF_POOL_FIXED_DEFINE(reassembly_pool, 1, CONFIG_BT_EXT_SCAN_BUF_SIZE, sizeof(struct bt_buf_data), NULL);
+
+static struct net_buf *ext_scan_buf;
 
 struct fragmented_advertiser {
 	bt_addr_le_t addr;
@@ -81,6 +83,9 @@ static bool fragmented_advertisers_equal(const struct fragmented_advertiser *a,
 /* Sets the address and sid of the advertiser to be reassembled. */
 static void init_reassembling_advertiser(const bt_addr_le_t *addr, uint8_t sid)
 {
+	ext_scan_buf = net_buf_alloc(&reassembly_pool, K_NO_WAIT);
+	__ASSERT_NO_MSG(ext_scan_buf);
+
 	bt_addr_le_copy(&reassembling_advertiser.addr, addr);
 	reassembling_advertiser.sid = sid;
 	reassembling_advertiser.state = FRAG_ADV_REASSEMBLING;
@@ -88,7 +93,12 @@ static void init_reassembling_advertiser(const bt_addr_le_t *addr, uint8_t sid)
 
 static void reset_reassembling_advertiser(void)
 {
-	net_buf_simple_reset(&ext_scan_buf);
+	if (ext_scan_buf) {
+		net_buf_unref(ext_scan_buf);
+		ext_scan_buf = NULL;
+		net_buf_simple_reset(&ext_scan_buf->b);
+	}
+
 	reassembling_advertiser.state = FRAG_ADV_INACTIVE;
 }
 
@@ -878,7 +888,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 			init_reassembling_advertiser(&evt->addr, evt->sid);
 		}
 
-		if (evt->length + ext_scan_buf.len > ext_scan_buf.size) {
+		if (evt->length + ext_scan_buf->b.len > ext_scan_buf->b.size) {
 			/* The report does not fit in the reassemby buffer
 			 * Discard this and future reports from the advertiser.
 			 */
@@ -895,7 +905,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 			goto cont;
 		}
 
-		net_buf_simple_add_mem(&ext_scan_buf, buf->data, evt->length);
+		net_buf_add_mem(ext_scan_buf, buf->data, evt->length);
 		if (more_to_come) {
 			/* The controller will send additional reports to be reassembled */
 			continue;
@@ -906,7 +916,8 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 		 */
 		__ASSERT_NO_MSG(is_report_complete);
 		create_ext_adv_info(evt, &scan_info);
-		le_adv_recv(&evt->addr, &scan_info, &ext_scan_buf, ext_scan_buf.len);
+		/* TODO: move out to syswq */
+		le_adv_recv(&evt->addr, &scan_info, &ext_scan_buf->b, ext_scan_buf->b.len);
 
 		/* We do no longer need to keep track of this advertiser. */
 		reset_reassembling_advertiser();
