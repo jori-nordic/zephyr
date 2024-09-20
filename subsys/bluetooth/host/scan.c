@@ -29,6 +29,7 @@
 #include "id.h"
 
 #include "common/bt_str.h"
+#include "common/assert.h"
 #include "scan.h"
 
 #define LOG_LEVEL CONFIG_BT_HCI_CORE_LOG_LEVEL
@@ -57,11 +58,17 @@ static struct scanner_state scan_state;
 
 #if defined(CONFIG_BT_EXT_ADV)
 
-#define REPORT_MAGIC 0xbf
-#define REPORT_HEADER_SIZE (sizeof(uint8_t) + sizeof(bt_addr_le_t) + sizeof(struct bt_le_scan_recv_info))
+enum report_magic {
+	COMPLETE_REPORT_MAGIC = 0xbf,
+	REASSEMBLED_REPORT_MAGIC = 0xfb,
+};
+BUILD_ASSERT(sizeof(enum report_magic) == sizeof(uint8_t));
+
+#define REPORT_HEADER_SIZE (sizeof(enum report_magic) + sizeof(bt_addr_le_t) + sizeof(struct bt_le_scan_recv_info))
 
 NET_BUF_POOL_DEFINE(reassembly_pool, 1, CONFIG_BT_EXT_SCAN_BUF_SIZE + REPORT_HEADER_SIZE,
 		    sizeof(struct bt_buf_data), NULL);
+
 static K_FIFO_DEFINE(adv_reports);
 
 static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const *const evt,
@@ -70,7 +77,42 @@ static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const 
 static void le_adv_recv(bt_addr_le_t *addr, struct bt_le_scan_recv_info *info,
 			struct net_buf_simple *buf, uint16_t len);
 
-static void reset_reassembling_advertiser(void);
+static bool do_not_want(void)
+{
+	/* The application has not requested explicit scan, so it is not expecting
+	 * advertising reports. Discard, and reset the reassembler if not inactive
+	 * This is done in the loop as this flag can change between each iteration,
+	 * and it is not uncommon that scanning is disabled in the callback called
+	 * from le_adv_recv
+	 */
+
+	/* see also: https://knowyourmeme.com/memes/do-want-do-not-want */
+
+	return !atomic_test_bit(scan_state.scan_flags, BT_LE_SCAN_USER_EXPLICIT_SCAN);
+}
+
+static void process_reassembled_report(struct net_buf *report)
+{
+	LOG_DBG("");
+
+	bt_addr_le_t *addr = net_buf_pull_mem(report, sizeof(*addr));
+	struct bt_le_scan_recv_info *scan_info =
+		net_buf_pull_mem(report, sizeof(*scan_info));
+
+	le_adv_recv(addr, scan_info, &report->b, report->len);
+}
+
+static void process_unparsed_reassembled_report(struct net_buf *report)
+{
+	LOG_DBG("");
+
+	struct bt_le_scan_recv_info scan_info;
+	struct bt_hci_evt_le_ext_advertising_info *evt =
+		net_buf_pull_mem(report, sizeof(struct bt_hci_evt_le_ext_advertising_info));
+
+	create_ext_adv_info(evt, &scan_info);
+	le_adv_recv(&evt->addr, &scan_info, &report->b, report->len);
+}
 
 static void adv_report_work_handler(struct k_work *work)
 {
@@ -85,43 +127,32 @@ static void adv_report_work_handler(struct k_work *work)
 
 	k_work_submit(work);
 
-	uint8_t magic = net_buf_pull_u8(report);
-	if (magic != REPORT_MAGIC) {
-		__ASSERT(0, "no fun without magic");
-		return;
+	if (do_not_want()) {	/* it's an old meme but it checks out */
+		goto yeet;
 	}
 
-	bt_addr_le_t *addr = net_buf_pull_mem(report, sizeof(*addr));
+	uint8_t magic = net_buf_pull_u8(report);
+	if (magic == REASSEMBLED_REPORT_MAGIC) {
+		process_reassembled_report(report);
+	} else if (magic == COMPLETE_REPORT_MAGIC) {
+		process_unparsed_reassembled_report(report);
+	} else {
+		__ASSERT(0, "no fun without magic");
+		goto yeet;
+	}
 
-	struct bt_le_scan_recv_info *scan_info =
-		net_buf_pull_mem(report, sizeof(*scan_info));
-
-	le_adv_recv(addr, scan_info, &report->b, report->len);
-
+yeet:
 	net_buf_unref(report);
 }
 
 static K_WORK_DEFINE(adv_report_work, adv_report_work_handler);
 
-static void process_report_async(struct net_buf *report,
-				 struct bt_le_scan_recv_info *info,
-				 bt_addr_le_t *addr)
-{
-	net_buf_push_mem(report, info, sizeof(*info));
-	net_buf_push_mem(report, addr, sizeof(*addr));
-	net_buf_push_u8(report, REPORT_MAGIC);
-
-	k_fifo_put(&adv_reports, report);
-	k_work_submit(&adv_report_work);
-}
-
-static struct net_buf *ext_scan_buf;
-
 struct fragmented_advertiser {
 	bt_addr_le_t addr;
 	uint8_t sid;
+	struct net_buf *report;
 	enum {
-		FRAG_ADV_INACTIVE,
+		FRAG_ADV_INACTIVE = 0,
 		FRAG_ADV_REASSEMBLING,
 		FRAG_ADV_DISCARDING,
 	} state;
@@ -129,36 +160,36 @@ struct fragmented_advertiser {
 
 static struct fragmented_advertiser reassembling_advertiser;
 
-static bool fragmented_advertisers_equal(const struct fragmented_advertiser *a,
-					 const bt_addr_le_t *addr, uint8_t sid)
+static bool advertisers_equal(const struct fragmented_advertiser *a,
+			      const bt_addr_le_t *addr, uint8_t sid)
 {
 	/* Two advertisers are equal if they are the same adv set from the same device */
 	return a->sid == sid && bt_addr_le_eq(&a->addr, addr);
 }
 
 /* Sets the address and sid of the advertiser to be reassembled. */
-static void init_reassembling_advertiser(const bt_addr_le_t *addr, uint8_t sid)
+static void init_reassembly(struct fragmented_advertiser *a, const bt_addr_le_t *addr, uint8_t sid)
 {
 	LOG_DBG("");
-	__ASSERT_NO_MSG(ext_scan_buf == NULL);
+	__ASSERT_NO_MSG(a->report == NULL);
 
-	ext_scan_buf = net_buf_alloc(&reassembly_pool, K_NO_WAIT);
-	if (ext_scan_buf) {
-		net_buf_reserve(ext_scan_buf, REPORT_HEADER_SIZE);
+	a->report = net_buf_alloc(&reassembly_pool, K_NO_WAIT);
+	if (a->report) {
+		net_buf_reserve(a->report, REPORT_HEADER_SIZE);
 	}
 
-	LOG_DBG("reassembly buf: %p", ext_scan_buf);
+	LOG_DBG("reassembly buf: %p", a->report);
 
-	bt_addr_le_copy(&reassembling_advertiser.addr, addr);
-	reassembling_advertiser.sid = sid;
-	reassembling_advertiser.state = FRAG_ADV_REASSEMBLING;
+	bt_addr_le_copy(&a->addr, addr);
+	a->sid = sid;
+	a->state = FRAG_ADV_REASSEMBLING;
 }
 
-static void reset_reassembling_advertiser(void)
+static void reset_reassembly(struct fragmented_advertiser *a)
 {
 	LOG_DBG("");
 
-	reassembling_advertiser.state = FRAG_ADV_INACTIVE;
+	memset(a, 0, sizeof(*a));
 }
 
 #if defined(CONFIG_BT_PER_ADV_SYNC)
@@ -172,7 +203,7 @@ void bt_scan_softreset(void)
 {
 	scan_dev_found_cb = NULL;
 #if defined(CONFIG_BT_EXT_ADV)
-	reset_reassembling_advertiser();
+	reset_reassembly(&reassembling_advertiser);
 #endif
 }
 
@@ -834,166 +865,181 @@ static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const 
 	scan_info->adv_props = get_adv_props_extended(sys_le16_to_cpu(evt->evt_type));
 }
 
-static void start_discarding(void)
+static void start_discarding(struct fragmented_advertiser *a)
 {
-	if (ext_scan_buf) {
-		net_buf_unref(ext_scan_buf);
-		ext_scan_buf = NULL;
+	if (a->report) {
+		net_buf_unref(a->report);
+		a->report = NULL;
 	}
 
-	reassembling_advertiser.state = FRAG_ADV_DISCARDING;
+	a->state = FRAG_ADV_DISCARDING;
 }
 
-void bt_hci_le_adv_ext_report(struct net_buf *buf)
+static void crash_if_corrupted(size_t report_length, size_t buffer_length)
 {
-	uint8_t num_reports = net_buf_pull_u8(buf);
+	/* I hope it's a k_oops! */
+#define BT_HOPE BT_ASSERT_MSG
 
-	LOG_DBG("Adv number of reports %u", num_reports);
+	BT_HOPE(buffer_length >= report_length,
+		"Adv report corrupted (wants %u out of %u)",
+		report_length, buffer_length);
+}
 
-	while (num_reports--) {
-		struct bt_hci_evt_le_ext_advertising_info *evt;
-		struct bt_le_scan_recv_info scan_info;
-		uint16_t data_status;
-		uint16_t evt_type;
-		bool is_report_complete;
-		bool more_to_come;
-		bool is_new_advertiser;
+enum data_status {
+	COMPLETE = 0x00,
+	INCOMPLETE_MORE_DATA_TO_COME = 0x01,
+	INCOMPLETE_DATA_TRUNCATED_NO_MORE_TO_COME = 0x02,
+	CONTACT_SALES = 0x03,
+};
 
-		if (!atomic_test_bit(scan_state.scan_flags, BT_LE_SCAN_USER_EXPLICIT_SCAN)) {
-			/* The application has not requested explicit scan, so it is not expecting
-			 * advertising reports. Discard, and reset the reassembler if not inactive
-			 * This is done in the loop as this flag can change between each iteration,
-			 * and it is not uncommon that scanning is disabled in the callback called
-			 * from le_adv_recv
-			 */
+static void process_reassembled_report_async(struct net_buf *report,
+					     bt_addr_le_t *addr,
+					     struct bt_le_scan_recv_info *info)
+{
+	net_buf_push_mem(report, info, sizeof(*info));
+	net_buf_push_mem(report, addr, sizeof(*addr));
+	net_buf_push_u8(report, REASSEMBLED_REPORT_MAGIC);
 
-			if (reassembling_advertiser.state != FRAG_ADV_INACTIVE) {
-				reset_reassembling_advertiser();
-				if (ext_scan_buf == NULL) {
-					start_discarding();
-				}
-			}
+	LOG_DBG("queue %p", report);
 
-			break;
-		}
+	k_fifo_put(&adv_reports, report);
+	k_work_submit(&adv_report_work);
+}
 
-		if (buf->len < sizeof(*evt)) {
-			LOG_ERR("Unexpected end of buffer");
-			break;
-		}
+static bool process_fragmented_report(struct bt_hci_evt_le_ext_advertising_info *evt)
+{
+	/* This function parses the event and re-assembles fragmented reports
+	 * into synthetic events.
+	 *
+	 * Returns true if the event was processed. I.e. will return false for
+	 * reports that fit a single event and are complete.
+	 */
+	struct fragmented_advertiser *r = &reassembling_advertiser;
 
-		evt = net_buf_pull_mem(buf, sizeof(*evt));
-		evt_type = sys_le16_to_cpu(evt->evt_type);
-		data_status = BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS(evt_type);
-		is_report_complete = data_status == BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS_COMPLETE;
-		more_to_come = data_status == BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS_PARTIAL;
+	uint16_t evt_type = sys_le16_to_cpu(evt->evt_type);
+	uint16_t data_status = BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS(evt_type);
 
-		if (evt->length > buf->len) {
-			LOG_WRN("Adv report corrupted (wants %u out of %u)", evt->length, buf->len);
+	bool complete = data_status == COMPLETE;
+	bool borked = (data_status == INCOMPLETE_DATA_TRUNCATED_NO_MORE_TO_COME) ||
+		      (data_status == CONTACT_SALES);
+	bool end_of_chain = complete || borked;
 
-			net_buf_reset(buf);
+	bool not_reassembling = r->state == FRAG_ADV_INACTIVE;
+	bool first_in_chain = not_reassembling || !advertisers_equal(r, &evt->addr, evt->sid);
 
-			if (evt_type & BT_HCI_LE_ADV_EVT_TYPE_LEGACY) {
-				return;
-			}
+	if (first_in_chain && complete) {
+		return false;
+	}
 
-			/* Start discarding irrespective of the `more_to_come` flag. We
-			 * assume we may have lost a partial adv report in the truncated
-			 * data.
-			 */
-			start_discarding();
+	if (first_in_chain) {
+		/* Will try to allocate a backing buffer for the data */
+		init_reassembly(r, &evt->addr, evt->sid);
+	}
 
-			return;
-		}
+	if (r->report == NULL) {
+		start_discarding(r);
+	} else if (evt->length > net_buf_tailroom(r->report)) {
+		start_discarding(r);
+		LOG_DBG("Adv report doesn't fit reassembly buffer.");
+	}
 
-		if (evt_type & BT_HCI_LE_ADV_EVT_TYPE_LEGACY) {
-			/* Legacy advertising reports are complete.
-			 * Create event immediately.
-			 */
-			create_ext_adv_info(evt, &scan_info);
-			le_adv_recv(&evt->addr, &scan_info, &buf->b, evt->length);
-			goto cont;
-		}
+	bool discarding = r->state == FRAG_ADV_DISCARDING;
 
-		is_new_advertiser = reassembling_advertiser.state == FRAG_ADV_INACTIVE ||
-				    !fragmented_advertisers_equal(&reassembling_advertiser,
-								  &evt->addr, evt->sid);
+	if (!discarding) {
+		__ASSERT_NO_MSG(r->report);
+		net_buf_add_mem(r->report, /* flex the member 🤖💪 */ evt->data, evt->length);
+	}
 
-		if (is_new_advertiser && reassembling_advertiser.state == FRAG_ADV_REASSEMBLING) {
-			LOG_WRN("Received an incomplete advertising report while reassembling "
-				"advertising reports from a different advertiser. The advertising "
-				"report is discarded and future scan results may be incomplete. "
-				"Interleaving of fragmented advertising reports from different "
-				"advertisers is not yet supported.");
-			goto cont;
-		}
-
-		if (data_status == BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS_INCOMPLETE) {
-			/* Got HCI_LE_Extended_Advertising_Report: Incomplete, data truncated, no
-			 * more to come. This means the Controller is aborting the reassembly. We
-			 * discard the partially received report, and the application is not
-			 * notified.
-			 *
-			 * See the Controller's documentation for possible reasons for aborting.
-			 * Hint: CONFIG_BT_CTLR_SCAN_DATA_LEN_MAX.
-			 */
-			LOG_DBG("Discarding incomplete advertisement.");
-			reset_reassembling_advertiser();
-			goto cont;
-		}
-
-		if (is_new_advertiser) {
-			/* We are not reassembling reports from an advertiser and
-			 * this is the first report from the new advertiser.
-			 * Initialize the new advertiser.
-			 *
-			 * It is OK to not get a reassembly buffer. In that case we switch gears to
-			 * DISCARDING immediately.
-			 */
-			init_reassembling_advertiser(&evt->addr, evt->sid);
-		}
-
-		if (ext_scan_buf == NULL) {
-			LOG_DBG("no reassembly buffer, discarding..");
-			start_discarding();
-			goto cont;
-		}
-
-		if (evt->length + ext_scan_buf->b.len > ext_scan_buf->b.size) {
-			/* The report does not fit in the reassemby buffer
-			 * Discard this and future reports from the advertiser.
-			 */
-			start_discarding();
-		}
-
-		if (reassembling_advertiser.state == FRAG_ADV_DISCARDING) {
-			if (!more_to_come) {
-				/* We do no longer need to keep track of this advertiser as
-				 * all the expected data is received.
-				 */
-				reset_reassembling_advertiser();
-			}
-			goto cont;
-		}
-
-		net_buf_add_mem(ext_scan_buf, buf->data, evt->length);
-		if (more_to_come) {
-			/* The controller will send additional reports to be reassembled */
-			continue;
-		}
-
-		/* No more data coming from the controller.
-		 * Create event.
+	if (!discarding && complete) {
+		/* Core Spec v5.4. 4.E.7.7.65.13 says controller uses latest
+		 * RSSI. Host wants to be like controller when grow up.
 		 */
-		__ASSERT_NO_MSG(is_report_complete);
+		struct bt_le_scan_recv_info scan_info;
+
 		create_ext_adv_info(evt, &scan_info);
+		process_reassembled_report_async(r->report, &r->addr, &scan_info);
+	}
 
-		process_report_async(ext_scan_buf, &scan_info, &evt->addr);
-		ext_scan_buf = NULL;
+	if (end_of_chain) {
+		reset_reassembly(r);
+	}
 
-		reset_reassembling_advertiser();
-cont:
-		net_buf_pull(buf, evt->length);
+	return true;
+}
+
+static void process_unfragmented_report(struct bt_hci_evt_le_ext_advertising_info *evt,
+					struct net_buf *report)
+{
+	if (report == NULL) {
+		return;
+	}
+
+	if (evt->length > net_buf_tailroom(report)) {
+		net_buf_unref(report);
+		report = NULL;
+		return;
+	}
+
+	net_buf_reset(report);
+	net_buf_add_u8(report, COMPLETE_REPORT_MAGIC);
+	/* slightly unsafe */
+	net_buf_add_mem(report, evt,  sizeof(*evt) + evt->length);
+
+	LOG_DBG("queue %p", report);
+
+	k_fifo_put(&adv_reports, report);
+	k_work_submit(&adv_report_work);
+}
+
+bool bt_buf_can_steal_ext_adv_report_buf(void);
+
+static struct net_buf *get_me_a_buf(uint8_t remaining_reports, struct net_buf **buf)
+{
+	struct net_buf *b;
+
+	if (remaining_reports == 1 && bt_buf_can_steal_ext_adv_report_buf()) {
+		/* optimization, we can zero-copy instead of malloc */
+		b = net_buf_ref(*buf);
+
+		/* The caller should _not_ modify `buf` anymore. We stole it. */
+		*buf = NULL;
+	} else {
+		b = net_buf_alloc(&reassembly_pool, K_NO_WAIT);
+	}
+
+	return b;
+}
+
+void bt_hci_le_adv_ext_report(struct net_buf *reports)
+{
+	/* - Read-onlies `buf`
+	 * - looks for fragments
+	 * - re-assembles into other pool
+	 * - schedules re-assembled events to async
+	 * - returns number of non-fragmented events as optimization
+	 */
+	uint8_t remaining_reports = net_buf_pull_u8(reports);
+
+	LOG_DBG("reports: %d", remaining_reports);
+
+	while (remaining_reports > 0) {
+		struct bt_hci_evt_le_ext_advertising_info *evt =
+			net_buf_pull_mem(reports, sizeof(*evt));
+
+		crash_if_corrupted(evt->length, reports->len);
+
+		if (!process_fragmented_report(evt)) {
+			/* The current report was not fragmented (ie it is
+			 * marked status COMPLETE and is the first in its
+			 * chain).
+			 */
+			process_unfragmented_report(evt, get_me_a_buf(remaining_reports, &reports));
+		}
+
+		if (reports) {
+			net_buf_pull(reports, evt->length);
+		}
+		remaining_reports--;
 	}
 }
 
