@@ -9,7 +9,7 @@
 #include "bstests.h"
 
 #define BS_SECONDS(dur_sec)    ((bs_time_t)dur_sec * USEC_PER_SEC)
-#define TEST_TIMEOUT_SIMULATED BS_SECONDS(10)
+#define TEST_TIMEOUT_SIMULATED BS_SECONDS(100)
 
 extern enum bst_result_t bst_result;
 

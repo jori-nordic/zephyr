@@ -36,12 +36,12 @@ LOG_MODULE_REGISTER(bt_tinyhost, LOG_LEVEL_INF);
 #define BT_ATT_OP_WRITE_CMD 0x52
 #define BT_L2CAP_CID_ATT    0x0004
 
+/* FIXME: remove unused */
 DEFINE_FLAG(is_connected);
-DEFINE_FLAG(flag_data_length_updated);
 DEFINE_FLAG(flag_handle);
-DEFINE_FLAG(flag_notified);
-DEFINE_FLAG(flag_write_ack);
-DEFINE_FLAG(flag_indication_ack);
+DEFINE_FLAG(flag_data_length_updated);
+DEFINE_FLAG(flag_indicated);
+DEFINE_FLAG(flag_dut_sent_a_write_req);
 
 static uint16_t server_write_handle;
 
@@ -171,20 +171,27 @@ static void handle_ncp(struct net_buf *buf)
 	}
 }
 
-static void handle_att_notification(struct net_buf *buf)
+struct net_buf *alloc_l2cap_pdu(void);
+static void send_l2cap_packet(struct net_buf *buf, uint16_t cid);
+
+static void send_indication_rsp(void)
+{
+	struct net_buf *buf = alloc_l2cap_pdu();
+
+	net_buf_add_u8(buf, BT_ATT_OP_CONFIRM);
+	send_l2cap_packet(buf, BT_L2CAP_CID_ATT);
+}
+
+static void handle_att_indication(struct net_buf *buf)
 {
 	uint16_t handle = net_buf_pull_le16(buf);
 
-	LOG_INF("Got notification for 0x%04x len %d", handle, buf->len);
+	LOG_INF("Got indication for 0x%04x len %d", handle, buf->len);
 	LOG_HEXDUMP_DBG(buf->data, buf->len, "payload");
+	SET_FLAG(flag_indicated);
 
-	server_write_handle = net_buf_pull_le16(buf);
-	LOG_INF("Retrieved handle to write to: 0x%x", server_write_handle);
-	SET_FLAG(flag_handle);
+	send_indication_rsp();
 }
-
-struct net_buf *alloc_l2cap_pdu(void);
-static void send_l2cap_packet(struct net_buf *buf, uint16_t cid);
 
 static void send_write_rsp(void)
 {
@@ -201,7 +208,19 @@ static void handle_att_write(struct net_buf *buf)
 	LOG_INF("Got write for 0x%04x len %d", handle, buf->len);
 	LOG_HEXDUMP_DBG(buf->data, buf->len, "payload");
 
-	send_write_rsp();
+	SET_FLAG(flag_dut_sent_a_write_req);
+}
+
+static void handle_att_notification(struct net_buf *buf)
+{
+	uint16_t handle = net_buf_pull_le16(buf);
+
+	LOG_INF("Got notification for 0x%04x len %d", handle, buf->len);
+	LOG_HEXDUMP_DBG(buf->data, buf->len, "payload");
+
+	server_write_handle = net_buf_pull_le16(buf);
+	LOG_INF("Retrieved handle to write to: 0x%x", server_write_handle);
+	SET_FLAG(flag_handle);
 }
 
 static void handle_att(struct net_buf *buf)
@@ -212,16 +231,17 @@ static void handle_att(struct net_buf *buf)
 	case BT_ATT_OP_NOTIFY:
 		handle_att_notification(buf);
 		return;
+	case BT_ATT_OP_INDICATE:
+		handle_att_indication(buf);
+		return;
 	case BT_ATT_OP_WRITE_REQ:
 		handle_att_write(buf);
 		return;
 	case BT_ATT_OP_WRITE_RSP:
 		LOG_INF("got ATT write RSP");
-		SET_FLAG(flag_write_ack);
 		return;
 	case BT_ATT_OP_CONFIRM:
 		LOG_INF("got ATT indication confirm");
-		SET_FLAG(flag_indication_ack);
 		return;
 	case BT_ATT_OP_MTU_RSP:
 		LOG_INF("got ATT MTU RSP");
@@ -521,50 +541,6 @@ static void send_l2cap_packet(struct net_buf *buf, uint16_t cid)
 	send_acl(buf);
 }
 
-static void gatt_write(uint16_t op)
-{
-	static uint8_t data[] = "write";
-	uint16_t handle = server_write_handle;
-	struct net_buf *buf = alloc_l2cap_pdu();
-
-	net_buf_add_u8(buf, op);
-	net_buf_add_le16(buf, handle);
-	net_buf_add_mem(buf, data, sizeof(data));
-
-	LOG_INF("send ATT write %s",
-		op == BT_ATT_OP_WRITE_REQ ? "REQ" : "CMD");
-
-	send_l2cap_packet(buf, BT_L2CAP_CID_ATT);
-}
-
-static void gatt_notify(void)
-{
-	static uint8_t data[] = NOTIFICATION_PAYLOAD;
-	uint16_t handle = HVX_HANDLE;
-	struct net_buf *buf = alloc_l2cap_pdu();
-
-	net_buf_add_u8(buf, BT_ATT_OP_NOTIFY);
-	net_buf_add_le16(buf, handle);
-	net_buf_add_mem(buf, data, sizeof(data));
-
-	LOG_INF("send ATT notification");
-	send_l2cap_packet(buf, BT_L2CAP_CID_ATT);
-}
-
-static void gatt_indicate(void)
-{
-	static uint8_t data[] = INDICATION_PAYLOAD;
-	uint16_t handle = HVX_HANDLE;
-	struct net_buf *buf = alloc_l2cap_pdu();
-
-	net_buf_add_u8(buf, BT_ATT_OP_INDICATE);
-	net_buf_add_le16(buf, handle);
-	net_buf_add_mem(buf, data, sizeof(data));
-
-	LOG_INF("send ATT indication");
-	send_l2cap_packet(buf, BT_L2CAP_CID_ATT);
-}
-
 static void prepare_controller(void)
 {
 	/* Initialize controller */
@@ -595,6 +571,21 @@ static void init_tinyhost(void)
 	prepare_controller();
 }
 
+static void gatt_write(void)
+{
+	static uint8_t data[] = "write";
+	uint16_t handle = server_write_handle;
+	struct net_buf *buf = alloc_l2cap_pdu();
+
+	net_buf_add_u8(buf, BT_ATT_OP_WRITE_REQ);
+	net_buf_add_le16(buf, handle);
+	net_buf_add_mem(buf, data, sizeof(data));
+
+	LOG_INF("send ATT write");
+
+	send_l2cap_packet(buf, BT_L2CAP_CID_ATT);
+}
+
 void test_procedure_0(void)
 {
 	init_tinyhost();
@@ -606,23 +597,24 @@ void test_procedure_0(void)
 
 	/* We need this to be able to send whole L2CAP PDUs on-air. */
 	WAIT_FOR_FLAG(flag_data_length_updated);
-
-	/* Get handle we will write to */
 	WAIT_FOR_FLAG(flag_handle);
 
 	LOG_INF("##################### START TEST #####################");
 
-	gatt_write(BT_ATT_OP_WRITE_REQ);	/* will prompt a response PDU */
-	gatt_indicate();			/* will prompt a confirmation PDU */
+	WAIT_FOR_FLAG(flag_dut_sent_a_write_req);
 
-	gatt_notify();
-	gatt_write(BT_ATT_OP_WRITE_CMD);
+	/* Send a write request. That will prompt the peer to send a bunch of
+	 * indications from its GATT write callback.
+	 */
+	gatt_write();
 
-	gatt_notify();
-	gatt_write(BT_ATT_OP_WRITE_CMD);
+	/* Wait. A bit. But not too much as to trigger ATT Timeout. */
+	k_sleep(K_SECONDS(10));
 
-	WAIT_FOR_FLAG(flag_write_ack);
-	WAIT_FOR_FLAG(flag_indication_ack);
+	send_write_rsp();
+
+	WAIT_FOR_FLAG(flag_indicated);
+	LOG_INF("Got indication from DUT. It must be alive then.");
 
 	PASS("Tester done\n");
 }

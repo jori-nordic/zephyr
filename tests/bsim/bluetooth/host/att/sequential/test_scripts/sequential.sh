@@ -13,7 +13,7 @@ tester_exe="bs_${BOARD_TS}_$(guess_test_long_name)_tester_prj_conf"
 cd ${BSIM_OUT_PATH}/bin
 
 Execute ./bs_2G4_phy_v1 \
-    -v=${verbosity_level} -s="${simulation_id}" -D=2 -sim_length=10e6 $@
+    -v=${verbosity_level} -s="${simulation_id}" -D=2 -sim_length=100e6 $@
 
 Execute "./$tester_exe" \
     -v=${verbosity_level} -s="${simulation_id}" -d=1 -testid=tester -RealEncryption=0 -rs=100

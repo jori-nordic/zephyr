@@ -28,12 +28,12 @@ DEFINE_FLAG(one_indication);
 DEFINE_FLAG(two_notifications);
 DEFINE_FLAG(flag_data_length_updated);
 
-static atomic_t nwrites;
-static atomic_t indications;
-static atomic_t notifications;
 
-/* Defined in conn.c */
-extern void bt_conn_suspend_tx(bool suspend);
+/* ############################## play with these. Test is designed for one at a time. */
+
+bool send_from_write_cb = false;
+bool send_from_main = true;
+bool send_from_work_item = false;
 
 static struct bt_conn *dconn;
 
@@ -142,6 +142,8 @@ static void connect(void)
 	/* No security support on the tinyhost unfortunately */
 }
 
+static void send_indications(void);
+
 static ssize_t written_to(struct bt_conn *conn,
 			  const struct bt_gatt_attr *attr,
 			  const void *buf,
@@ -156,13 +158,9 @@ static ssize_t written_to(struct bt_conn *conn,
 
 	LOG_HEXDUMP_DBG(buf, len, "Write data");
 
-	if (atomic_get(&nwrites) == 0) {
-		/* Suspend on the first write, which is an ATT Request */
-		LOG_INF("suspending HCI TX thread");
-		bt_conn_suspend_tx(true);
+	if (send_from_write_cb) {
+		send_indications();
 	}
-
-	atomic_inc(&nwrites);
 
 	return len;
 }
@@ -180,62 +178,86 @@ BT_GATT_SERVICE_DEFINE(test_gatt_service, BT_GATT_PRIMARY_SERVICE(test_service_u
 					      NULL, written_to, NULL),
 		       BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),);
 
-static uint8_t notified(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-			const void *data, uint16_t length)
+static void _destroy_indication(struct bt_gatt_indicate_params *params)
 {
-	static uint8_t notification[] = NOTIFICATION_PAYLOAD;
-	static uint8_t indication[] = INDICATION_PAYLOAD;
-	bool is_nfy;
+	k_free(params);
+}
 
-	ASSERT(length >= sizeof(indication), "Unexpected data");
-	ASSERT(length <= sizeof(notification), "Unexpected data");
+static void _indicate_cb(struct bt_conn *conn,
+			 struct bt_gatt_indicate_params *params,
+			 uint8_t err)
+{
+	LOG_INF("indication ACK: conn %p attr %p", conn, params->attr);
+}
 
-	LOG_HEXDUMP_DBG(data, length, "HVx data");
+/* FIXME: use BabbleKit */
+static void send_gatt_indication(void)
+{
+	struct bt_gatt_indicate_params *params = k_malloc(sizeof(struct bt_gatt_indicate_params));
+	static uint8_t data[] = "hello";
 
-	is_nfy = memcmp(data, notification, length) == 0;
+	/* TODO: move this somewhere else */
+	#define TESTER_HANDLE 0x1337
 
-	LOG_INF("%s from 0x%x", is_nfy ? "notified" : "indicated",
-		params->value_handle);
+	memset(params, 0, sizeof(*params));
+	params->func = _indicate_cb;
+	params->destroy = _destroy_indication;
+	params->data = data;
+	params->len = sizeof(data);
+	params->attr = &test_gatt_service.attrs[2];
 
-	if (is_nfy) {
-		atomic_inc(&notifications);
-	} else {
-		atomic_inc(&indications);
+	LOG_INF("Sending indication: attr %p", params->attr);
+	int err = bt_gatt_indicate(dconn, params);
+
+	ASSERT(err == 0, "Can't send indication (err %d)\n", err);
+}
+
+static void send_indications(void)
+{
+	/* Queue a bunch of indications. */
+	#define NUM_INDICATIONS (CONFIG_BT_ATT_TX_COUNT + 1)
+	for (size_t i=0; i<NUM_INDICATIONS; i++) {
+		send_gatt_indication();
 	}
-
-	return BT_GATT_ITER_CONTINUE;
 }
 
-static void subscribed(struct bt_conn *conn,
-		       uint8_t err,
-		       struct bt_gatt_subscribe_params *params)
+static void send_indications_cb(struct k_work *work)
 {
-	ASSERT(!err, "Subscribe failed (err %d)\n", err);
-
-	ASSERT(params, "params is NULL\n");
-
-	SET_FLAG(is_subscribed);
-	/* spoiler: tester doesn't really have attributes */
-	LOG_INF("Subscribed to Tester attribute");
+	send_indications();
 }
 
-void subscribe(void)
+static K_WORK_DEFINE(send_indications_work, send_indications_cb);
+
+static void send_indications_from_syswq(void)
 {
-	int err;
+	k_work_submit(&send_indications_work);
+}
 
-	/* Handle values don't matter, as long as they match on the tester */
-	static struct bt_gatt_subscribe_params params = {
-		.notify = notified,
-		.subscribe = subscribed,
-		.value = BT_GATT_CCC_NOTIFY | BT_GATT_CCC_INDICATE,
-		.value_handle = HVX_HANDLE,
-		.ccc_handle = (HVX_HANDLE + 1),
-	};
+void _write_cb(struct bt_conn *conn, uint8_t err,
+	       struct bt_gatt_write_params *params)
+{
+	LOG_INF("ATT write complete: conn %p err 0x%x handle %p",
+		conn, err, params->handle);
 
-	err = bt_gatt_subscribe(dconn, &params);
-	ASSERT(!err, "Subscribe failed (err %d)\n", err);
+	k_free(params);
+}
 
-	WAIT_FOR_FLAG(is_subscribed);
+static void send_gatt_write(void)
+{
+
+	struct bt_gatt_write_params *params = k_malloc(sizeof(struct bt_gatt_write_params));
+
+	#define WRITE_DATA "hola"
+
+	memset(params, 0, sizeof(*params));
+	params->func = _write_cb;
+	params->handle = 0x1337;
+	params->data = WRITE_DATA;
+	params->length = sizeof(WRITE_DATA);
+
+	int err = bt_gatt_write(dconn, params);
+
+	ASSERT(err == 0, "Can't send write (err %d)\n", err);
 }
 
 static void send_write_handle(void)
@@ -263,55 +285,48 @@ void test_procedure_0(void)
 	LOG_DBG("Central: Bluetooth initialized.");
 
 	/* Test purpose:
-	 * Test Spec V.3 P.F 3.3.2 Sequential protocol
 	 *
-	 * Verify that a Zephyr host server/client combo can process
-	 * concurrently: one Request, one Indication, multiple
-	 * Notifications and multiple Commands.
-	 *
-	 * To do this, the application on the DUT will purposefully stall the
-	 * HCI TX thread, ensuring that the responses are not sent until the
-	 * tester has finished sending everything.
+	 * Verify that a Zephyr host GATT server/client combo can handle
+	 * out-of-memory errors in the TX path gracefully.
 	 *
 	 * Test procedure:
 	 *
 	 * [setup]
 	 * - connect ACL
 	 * - update data length (tinyhost doens't have recombination)
-	 * - dut: subscribe to INDICATE and NOTIFY on tester CHRC
-	 * - dut: send a handle the tester can write to
 	 *
 	 * [proc]
-	 * - tester: send one ATT write request
-	 * - tester: send one ATT indication
-	 * - tester: send two ATT notifications
-	 * - tester: send two ATT commands
-	 *
-	 * - dut: handle the REQuest, build & put the RSP PDU on the HCI TX queue
-	 * - dut: suspend the HCI TX thread
-	 * - dut: handle the INDication
-	 * - dut: handle the notifications
-	 * - dut: handle the (write) commands
-	 * - dut: resume the TX thread after a short while
+	 * - dut: send one ATT read request
+	 * - tester: don't reply to read request
+	 * - dut: send enough ATT indications to drain TX resources
+	 * - tester: reply to initial read request
 	 *
 	 * [verdict]
-	 * - all procedures complete successfully, no buffer allocation failures
-	 *   or timeouts.
+	 * - tester is able to receive at least one indication
+	 * - ATT does not time out
+	 * - the system workqueue is not blocked
+	 * - the application is informed of dropped indications
 	 */
 	connect();
-	subscribe();
-
 	do_dlu();
-
 	send_write_handle();
 
-	WAIT_FOR_VAL(indications, 1);
-	WAIT_FOR_VAL(notifications, 2);
-	/* One REQ, two CMDs */
-	WAIT_FOR_VAL(nwrites, 3);
+	/* Send a write. The response will be delayed by the peer. */
+	send_gatt_write();
 
-	/* Send RSP to LL */
-	bt_conn_suspend_tx(false);
+	/* Allow the peer to receive it */
+	k_sleep(K_SECONDS(1));
+
+	if (send_from_main) {
+		send_indications();
+	}
+
+	if (send_from_work_item) {
+		send_indications_from_syswq();
+	}
+
+	/* Wait for write callback */
+	/* Wait for callback that at least one indication was received. */
 
 	PASS("DUT done\n");
 }
