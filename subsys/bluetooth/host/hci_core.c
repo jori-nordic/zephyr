@@ -4070,6 +4070,18 @@ void hci_event_prio(struct net_buf *buf)
 	}
 }
 
+struct k_work_q *bt_get_rx_wq(void)
+{
+#if defined(CONFIG_BT_RECV_WORKQ_SYS)
+	return &k_sys_work_q;
+#elif defined(CONFIG_BT_RECV_WORKQ_BT)
+	return &bt_workq;
+#else
+	BUILD_ASSERT("config not supported");
+	return NULL;
+#endif /* CONFIG_BT_RECV_WORKQ_SYS */
+}
+
 static void rx_queue_put(struct net_buf *buf)
 {
 	net_buf_slist_put(&bt_dev.rx_queue, buf);

@@ -892,6 +892,8 @@ enum data_status {
 	CONTACT_SALES = 0x03,
 };
 
+extern struct k_work_q *bt_get_rx_wq(void);
+
 static void process_reassembled_report_async(struct net_buf *report,
 					     bt_addr_le_t *addr,
 					     struct bt_le_scan_recv_info *info)
@@ -903,7 +905,7 @@ static void process_reassembled_report_async(struct net_buf *report,
 	LOG_DBG("queue %p", report);
 
 	k_fifo_put(&adv_reports, report);
-	k_work_submit(&adv_report_work);
+	k_work_submit_to_queue(bt_get_rx_wq(), &adv_report_work);
 }
 
 static bool process_fragmented_report(struct bt_hci_evt_le_ext_advertising_info *evt)
@@ -988,7 +990,7 @@ static void process_unfragmented_report(struct bt_hci_evt_le_ext_advertising_inf
 	LOG_DBG("queue %p", report);
 
 	k_fifo_put(&adv_reports, report);
-	k_work_submit(&adv_report_work);
+	k_work_submit_to_queue(bt_get_rx_wq(), &adv_report_work);
 }
 
 bool bt_buf_can_steal_ext_adv_report_buf(void);
